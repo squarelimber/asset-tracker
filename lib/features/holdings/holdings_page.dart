@@ -8,6 +8,7 @@ import '../../core/enums.dart';
 import '../../core/formats.dart';
 import '../../core/responsive.dart';
 import '../../data/database.dart';
+import 'invested_profit_field.dart';
 import 'purchase_date_field.dart';
 
 final _refreshingProvider = StateProvider<bool>((ref) => false);
@@ -117,6 +118,8 @@ class _HoldingsPageState extends ConsumerState<HoldingsPage> {
     final latestPriceCtrl = TextEditingController();
     final currencyCtrl = TextEditingController(text: 'CNY');
     final purchaseDate = ValueNotifier<DateTime?>(DateTime.now());
+    final amount = ValueNotifier<double>(0);
+    double? investedResult;
 
     await showDialog<void>(
       context: context,
@@ -161,7 +164,7 @@ class _HoldingsPageState extends ConsumerState<HoldingsPage> {
                 valueListenable: assetType,
                 builder: (context, type, _) {
                   if (type.isAmountBased) {
-                    // Amount-based assets: plain balance + optional invested.
+                    // Amount-based assets: amount + linked invested/profit.
                     return Column(
                       children: [
                         TextField(
@@ -171,15 +174,15 @@ class _HoldingsPageState extends ConsumerState<HoldingsPage> {
                             labelText: '当前金额',
                             hintText: '如 50000',
                           ),
+                          onChanged: (v) {
+                            amount.value = double.tryParse(v.trim()) ?? 0;
+                          },
                         ),
                         const SizedBox(height: 12),
-                        TextField(
-                          controller: costPriceCtrl,
-                          keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                          decoration: const InputDecoration(
-                            labelText: '累计投入（选填，用于计算收益）',
-                            hintText: '留空则视为与当前金额相同',
-                          ),
+                        InvestedProfitField(
+                          amount: amount,
+                          initialInvested: null,
+                          onChanged: (v) => investedResult = v,
                         ),
                         const SizedBox(height: 12),
                       ],
@@ -282,7 +285,9 @@ class _HoldingsPageState extends ConsumerState<HoldingsPage> {
                 marketSource: Value(marketSource),
                 symbol: symbol.isNotEmpty ? Value(symbol) : const Value.absent(),
                 quantity: Value(qty),
-                costPrice: Value(type.isAmountBased ? (invested ?? qty) : (invested ?? 0)),
+                costPrice: Value(type.isAmountBased
+                    ? (investedResult ?? qty)
+                    : (invested ?? 0)),
                 latestPrice: Value(type.isAmountBased ? 1 : (userPrice ?? 0)),
                 purchaseDate: Value(purchaseDate.value),
                 currency: Value(currencyCtrl.text.trim().toUpperCase().isEmpty
@@ -532,6 +537,8 @@ class _HoldingCard extends ConsumerWidget {
     final purchaseDate = ValueNotifier<DateTime?>(
       holding.purchaseDate ?? holding.createdAt,
     );
+    final amount = ValueNotifier<double>(holding.quantity);
+    double? investedResult = isAmountBased ? holding.costPrice : null;
 
     final ok = await showDialog<bool>(
       context: context,
@@ -549,16 +556,26 @@ class _HoldingCard extends ConsumerWidget {
                 decoration: InputDecoration(
                   labelText: isAmountBased ? '当前金额' : '数量 / 份额 / 克数',
                 ),
+                onChanged: (v) {
+                  if (isAmountBased) {
+                    amount.value = double.tryParse(v.trim()) ?? 0;
+                  }
+                },
               ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: costCtrl,
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                decoration: InputDecoration(
-                  labelText: isAmountBased ? '累计投入' : '成本单价',
+              if (isAmountBased) ...[
+                const SizedBox(height: 12),
+                InvestedProfitField(
+                  amount: amount,
+                  initialInvested: holding.costPrice > 0 ? holding.costPrice : null,
+                  onChanged: (v) => investedResult = v,
                 ),
-              ),
-              if (!isAmountBased) ...[
+              ] else ...[
+                const SizedBox(height: 12),
+                TextField(
+                  controller: costCtrl,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  decoration: const InputDecoration(labelText: '成本单价'),
+                ),
                 const SizedBox(height: 12),
                 TextField(
                   controller: priceCtrl,
@@ -585,15 +602,15 @@ class _HoldingCard extends ConsumerWidget {
 
     if (ok == true) {
       final qty = double.tryParse(quantityCtrl.text.trim());
-      final cost = double.tryParse(costCtrl.text.trim());
       if (qty == null) return;
+      final cost = double.tryParse(costCtrl.text.trim());
       final price = double.tryParse(priceCtrl.text.trim());
       if (!isAmountBased && (cost == null || price == null)) return;
       await ref.read(daoProvider).updateHolding(
         holding.copyWith(
           name: nameCtrl.text.trim().isEmpty ? holding.name : nameCtrl.text.trim(),
           quantity: qty,
-          costPrice: isAmountBased ? (cost ?? qty) : (cost ?? holding.costPrice),
+          costPrice: isAmountBased ? (investedResult ?? qty) : (cost ?? holding.costPrice),
           latestPrice: isAmountBased ? 1 : (price ?? holding.latestPrice),
           purchaseDate: Value(purchaseDate.value),
           note: noteCtrl.text.trim().isEmpty ? const Value.absent() : Value(noteCtrl.text.trim()),
