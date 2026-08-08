@@ -37,11 +37,16 @@ class _InvestedProfitFieldState extends State<InvestedProfitField> {
   @override
   void initState() {
     super.initState();
-    final invested = widget.initialInvested ?? widget.amount.value;
+    // Only prefill when the user already recorded an invested amount.
+    // A null initialInvested means "not set" -> keep both fields empty
+    // (the invested amount defaults to the current amount on save).
+    final invested = widget.initialInvested;
     _investedCtrl = TextEditingController(
-      text: invested > 0 ? Formats.smartNum(invested) : '',
+      text: (invested != null && invested > 0) ? Formats.smartNum(invested) : '',
     );
-    _profitCtrl = TextEditingController(text: _profitText(invested));
+    _profitCtrl = TextEditingController(
+      text: (invested != null && invested > 0) ? _profitText(invested) : '',
+    );
     widget.amount.addListener(_onAmountChanged);
     _investedCtrl.addListener(_onInvestedChanged);
     _profitCtrl.addListener(_onProfitChanged);
