@@ -28,11 +28,6 @@ class Holdings extends Table {
   TextColumn get note => text().nullable()();
   DateTimeColumn get createdAt => dateTime().withDefault(currentDateAndTime)();
   DateTimeColumn get updatedAt => dateTime().withDefault(currentDateAndTime)();
-
-  @override
-  List<Set<Column>> get uniqueKeys => [
-        {symbol},
-      ];
 }
 
 /// Buy / sell / dividend / transfer / income / expense records.

@@ -675,10 +675,6 @@ class $HoldingsTable extends Holdings
   @override
   Set<GeneratedColumn> get $primaryKey => {id};
   @override
-  List<Set<GeneratedColumn>> get uniqueKeys => [
-    {symbol},
-  ];
-  @override
   HoldingRow map(Map<String, dynamic> data, {String? tablePrefix}) {
     final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
     return HoldingRow(

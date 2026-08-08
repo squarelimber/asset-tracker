@@ -195,7 +195,7 @@ class HoldingsPage extends ConsumerWidget {
                 AssetType.bankWealth when symbol.isNotEmpty => 'forex',
                 _ => 'manual',
               };
-              await dao.createHolding(HoldingsCompanion.insert(
+              final createdId = await dao.createHolding(HoldingsCompanion.insert(
                 accountId: accountId.value!,
                 name: name,
                 assetType: type.storageName,
@@ -208,6 +208,22 @@ class HoldingsPage extends ConsumerWidget {
                     : currencyCtrl.text.trim().toUpperCase()),
               ));
               if (context.mounted) Navigator.pop(context);
+
+              // Auto-fetch the latest price for market-linked holdings.
+              if (marketSource != 'manual' && symbol.isNotEmpty) {
+                final created = await dao.getHolding(createdId);
+                if (created != null) {
+                  final quote =
+                      await ref.read(marketServiceProvider).refreshHolding(created);
+                  if (quote != null && context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('已自动获取最新净值：${Formats.smartNum(quote.price)}'),
+                      ),
+                    );
+                  }
+                }
+              }
             },
             child: const Text('保存'),
           ),

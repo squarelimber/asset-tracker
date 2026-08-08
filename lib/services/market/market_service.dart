@@ -114,4 +114,31 @@ class MarketService {
   Future<List<MarketQuote>> fetchQuotes(MarketSource source, List<String> symbols) {
     return _fetchFromSource(source, symbols);
   }
+
+  /// Fetches the latest price for a single holding and writes it back
+  /// (holding row + price cache). Returns the fetched quote, or null.
+  Future<MarketQuote?> refreshHolding(HoldingRow holding) async {
+    final symbol = holding.symbol;
+    if (symbol == null || symbol.isEmpty) return null;
+    final source = MarketSource.fromStorage(holding.marketSource);
+    final quotes = await _fetchFromSource(source, [symbol]);
+    if (quotes.isEmpty) return null;
+    final quote = quotes.first;
+    if (!quote.isSuccess) return null;
+    await _dao.transaction(() async {
+      await _dao.updateHoldingPrice(holding.id, quote.price);
+      await _dao.upsertPriceCache(PriceCacheRow(
+        symbol: holding.symbol!,
+        source: quote.source.storageName,
+        name: quote.name,
+        price: quote.price,
+        currency: quote.currency,
+        prevClose: quote.prevClose,
+        change: quote.change,
+        changePct: quote.changePct,
+        fetchedAt: quote.fetchedAt,
+      ));
+    });
+    return quote;
+  }
 }

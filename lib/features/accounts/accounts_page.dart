@@ -4,7 +4,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../app/providers.dart';
-import '../../core/enums.dart';
 import '../../core/responsive.dart';
 import '../../data/database.dart';
 
@@ -45,7 +44,6 @@ class AccountsPage extends ConsumerWidget {
 
   Future<void> _showAccountDialog(BuildContext context, WidgetRef ref) async {
     final nameCtrl = TextEditingController();
-    final type = ValueNotifier<AssetType>(AssetType.stock);
     final currencyCtrl = TextEditingController(text: 'CNY');
     final noteCtrl = TextEditingController();
 
@@ -60,19 +58,9 @@ class AccountsPage extends ConsumerWidget {
               TextField(
                 controller: nameCtrl,
                 autofocus: true,
-                decoration: const InputDecoration(labelText: '账户名称'),
-              ),
-              const SizedBox(height: 12),
-              ValueListenableBuilder<AssetType>(
-                valueListenable: type,
-                builder: (context, value, _) => DropdownButtonFormField<AssetType>(
-                  initialValue: value,
-                  decoration: const InputDecoration(labelText: '账户类型'),
-                  items: [
-                    for (final t in AssetType.values)
-                      DropdownMenuItem(value: t, child: Text(t.label)),
-                  ],
-                  onChanged: (v) => type.value = v ?? AssetType.stock,
+                decoration: const InputDecoration(
+                  labelText: '账户名称',
+                  hintText: '如：招商银行 / 华泰证券 / 天天基金',
                 ),
               ),
               const SizedBox(height: 12),
@@ -97,7 +85,7 @@ class AccountsPage extends ConsumerWidget {
               final dao = ref.read(daoProvider);
               await dao.createAccount(AccountsCompanion.insert(
                 name: name,
-                type: type.value.storageName,
+                type: 'general',
                 currency: Value(currencyCtrl.text.trim().toUpperCase().isEmpty
                     ? 'CNY'
                     : currencyCtrl.text.trim().toUpperCase()),
@@ -144,7 +132,6 @@ class _AccountCard extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final holdings = ref.watch(holdingsByAccountProvider(account.id));
-    final assetType = AssetType.fromStorage(account.type);
 
     return Card(
       child: InkWell(
@@ -155,8 +142,9 @@ class _AccountCard extends ConsumerWidget {
           child: Row(
             children: [
               CircleAvatar(
-                backgroundColor: assetType.color.withValues(alpha: 0.15),
-                child: Icon(assetType.icon, color: assetType.color),
+                backgroundColor: Theme.of(context).colorScheme.primary.withValues(alpha: 0.12),
+                child: Icon(Icons.account_balance_wallet_outlined,
+                    color: Theme.of(context).colorScheme.primary),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -167,7 +155,7 @@ class _AccountCard extends ConsumerWidget {
                         style: Theme.of(context).textTheme.titleMedium),
                     const SizedBox(height: 2),
                     Text(
-                      '${assetType.label} · ${account.currency}${account.note == null || account.note!.isEmpty ? '' : ' · ${account.note}'}',
+                      '${account.currency}${account.note == null || account.note!.isEmpty ? '' : ' · ${account.note}'}',
                       style: Theme.of(context).textTheme.bodySmall,
                     ),
                   ],
