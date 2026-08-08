@@ -29,7 +29,8 @@ jobs:
         run: flutter pub get
 
       - name: Build web
-        run: flutter build web --release
+        # Wasm build is required: drift_flutter's sqlite runs on native assets.
+        run: flutter build web --wasm --release
 
       - name: Configure Pages
         uses: actions/configure-pages@v5
