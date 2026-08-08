@@ -9,14 +9,32 @@ import '../../core/formats.dart';
 import '../../core/responsive.dart';
 import '../../data/database.dart';
 
+final _refreshingProvider = StateProvider<bool>((ref) => false);
+
 class HoldingsPage extends ConsumerWidget {
   const HoldingsPage({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final holdings = ref.watch(holdingsProvider);
+    final refreshing = ref.watch(_refreshingProvider);
     return Scaffold(
-      appBar: AppBar(title: const Text('持仓')),
+      appBar: AppBar(
+        title: const Text('持仓'),
+        actions: [
+          IconButton(
+            tooltip: '刷新行情',
+            onPressed: refreshing ? null : () => _refresh(context, ref),
+            icon: refreshing
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.refresh),
+          ),
+        ],
+      ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => _showAddHoldingDialog(context, ref),
         icon: const Icon(Icons.add),
@@ -34,6 +52,20 @@ class HoldingsPage extends ConsumerWidget {
               ),
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, _) => Center(child: Text('加载失败: $e')),
+      ),
+    );
+  }
+
+  Future<void> _refresh(BuildContext context, WidgetRef ref) async {
+    ref.read(_refreshingProvider.notifier).state = true;
+    final result = await ref.read(marketServiceProvider).refreshAll();
+    ref.read(_refreshingProvider.notifier).state = false;
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(result.failed == 0
+            ? '行情已更新 (${result.updated} 项)'
+            : '更新 ${result.updated} 项，失败 ${result.failed} 项'),
       ),
     );
   }
@@ -99,20 +131,25 @@ class HoldingsPage extends ConsumerWidget {
               const SizedBox(height: 12),
               ValueListenableBuilder<AssetType>(
                 valueListenable: assetType,
-                builder: (context, type, _) => TextField(
-                  controller: symbolCtrl,
-                  decoration: InputDecoration(
-                    labelText: type.isMarketLinked ? '行情代码' : '（手动净值资产无需代码）',
-                    hintText: switch (type) {
-                      AssetType.stock || AssetType.etf => '如 sh600519 / sz159915',
-                      AssetType.mutualFund => '如 110022',
-                      AssetType.gold => 'AU99.99',
-                      AssetType.crypto => '如 bitcoin',
-                      _ => null,
-                    },
-                  ),
-                  enabled: type.isMarketLinked,
-                ),
+                builder: (context, type, _) {
+                  final symbolEnabled = type.isMarketLinked ||
+                      type == AssetType.bankWealth;
+                  return TextField(
+                    controller: symbolCtrl,
+                    decoration: InputDecoration(
+                      labelText: symbolEnabled ? '行情代码' : '（手动净值资产无需代码）',
+                      hintText: switch (type) {
+                        AssetType.stock || AssetType.etf => '如 sh600519 / sz159915',
+                        AssetType.mutualFund => '如 110022',
+                        AssetType.gold => 'AU99.99（自动金价）',
+                        AssetType.crypto => '如 bitcoin',
+                        AssetType.bankWealth => '填外汇代码如 USD 可自动汇率联动，留空手动净值',
+                        _ => null,
+                      },
+                    ),
+                    enabled: symbolEnabled,
+                  );
+                },
               ),
               const SizedBox(height: 12),
               TextField(
@@ -149,20 +186,21 @@ class HoldingsPage extends ConsumerWidget {
               }
               final dao = ref.read(daoProvider);
               final type = assetType.value;
+              final symbol = symbolCtrl.text.trim();
+              final marketSource = switch (type) {
+                AssetType.stock || AssetType.etf => 'sina',
+                AssetType.mutualFund => 'eastmoney',
+                AssetType.gold => 'sge',
+                AssetType.crypto => 'coingecko',
+                AssetType.bankWealth when symbol.isNotEmpty => 'forex',
+                _ => 'manual',
+              };
               await dao.createHolding(HoldingsCompanion.insert(
                 accountId: accountId.value!,
                 name: name,
                 assetType: type.storageName,
-                marketSource: Value(switch (type) {
-                  AssetType.stock || AssetType.etf => 'sina',
-                  AssetType.mutualFund => 'eastmoney',
-                  AssetType.gold => 'sge',
-                  AssetType.crypto => 'coingecko',
-                  _ => 'manual',
-                }),
-                symbol: type.isMarketLinked && symbolCtrl.text.trim().isNotEmpty
-                    ? Value(symbolCtrl.text.trim())
-                    : const Value.absent(),
+                marketSource: Value(marketSource),
+                symbol: symbol.isNotEmpty ? Value(symbol) : const Value.absent(),
                 quantity: Value(qty),
                 costPrice: Value(cost),
                 currency: Value(currencyCtrl.text.trim().toUpperCase().isEmpty

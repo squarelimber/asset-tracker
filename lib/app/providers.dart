@@ -2,12 +2,18 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../data/asset_dao.dart';
 import '../data/database.dart';
+import '../services/market/market_service.dart';
 
 /// App-wide database instance.
 final databaseProvider = Provider<AppDatabase>((ref) => AppDatabase());
 
 /// Data access layer.
 final daoProvider = Provider<AssetDao>((ref) => AssetDao(ref.watch(databaseProvider)));
+
+/// Market data orchestration engine.
+final marketServiceProvider = Provider<MarketService>(
+  (ref) => MarketService(ref.watch(daoProvider)),
+);
 
 // ---------------------------------------------------------------------------
 // Accounts
