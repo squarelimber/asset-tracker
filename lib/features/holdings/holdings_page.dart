@@ -11,11 +11,28 @@ import '../../data/database.dart';
 
 final _refreshingProvider = StateProvider<bool>((ref) => false);
 
-class HoldingsPage extends ConsumerWidget {
+class HoldingsPage extends ConsumerStatefulWidget {
   const HoldingsPage({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<HoldingsPage> createState() => _HoldingsPageState();
+}
+
+class _HoldingsPageState extends ConsumerState<HoldingsPage> {
+  @override
+  void initState() {
+    super.initState();
+    // Auto-refresh quotes shortly after opening so existing holdings
+    // show up-to-date NAV without any manual action.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      Future.delayed(const Duration(milliseconds: 400), () {
+        if (mounted) _refresh(showSnack: false);
+      });
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final holdings = ref.watch(holdingsProvider);
     final refreshing = ref.watch(_refreshingProvider);
     return Scaffold(
@@ -24,7 +41,7 @@ class HoldingsPage extends ConsumerWidget {
         actions: [
           IconButton(
             tooltip: '刷新行情',
-            onPressed: refreshing ? null : () => _refresh(context, ref),
+            onPressed: refreshing ? null : () => _refresh(showSnack: true),
             icon: refreshing
                 ? const SizedBox(
                     width: 18,
@@ -56,18 +73,20 @@ class HoldingsPage extends ConsumerWidget {
     );
   }
 
-  Future<void> _refresh(BuildContext context, WidgetRef ref) async {
+  Future<void> _refresh({bool showSnack = true}) async {
     ref.read(_refreshingProvider.notifier).state = true;
     final result = await ref.read(marketServiceProvider).refreshAll();
     ref.read(_refreshingProvider.notifier).state = false;
-    if (!context.mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(result.failed == 0
-            ? '行情已更新 (${result.updated} 项)'
-            : '更新 ${result.updated} 项，失败 ${result.failed} 项'),
-      ),
-    );
+    if (!mounted) return;
+    if (showSnack) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(result.failed == 0
+              ? '行情已更新 (${result.updated} 项)'
+              : '更新 ${result.updated} 项，失败 ${result.failed} 项'),
+        ),
+      );
+    }
   }
 
   Future<void> _showAddHoldingDialog(BuildContext context, WidgetRef ref) async {
@@ -88,6 +107,7 @@ class HoldingsPage extends ConsumerWidget {
     final symbolCtrl = TextEditingController();
     final quantityCtrl = TextEditingController();
     final costPriceCtrl = TextEditingController();
+    final latestPriceCtrl = TextEditingController();
     final currencyCtrl = TextEditingController(text: 'CNY');
 
     await showDialog<void>(
@@ -164,6 +184,20 @@ class HoldingsPage extends ConsumerWidget {
                 decoration: const InputDecoration(labelText: '成本单价'),
               ),
               const SizedBox(height: 12),
+              ValueListenableBuilder<AssetType>(
+                valueListenable: assetType,
+                builder: (context, type, _) => TextField(
+                  controller: latestPriceCtrl,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  decoration: InputDecoration(
+                    labelText: '最新净值（可选）',
+                    hintText: type.isMarketLinked
+                        ? '留空则保存后自动获取'
+                        : '手动净值资产建议填写',
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
               TextField(
                 controller: currencyCtrl,
                 decoration: const InputDecoration(labelText: '币种 (ISO 代码)'),
@@ -195,6 +229,7 @@ class HoldingsPage extends ConsumerWidget {
                 AssetType.bankWealth when symbol.isNotEmpty => 'forex',
                 _ => 'manual',
               };
+              final userPrice = double.tryParse(latestPriceCtrl.text.trim());
               final createdId = await dao.createHolding(HoldingsCompanion.insert(
                 accountId: accountId.value!,
                 name: name,
@@ -203,25 +238,32 @@ class HoldingsPage extends ConsumerWidget {
                 symbol: symbol.isNotEmpty ? Value(symbol) : const Value.absent(),
                 quantity: Value(qty),
                 costPrice: Value(cost),
+                latestPrice: Value(userPrice ?? 0),
                 currency: Value(currencyCtrl.text.trim().toUpperCase().isEmpty
                     ? 'CNY'
                     : currencyCtrl.text.trim().toUpperCase()),
               ));
               if (context.mounted) Navigator.pop(context);
 
-              // Auto-fetch the latest price for market-linked holdings.
+              // Auto-fetch the latest price for market-linked holdings
+              // unless the user already entered one.
               if (marketSource != 'manual' && symbol.isNotEmpty) {
                 final created = await dao.getHolding(createdId);
                 if (created != null) {
                   final quote =
                       await ref.read(marketServiceProvider).refreshHolding(created);
-                  if (quote != null && context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text('已自动获取最新净值：${Formats.smartNum(quote.price)}'),
-                      ),
-                    );
-                  }
+                  if (!context.mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    quote != null
+                        ? SnackBar(
+                            content: Text(
+                                '已自动获取最新净值：${Formats.smartNum(quote.price)}'),
+                          )
+                        : const SnackBar(
+                            content: Text('自动获取净值失败：请检查行情代码，'
+                                '或稍后在持仓页点 ⚡ 刷新'),
+                          ),
+                  );
                 }
               }
             },
@@ -234,6 +276,7 @@ class HoldingsPage extends ConsumerWidget {
     symbolCtrl.dispose();
     quantityCtrl.dispose();
     costPriceCtrl.dispose();
+    latestPriceCtrl.dispose();
     currencyCtrl.dispose();
   }
 }
