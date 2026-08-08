@@ -217,6 +217,19 @@ class AssetDao {
   Future<int> createAlertEvent(AlertEventsCompanion entry) =>
       _db.into(_db.alertEvents).insert(entry);
 
+  // ---------------------------------------------------------------------------
+  // Bulk access for backup/restore
+  // ---------------------------------------------------------------------------
+
+  Future<List<AccountRow>> getAccounts() => _db.select(_db.accounts).get();
+  Future<List<SnapshotRow>> getSnapshots() => _db.select(_db.snapshots).get();
+
+  Future<void> deleteAllTransactions() => _db.delete(_db.transactions).go();
+  Future<void> deleteAllHoldings() => _db.delete(_db.holdings).go();
+  Future<void> deleteAllAccounts() => _db.delete(_db.accounts).go();
+  Future<void> deleteAllSnapshots() => _db.delete(_db.snapshots).go();
+  Future<void> deleteAllAlertRules() => _db.delete(_db.alertRules).go();
+
   /// Runs [action] inside a transaction.
   Future<T> transaction<T>(Future<T> Function() action) => _db.transaction(action);
 }
