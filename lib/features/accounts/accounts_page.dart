@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../app/providers.dart';
+import '../../app/theme.dart';
 import '../../core/responsive.dart';
 import '../../data/database.dart';
 
@@ -167,11 +168,44 @@ class _AccountCard extends ConsumerWidget {
                 error: (_, _) => const SizedBox.shrink(),
               ),
               const SizedBox(width: 4),
-              const Icon(Icons.chevron_right, size: 20),
+              PopupMenuButton<String>(
+                onSelected: (v) {
+                  if (v == 'delete') _confirmDelete(context, ref);
+                },
+                itemBuilder: (_) => const [
+                  PopupMenuItem(value: 'delete', child: Text('删除账户')),
+                ],
+              ),
             ],
           ),
         ),
       ),
     );
+  }
+
+  Future<void> _confirmDelete(BuildContext context, WidgetRef ref) async {
+    final holdings = ref.read(holdingsByAccountProvider(account.id)).value ?? const [];
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('删除账户'),
+        content: Text(
+          '确定删除账户「${account.name}」吗？'
+          '${holdings.isEmpty ? '' : '账户内 ${holdings.length} 项持仓及交易流水将一并删除。'}'
+          '此操作无法撤销。',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('取消')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: context.upColor()),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('删除'),
+          ),
+        ],
+      ),
+    );
+    if (ok == true) {
+      await ref.read(daoProvider).deleteAccount(account.id);
+    }
   }
 }
