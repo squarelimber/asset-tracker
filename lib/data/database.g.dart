@@ -521,6 +521,17 @@ class $HoldingsTable extends Holdings
     requiredDuringInsert: false,
     defaultValue: const Constant('CNY'),
   );
+  static const VerificationMeta _purchaseDateMeta = const VerificationMeta(
+    'purchaseDate',
+  );
+  @override
+  late final GeneratedColumn<DateTime> purchaseDate = GeneratedColumn<DateTime>(
+    'purchase_date',
+    aliasedName,
+    true,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: false,
+  );
   static const VerificationMeta _noteMeta = const VerificationMeta('note');
   @override
   late final GeneratedColumn<String> note = GeneratedColumn<String>(
@@ -566,6 +577,7 @@ class $HoldingsTable extends Holdings
     costPrice,
     latestPrice,
     currency,
+    purchaseDate,
     note,
     createdAt,
     updatedAt,
@@ -651,6 +663,15 @@ class $HoldingsTable extends Holdings
         currency.isAcceptableOrUnknown(data['currency']!, _currencyMeta),
       );
     }
+    if (data.containsKey('purchase_date')) {
+      context.handle(
+        _purchaseDateMeta,
+        purchaseDate.isAcceptableOrUnknown(
+          data['purchase_date']!,
+          _purchaseDateMeta,
+        ),
+      );
+    }
     if (data.containsKey('note')) {
       context.handle(
         _noteMeta,
@@ -718,6 +739,10 @@ class $HoldingsTable extends Holdings
         DriftSqlType.string,
         data['${effectivePrefix}currency'],
       )!,
+      purchaseDate: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}purchase_date'],
+      ),
       note: attachedDatabase.typeMapping.read(
         DriftSqlType.string,
         data['${effectivePrefix}note'],
@@ -750,6 +775,7 @@ class HoldingRow extends DataClass implements Insertable<HoldingRow> {
   final double costPrice;
   final double latestPrice;
   final String currency;
+  final DateTime? purchaseDate;
   final String? note;
   final DateTime createdAt;
   final DateTime updatedAt;
@@ -764,6 +790,7 @@ class HoldingRow extends DataClass implements Insertable<HoldingRow> {
     required this.costPrice,
     required this.latestPrice,
     required this.currency,
+    this.purchaseDate,
     this.note,
     required this.createdAt,
     required this.updatedAt,
@@ -783,6 +810,9 @@ class HoldingRow extends DataClass implements Insertable<HoldingRow> {
     map['cost_price'] = Variable<double>(costPrice);
     map['latest_price'] = Variable<double>(latestPrice);
     map['currency'] = Variable<String>(currency);
+    if (!nullToAbsent || purchaseDate != null) {
+      map['purchase_date'] = Variable<DateTime>(purchaseDate);
+    }
     if (!nullToAbsent || note != null) {
       map['note'] = Variable<String>(note);
     }
@@ -805,6 +835,9 @@ class HoldingRow extends DataClass implements Insertable<HoldingRow> {
       costPrice: Value(costPrice),
       latestPrice: Value(latestPrice),
       currency: Value(currency),
+      purchaseDate: purchaseDate == null && nullToAbsent
+          ? const Value.absent()
+          : Value(purchaseDate),
       note: note == null && nullToAbsent ? const Value.absent() : Value(note),
       createdAt: Value(createdAt),
       updatedAt: Value(updatedAt),
@@ -827,6 +860,7 @@ class HoldingRow extends DataClass implements Insertable<HoldingRow> {
       costPrice: serializer.fromJson<double>(json['costPrice']),
       latestPrice: serializer.fromJson<double>(json['latestPrice']),
       currency: serializer.fromJson<String>(json['currency']),
+      purchaseDate: serializer.fromJson<DateTime?>(json['purchaseDate']),
       note: serializer.fromJson<String?>(json['note']),
       createdAt: serializer.fromJson<DateTime>(json['createdAt']),
       updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
@@ -846,6 +880,7 @@ class HoldingRow extends DataClass implements Insertable<HoldingRow> {
       'costPrice': serializer.toJson<double>(costPrice),
       'latestPrice': serializer.toJson<double>(latestPrice),
       'currency': serializer.toJson<String>(currency),
+      'purchaseDate': serializer.toJson<DateTime?>(purchaseDate),
       'note': serializer.toJson<String?>(note),
       'createdAt': serializer.toJson<DateTime>(createdAt),
       'updatedAt': serializer.toJson<DateTime>(updatedAt),
@@ -863,6 +898,7 @@ class HoldingRow extends DataClass implements Insertable<HoldingRow> {
     double? costPrice,
     double? latestPrice,
     String? currency,
+    Value<DateTime?> purchaseDate = const Value.absent(),
     Value<String?> note = const Value.absent(),
     DateTime? createdAt,
     DateTime? updatedAt,
@@ -877,6 +913,7 @@ class HoldingRow extends DataClass implements Insertable<HoldingRow> {
     costPrice: costPrice ?? this.costPrice,
     latestPrice: latestPrice ?? this.latestPrice,
     currency: currency ?? this.currency,
+    purchaseDate: purchaseDate.present ? purchaseDate.value : this.purchaseDate,
     note: note.present ? note.value : this.note,
     createdAt: createdAt ?? this.createdAt,
     updatedAt: updatedAt ?? this.updatedAt,
@@ -897,6 +934,9 @@ class HoldingRow extends DataClass implements Insertable<HoldingRow> {
           ? data.latestPrice.value
           : this.latestPrice,
       currency: data.currency.present ? data.currency.value : this.currency,
+      purchaseDate: data.purchaseDate.present
+          ? data.purchaseDate.value
+          : this.purchaseDate,
       note: data.note.present ? data.note.value : this.note,
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
       updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
@@ -916,6 +956,7 @@ class HoldingRow extends DataClass implements Insertable<HoldingRow> {
           ..write('costPrice: $costPrice, ')
           ..write('latestPrice: $latestPrice, ')
           ..write('currency: $currency, ')
+          ..write('purchaseDate: $purchaseDate, ')
           ..write('note: $note, ')
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt')
@@ -935,6 +976,7 @@ class HoldingRow extends DataClass implements Insertable<HoldingRow> {
     costPrice,
     latestPrice,
     currency,
+    purchaseDate,
     note,
     createdAt,
     updatedAt,
@@ -953,6 +995,7 @@ class HoldingRow extends DataClass implements Insertable<HoldingRow> {
           other.costPrice == this.costPrice &&
           other.latestPrice == this.latestPrice &&
           other.currency == this.currency &&
+          other.purchaseDate == this.purchaseDate &&
           other.note == this.note &&
           other.createdAt == this.createdAt &&
           other.updatedAt == this.updatedAt);
@@ -969,6 +1012,7 @@ class HoldingsCompanion extends UpdateCompanion<HoldingRow> {
   final Value<double> costPrice;
   final Value<double> latestPrice;
   final Value<String> currency;
+  final Value<DateTime?> purchaseDate;
   final Value<String?> note;
   final Value<DateTime> createdAt;
   final Value<DateTime> updatedAt;
@@ -983,6 +1027,7 @@ class HoldingsCompanion extends UpdateCompanion<HoldingRow> {
     this.costPrice = const Value.absent(),
     this.latestPrice = const Value.absent(),
     this.currency = const Value.absent(),
+    this.purchaseDate = const Value.absent(),
     this.note = const Value.absent(),
     this.createdAt = const Value.absent(),
     this.updatedAt = const Value.absent(),
@@ -998,6 +1043,7 @@ class HoldingsCompanion extends UpdateCompanion<HoldingRow> {
     this.costPrice = const Value.absent(),
     this.latestPrice = const Value.absent(),
     this.currency = const Value.absent(),
+    this.purchaseDate = const Value.absent(),
     this.note = const Value.absent(),
     this.createdAt = const Value.absent(),
     this.updatedAt = const Value.absent(),
@@ -1015,6 +1061,7 @@ class HoldingsCompanion extends UpdateCompanion<HoldingRow> {
     Expression<double>? costPrice,
     Expression<double>? latestPrice,
     Expression<String>? currency,
+    Expression<DateTime>? purchaseDate,
     Expression<String>? note,
     Expression<DateTime>? createdAt,
     Expression<DateTime>? updatedAt,
@@ -1030,6 +1077,7 @@ class HoldingsCompanion extends UpdateCompanion<HoldingRow> {
       if (costPrice != null) 'cost_price': costPrice,
       if (latestPrice != null) 'latest_price': latestPrice,
       if (currency != null) 'currency': currency,
+      if (purchaseDate != null) 'purchase_date': purchaseDate,
       if (note != null) 'note': note,
       if (createdAt != null) 'created_at': createdAt,
       if (updatedAt != null) 'updated_at': updatedAt,
@@ -1047,6 +1095,7 @@ class HoldingsCompanion extends UpdateCompanion<HoldingRow> {
     Value<double>? costPrice,
     Value<double>? latestPrice,
     Value<String>? currency,
+    Value<DateTime?>? purchaseDate,
     Value<String?>? note,
     Value<DateTime>? createdAt,
     Value<DateTime>? updatedAt,
@@ -1062,6 +1111,7 @@ class HoldingsCompanion extends UpdateCompanion<HoldingRow> {
       costPrice: costPrice ?? this.costPrice,
       latestPrice: latestPrice ?? this.latestPrice,
       currency: currency ?? this.currency,
+      purchaseDate: purchaseDate ?? this.purchaseDate,
       note: note ?? this.note,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
@@ -1101,6 +1151,9 @@ class HoldingsCompanion extends UpdateCompanion<HoldingRow> {
     if (currency.present) {
       map['currency'] = Variable<String>(currency.value);
     }
+    if (purchaseDate.present) {
+      map['purchase_date'] = Variable<DateTime>(purchaseDate.value);
+    }
     if (note.present) {
       map['note'] = Variable<String>(note.value);
     }
@@ -1126,6 +1179,7 @@ class HoldingsCompanion extends UpdateCompanion<HoldingRow> {
           ..write('costPrice: $costPrice, ')
           ..write('latestPrice: $latestPrice, ')
           ..write('currency: $currency, ')
+          ..write('purchaseDate: $purchaseDate, ')
           ..write('note: $note, ')
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt')
@@ -3842,6 +3896,7 @@ typedef $$HoldingsTableCreateCompanionBuilder =
       Value<double> costPrice,
       Value<double> latestPrice,
       Value<String> currency,
+      Value<DateTime?> purchaseDate,
       Value<String?> note,
       Value<DateTime> createdAt,
       Value<DateTime> updatedAt,
@@ -3858,6 +3913,7 @@ typedef $$HoldingsTableUpdateCompanionBuilder =
       Value<double> costPrice,
       Value<double> latestPrice,
       Value<String> currency,
+      Value<DateTime?> purchaseDate,
       Value<String?> note,
       Value<DateTime> createdAt,
       Value<DateTime> updatedAt,
@@ -3954,6 +4010,11 @@ class $$HoldingsTableFilterComposer
 
   ColumnFilters<String> get currency => $composableBuilder(
     column: $table.currency,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get purchaseDate => $composableBuilder(
+    column: $table.purchaseDate,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -4075,6 +4136,11 @@ class $$HoldingsTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<DateTime> get purchaseDate => $composableBuilder(
+    column: $table.purchaseDate,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<String> get note => $composableBuilder(
     column: $table.note,
     builder: (column) => ColumnOrderings(column),
@@ -4153,6 +4219,11 @@ class $$HoldingsTableAnnotationComposer
 
   GeneratedColumn<String> get currency =>
       $composableBuilder(column: $table.currency, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get purchaseDate => $composableBuilder(
+    column: $table.purchaseDate,
+    builder: (column) => column,
+  );
 
   GeneratedColumn<String> get note =>
       $composableBuilder(column: $table.note, builder: (column) => column);
@@ -4250,6 +4321,7 @@ class $$HoldingsTableTableManager
                 Value<double> costPrice = const Value.absent(),
                 Value<double> latestPrice = const Value.absent(),
                 Value<String> currency = const Value.absent(),
+                Value<DateTime?> purchaseDate = const Value.absent(),
                 Value<String?> note = const Value.absent(),
                 Value<DateTime> createdAt = const Value.absent(),
                 Value<DateTime> updatedAt = const Value.absent(),
@@ -4264,6 +4336,7 @@ class $$HoldingsTableTableManager
                 costPrice: costPrice,
                 latestPrice: latestPrice,
                 currency: currency,
+                purchaseDate: purchaseDate,
                 note: note,
                 createdAt: createdAt,
                 updatedAt: updatedAt,
@@ -4280,6 +4353,7 @@ class $$HoldingsTableTableManager
                 Value<double> costPrice = const Value.absent(),
                 Value<double> latestPrice = const Value.absent(),
                 Value<String> currency = const Value.absent(),
+                Value<DateTime?> purchaseDate = const Value.absent(),
                 Value<String?> note = const Value.absent(),
                 Value<DateTime> createdAt = const Value.absent(),
                 Value<DateTime> updatedAt = const Value.absent(),
@@ -4294,6 +4368,7 @@ class $$HoldingsTableTableManager
                 costPrice: costPrice,
                 latestPrice: latestPrice,
                 currency: currency,
+                purchaseDate: purchaseDate,
                 note: note,
                 createdAt: createdAt,
                 updatedAt: updatedAt,

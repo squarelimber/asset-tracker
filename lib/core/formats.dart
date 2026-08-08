@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:intl/intl.dart';
 
 /// Number / currency formatting helpers.
@@ -36,6 +38,36 @@ class Formats {
   static String smartNum(double v) {
     if (v == v.roundToDouble()) return v.toInt().toString();
     return _num.format(v);
+  }
+
+  /// Holding duration in a human-friendly form, e.g. "2年3个月",
+  /// "8个月", "15天". [from] must not be after [to].
+  static String holdingDuration(DateTime from, [DateTime? to]) {
+    final end = to ?? DateTime.now();
+    var months = (end.year - from.year) * 12 + (end.month - from.month);
+    var days = end.day - from.day;
+    if (days < 0) {
+      months -= 1;
+      days += DateTime(end.year, end.month, 0).day;
+    }
+    if (months < 0) return '刚刚买入';
+    final years = months ~/ 12;
+    final restMonths = months % 12;
+    if (years > 0) {
+      return restMonths > 0 ? '$years年$restMonths个月' : '$years年';
+    }
+    if (restMonths > 0) return '$restMonths个月';
+    if (days > 0) return '$days天';
+    return '1天以内';
+  }
+
+  /// Annualized return from total return and holding period in days.
+  /// Returns null when the period is unknown/zero or the input is invalid.
+  static double? annualizedReturn(double totalReturnPct, int days) {
+    if (days <= 0) return null;
+    final years = days / 365.0;
+    if (totalReturnPct <= -1) return null; // total loss has no annualized value
+    return pow(1 + totalReturnPct, 1 / years) - 1;
   }
 }
 

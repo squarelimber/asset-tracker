@@ -20,7 +20,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase() : super(_openConnection());
 
   @override
-  int get schemaVersion => 1;
+  int get schemaVersion => 2;
 
   static QueryExecutor _openConnection() {
     return driftDatabase(name: 'asset_tracker');
@@ -35,7 +35,11 @@ class AppDatabase extends _$AppDatabase {
           await m.createAll();
         },
         onUpgrade: (m, from, to) async {
-          // Schema v2+ migrations go here.
+          // v1 -> v2: add purchase_date to holdings.
+          if (from < 2) {
+            final db = m.database as AppDatabase;
+            await m.addColumn(db.holdings, db.holdings.purchaseDate);
+          }
         },
       );
 }

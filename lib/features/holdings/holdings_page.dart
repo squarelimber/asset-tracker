@@ -115,6 +115,7 @@ class _HoldingsPageState extends ConsumerState<HoldingsPage> {
     final costPriceCtrl = TextEditingController();
     final latestPriceCtrl = TextEditingController();
     final currencyCtrl = TextEditingController(text: 'CNY');
+    final purchaseDate = ValueNotifier<DateTime?>(DateTime.now());
 
     await showDialog<void>(
       context: context,
@@ -204,6 +205,31 @@ class _HoldingsPageState extends ConsumerState<HoldingsPage> {
                 ),
               ),
               const SizedBox(height: 12),
+              ValueListenableBuilder<DateTime?>(
+                valueListenable: purchaseDate,
+                builder: (context, value, _) => InkWell(
+                  onTap: () async {
+                    final picked = await showDatePicker(
+                      context: context,
+                      initialDate: value ?? DateTime.now(),
+                      firstDate: DateTime(2000),
+                      lastDate: DateTime.now(),
+                    );
+                    if (picked != null) purchaseDate.value = picked;
+                  },
+                  child: InputDecorator(
+                    decoration: const InputDecoration(labelText: '买入日期'),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.calendar_today_outlined, size: 16),
+                        const SizedBox(width: 8),
+                        Text(Formats.date(value ?? DateTime.now())),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
               TextField(
                 controller: currencyCtrl,
                 decoration: const InputDecoration(labelText: '币种 (ISO 代码)'),
@@ -245,6 +271,7 @@ class _HoldingsPageState extends ConsumerState<HoldingsPage> {
                 quantity: Value(qty),
                 costPrice: Value(cost),
                 latestPrice: Value(userPrice ?? 0),
+                purchaseDate: Value(purchaseDate.value),
                 currency: Value(currencyCtrl.text.trim().toUpperCase().isEmpty
                     ? 'CNY'
                     : currencyCtrl.text.trim().toUpperCase()),
@@ -310,6 +337,9 @@ class _HoldingCard extends ConsumerWidget {
 
   final HoldingRow holding;
 
+  static String _holdingAge(HoldingRow h) =>
+      Formats.holdingDuration(h.purchaseDate ?? h.createdAt);
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final type = AssetType.fromStorage(holding.assetType);
@@ -346,7 +376,7 @@ class _HoldingCard extends ConsumerWidget {
                           style: Theme.of(context).textTheme.titleMedium,
                         ),
                         Text(
-                          holding.symbol ?? '手动净值',
+                          '${holding.symbol ?? '手动净值'} · 持有 ${_holdingAge(holding)}',
                           style: Theme.of(context).textTheme.bodySmall,
                         ),
                       ],
@@ -477,6 +507,9 @@ class _HoldingCard extends ConsumerWidget {
     final priceCtrl =
         TextEditingController(text: holding.latestPrice.toString());
     final noteCtrl = TextEditingController(text: holding.note ?? '');
+    final purchaseDate = ValueNotifier<DateTime?>(
+      holding.purchaseDate ?? holding.createdAt,
+    );
 
     final ok = await showDialog<bool>(
       context: context,
@@ -506,6 +539,31 @@ class _HoldingCard extends ConsumerWidget {
                 decoration: const InputDecoration(labelText: '最新单价'),
               ),
               const SizedBox(height: 12),
+              ValueListenableBuilder<DateTime?>(
+                valueListenable: purchaseDate,
+                builder: (context, value, _) => InkWell(
+                  onTap: () async {
+                    final picked = await showDatePicker(
+                      context: context,
+                      initialDate: value ?? DateTime.now(),
+                      firstDate: DateTime(2000),
+                      lastDate: DateTime.now(),
+                    );
+                    if (picked != null) purchaseDate.value = picked;
+                  },
+                  child: InputDecorator(
+                    decoration: const InputDecoration(labelText: '买入日期'),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.calendar_today_outlined, size: 16),
+                        const SizedBox(width: 8),
+                        Text(Formats.date(value ?? DateTime.now())),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
               TextField(controller: noteCtrl, decoration: const InputDecoration(labelText: '备注')),
             ],
           ),
@@ -531,6 +589,7 @@ class _HoldingCard extends ConsumerWidget {
           quantity: qty,
           costPrice: cost,
           latestPrice: price,
+          purchaseDate: Value(purchaseDate.value),
           note: noteCtrl.text.trim().isEmpty ? const Value.absent() : Value(noteCtrl.text.trim()),
         ),
       );
@@ -573,6 +632,12 @@ class _HoldingDetailSheet extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final txns = ref.watch(transactionsByHoldingProvider(holding.id));
+    final marketValue = holding.quantity * holding.latestPrice;
+    final cost = holding.quantity * holding.costPrice;
+    final profitPct = cost == 0 ? 0.0 : (marketValue - cost) / cost;
+    final buyDate = holding.purchaseDate ?? holding.createdAt;
+    final days = DateTime.now().difference(buyDate).inDays;
+    final annualized = Formats.annualizedReturn(profitPct, days);
     return ListView(
       controller: scrollController,
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 32),
@@ -588,6 +653,14 @@ class _HoldingDetailSheet extends ConsumerWidget {
                 _InfoRow(label: '成本单价', value: holding.costPrice.toStringAsFixed(4)),
                 _InfoRow(label: '数量/份额', value: Formats.smartNum(holding.quantity)),
                 _InfoRow(label: '币种', value: holding.currency),
+                _InfoRow(label: '买入日期', value: Formats.date(buyDate)),
+                _InfoRow(label: '持有时间', value: Formats.holdingDuration(buyDate)),
+                if (annualized != null)
+                  _InfoRow(
+                    label: '年化收益率',
+                    value: Formats.pct(annualized),
+                    valueColor: context.changeColor(annualized),
+                  ),
               ],
             ),
           ),
@@ -618,10 +691,11 @@ class _HoldingDetailSheet extends ConsumerWidget {
 }
 
 class _InfoRow extends StatelessWidget {
-  const _InfoRow({required this.label, required this.value});
+  const _InfoRow({required this.label, required this.value, this.valueColor});
 
   final String label;
   final String value;
+  final Color? valueColor;
 
   @override
   Widget build(BuildContext context) {
@@ -637,7 +711,10 @@ class _InfoRow extends StatelessWidget {
               textAlign: TextAlign.end,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
+              style: Theme.of(context)
+                  .textTheme
+                  .bodyMedium
+                  ?.copyWith(fontWeight: FontWeight.w600, color: valueColor),
             ),
           ),
         ],

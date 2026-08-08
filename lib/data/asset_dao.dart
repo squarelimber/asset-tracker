@@ -78,6 +78,7 @@ class AssetDao {
         costPrice: Value(holding.costPrice),
         latestPrice: Value(holding.latestPrice),
         currency: Value(holding.currency),
+        purchaseDate: Value(holding.purchaseDate),
         note: Value(holding.note),
         updatedAt: Value(now ?? DateTime.now()),
       ),
