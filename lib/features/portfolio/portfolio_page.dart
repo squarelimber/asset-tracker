@@ -153,18 +153,18 @@ class _SummaryHeader extends StatelessWidget {
               children: [
                 _Chip(
                   label: '今日 ${summary.todayChangePct == null ? '--' : Formats.pct(summary.todayChangePct!)}',
-                  value: '${summary.todayChange >= 0 ? '+' : ''}${Formats.amount(summary.todayChange)}',
+                  value: '${summary.todayChange >= 0 ? '+' : ''}¥${Formats.amount(summary.todayChange)}',
                   color: changeColor,
                 ),
                 _Chip(
-                  label: '累计收益',
-                  value: '${summary.profit >= 0 ? '+' : ''}${Formats.amount(summary.profit)} (${Formats.pct(summary.profitPct)})',
+                  label: '累计收益 ${Formats.pct(summary.profitPct)}',
+                  value: '${summary.profit >= 0 ? '+' : ''}¥${Formats.amount(summary.profit)}',
                   color: context.changeColor(summary.profit),
                 ),
                 if (summary.totalLiabilities > 0)
                   _Chip(
                     label: '负债',
-                    value: Formats.amount(summary.totalLiabilities),
+                    value: '¥${Formats.amount(summary.totalLiabilities)}',
                     color: Theme.of(context).colorScheme.outline,
                   ),
               ],
@@ -187,11 +187,15 @@ class _Chip extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(
       mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.baseline,
+      textBaseline: TextBaseline.alphabetic,
       children: [
         Text(label, style: Theme.of(context).textTheme.bodySmall),
         const SizedBox(width: 6),
         Text(
           value,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
           style: Theme.of(context).textTheme.titleSmall?.copyWith(
                 color: color,
                 fontWeight: FontWeight.w700,

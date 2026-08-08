@@ -333,7 +333,12 @@ class _HoldingCard extends ConsumerWidget {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(holding.name, style: Theme.of(context).textTheme.titleMedium),
+                        Text(
+                          holding.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
                         Text(
                           holding.symbol ?? '手动净值',
                           style: Theme.of(context).textTheme.bodySmall,
@@ -367,23 +372,35 @@ class _HoldingCard extends ConsumerWidget {
               ),
               const SizedBox(height: 4),
               Row(
+                crossAxisAlignment: CrossAxisAlignment.baseline,
+                textBaseline: TextBaseline.alphabetic,
                 children: [
-                  Text(
-                    '${profit >= 0 ? '+' : ''}${Formats.amount(profit)}',
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: context.changeColor(profit),
-                          fontWeight: FontWeight.w600,
+                  Flexible(
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          '${profit >= 0 ? '+' : ''}¥${Formats.amount(profit)}',
+                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                color: context.changeColor(profit),
+                                fontWeight: FontWeight.w600,
+                              ),
                         ),
+                        const SizedBox(width: 8),
+                        Text(
+                          '(${Formats.pct(profitPct)})',
+                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                color: context.changeColor(profit),
+                              ),
+                        ),
+                      ],
+                    ),
                   ),
                   const SizedBox(width: 8),
                   Text(
-                    '(${Formats.pct(profitPct)})',
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: context.changeColor(profit),
-                        ),
+                    '成本 ¥${Formats.amount(cost)}',
+                    style: Theme.of(context).textTheme.bodySmall,
                   ),
-                  const Spacer(),
-                  Text('成本 ${Formats.amount(cost)}', style: Theme.of(context).textTheme.bodySmall),
                 ],
               ),
             ],
@@ -605,10 +622,18 @@ class _InfoRow extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Text(label, style: Theme.of(context).textTheme.bodyMedium),
-          Text(value, style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600)),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              value,
+              textAlign: TextAlign.end,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
+            ),
+          ),
         ],
       ),
     );
@@ -633,11 +658,15 @@ class _TransactionTile extends StatelessWidget {
         leading: Icon(type.icon, size: 20, color: context.changeColor(isIn ? 1 : -1)),
         title: Text(type.label),
         subtitle: Text(Formats.dateTime(txn.occurredAt.toLocal())),
-        trailing: Text(
-          '${isIn ? '+' : '-'}${Formats.amount(txn.amount)}',
-          style: TextStyle(
-            color: context.changeColor(isIn ? 1 : -1),
-            fontWeight: FontWeight.w600,
+        trailing: SizedBox(
+          width: 110,
+          child: Text(
+            '${isIn ? '+' : '-'}¥${Formats.amount(txn.amount)}',
+            textAlign: TextAlign.end,
+            style: TextStyle(
+              color: context.changeColor(isIn ? 1 : -1),
+              fontWeight: FontWeight.w600,
+            ),
           ),
         ),
       ),

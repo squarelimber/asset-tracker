@@ -113,7 +113,10 @@ class _HoldingTile extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(holding.name, style: Theme.of(context).textTheme.titleSmall),
+                  Text(holding.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.titleSmall),
                   Text(
                     '${holding.symbol ?? ''}  ${MarketSource.fromStorage(holding.marketSource).label}',
                     style: Theme.of(context).textTheme.bodySmall,
@@ -124,10 +127,12 @@ class _HoldingTile extends StatelessWidget {
             Column(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
-                Text(marketValue.toStringAsFixed(2),
-                    style: Theme.of(context).textTheme.titleSmall),
                 Text(
-                  '${profit >= 0 ? '+' : ''}${profit.toStringAsFixed(2)} (${(profitPct * 100).toStringAsFixed(2)}%)',
+                  '¥${marketValue.toStringAsFixed(2)}',
+                  style: Theme.of(context).textTheme.titleSmall,
+                ),
+                Text(
+                  '${profit >= 0 ? '+' : ''}¥${profit.toStringAsFixed(2)} (${(profitPct * 100).toStringAsFixed(2)}%)',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         color: profit >= 0 ? context.upColor() : context.downColor(),
                       ),
@@ -162,11 +167,15 @@ class _TransactionTile extends StatelessWidget {
               ? Formats.dateTime(txn.occurredAt.toLocal())
               : '${txn.note} · ${Formats.dateTime(txn.occurredAt.toLocal())}',
         ),
-        trailing: Text(
-          '${isIn ? '+' : '-'}${Formats.amount(txn.amount)}',
-          style: TextStyle(
-            color: isIn ? context.upColor() : context.downColor(),
-            fontWeight: FontWeight.w600,
+        trailing: SizedBox(
+          width: 110,
+          child: Text(
+            '${isIn ? '+' : '-'}¥${Formats.amount(txn.amount)}',
+            textAlign: TextAlign.end,
+            style: TextStyle(
+              color: isIn ? context.upColor() : context.downColor(),
+              fontWeight: FontWeight.w600,
+            ),
           ),
         ),
       ),
