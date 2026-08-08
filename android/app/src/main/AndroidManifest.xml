@@ -1,6 +1,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Required for market data sync (release builds need it explicitly). -->
+    <uses-permission android:name="android.permission.INTERNET"/>
     <application
-        android:label="asset_tracker"
+        android:label="Asset Tracker"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity
