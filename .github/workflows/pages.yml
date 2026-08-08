@@ -29,8 +29,9 @@ jobs:
         run: flutter pub get
 
       - name: Build web
-        # Wasm build is required: drift_flutter's sqlite runs on native assets.
-        run: flutter build web --wasm --release
+        # Wasm build is required (drift sqlite uses native assets);
+        # base-href matches the GitHub Pages sub-path.
+        run: flutter build web --wasm --release --base-href=/asset-tracker/
 
       - name: Configure Pages
         uses: actions/configure-pages@v5
