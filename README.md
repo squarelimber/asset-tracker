@@ -34,6 +34,12 @@ A local-first, multi-platform asset tracking app built with Flutter. Track your 
 | Market data | Sina / Eastmoney / CoinGecko free endpoints |
 | CI | GitHub Actions |
 
+## Try it online
+
+Web version (auto-deployed from `main`): **https://squarelimber.github.io/asset-tracker/**
+
+Works on desktop and mobile browsers (iPhone Safari included) with the same features. Data is stored locally in the browser (IndexedDB).
+
 ## Getting Started
 
 ### Prerequisites
