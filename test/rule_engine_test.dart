@@ -1,4 +1,4 @@
-import 'dart:convert';
+﻿import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
 
@@ -64,7 +64,7 @@ void main() {
     test('flags holding above threshold', () {
       final holdings = [
         _holding(id: 1, type: 'stock', price: 800, cost: 100),
-        _holding(id: 2, type: 'cash', price: 200, cost: 200),
+        _holding(id: 2, type: 'cash', quantity: 200, price: 1, cost: 200),
       ];
       final results = const ConcentrationEvaluator()
           .evaluate(_rule(id: 1, type: AlertRuleType.concentration), _ctx(holdings: holdings));
@@ -76,7 +76,7 @@ void main() {
       // Four equal holdings -> 25% each, below the 30% default.
       final holdings = [
         _holding(id: 1, type: 'stock', price: 250, cost: 200),
-        _holding(id: 2, type: 'cash', price: 250, cost: 250),
+        _holding(id: 2, type: 'cash', quantity: 250, price: 1, cost: 250),
         _holding(id: 3, type: 'mutual_fund', price: 250, cost: 200),
         _holding(id: 4, type: 'etf', price: 250, cost: 200),
       ];
@@ -88,7 +88,7 @@ void main() {
     test('liabilities are excluded from the base and never flagged', () {
       final holdings = [
         _holding(id: 1, type: 'liability', price: 990, cost: 990),
-        _holding(id: 2, type: 'cash', price: 10, cost: 10),
+        _holding(id: 2, type: 'cash', quantity: 10, price: 1, cost: 10),
       ];
       final results = const ConcentrationEvaluator()
           .evaluate(_rule(id: 1, type: AlertRuleType.concentration), _ctx(holdings: holdings));
@@ -101,7 +101,7 @@ void main() {
     test('respects custom threshold param', () {
       final holdings = [
         _holding(id: 1, type: 'stock', price: 600, cost: 100),
-        _holding(id: 2, type: 'cash', price: 400, cost: 400),
+        _holding(id: 2, type: 'cash', quantity: 400, price: 1, cost: 400),
       ];
       final results = const ConcentrationEvaluator().evaluate(
         _rule(id: 1, type: AlertRuleType.concentration, params: {'threshold': 0.7}),
@@ -115,7 +115,7 @@ void main() {
     test('flags equity below target range', () {
       final holdings = [
         _holding(id: 1, type: 'stock', price: 200, cost: 200),
-        _holding(id: 2, type: 'cash', price: 800, cost: 800),
+        _holding(id: 2, type: 'cash', quantity: 800, price: 1, cost: 800),
       ];
       final results = const AssetRatioEvaluator().evaluate(
         _rule(id: 1, type: AlertRuleType.assetRatio, params: {'target': 0.6, 'tolerance': 0.1}),
@@ -128,7 +128,7 @@ void main() {
     test('passes within range', () {
       final holdings = [
         _holding(id: 1, type: 'stock', price: 600, cost: 600),
-        _holding(id: 2, type: 'cash', price: 400, cost: 400),
+        _holding(id: 2, type: 'cash', quantity: 400, price: 1, cost: 400),
       ];
       final results = const AssetRatioEvaluator().evaluate(
         _rule(id: 1, type: AlertRuleType.assetRatio, params: {'target': 0.6, 'tolerance': 0.1}),
@@ -140,7 +140,7 @@ void main() {
     test('flags equity above range as 偏高', () {
       final holdings = [
         _holding(id: 1, type: 'mutual_fund', price: 900, cost: 900),
-        _holding(id: 2, type: 'cash', price: 100, cost: 100),
+        _holding(id: 2, type: 'cash', quantity: 100, price: 1, cost: 100),
       ];
       final results = const AssetRatioEvaluator().evaluate(
         _rule(id: 1, type: AlertRuleType.assetRatio, params: {'target': 0.6, 'tolerance': 0.1}),
@@ -189,16 +189,16 @@ void main() {
   group('CashflowEvaluator', () {
     test('alerts on the configured day', () {
       final results = const CashflowEvaluator().evaluate(
-        _rule(id: 1, type: AlertRuleType.cashflow, params: {'dayOfMonth': 8, 'label': '房贷还款'}),
+        _rule(id: 1, type: AlertRuleType.cashflow, params: {'dayOfMonth': 8, 'label': '鎴胯捶杩樻'}),
         _ctx(holdings: [], now: DateTime(2026, 8, 8)),
       );
       expect(results, hasLength(1));
-      expect(results.single.message, contains('房贷还款'));
+      expect(results.single.message, contains('鎴胯捶杩樻'));
     });
 
     test('silent on other days', () {
       final results = const CashflowEvaluator().evaluate(
-        _rule(id: 1, type: AlertRuleType.cashflow, params: {'dayOfMonth': 20, 'label': '定投'}),
+        _rule(id: 1, type: AlertRuleType.cashflow, params: {'dayOfMonth': 20, 'label': '瀹氭姇'}),
         _ctx(holdings: [], now: DateTime(2026, 8, 8)),
       );
       expect(results, isEmpty);

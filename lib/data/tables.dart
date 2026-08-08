@@ -102,3 +102,13 @@ class AlertEvents extends Table {
   TextColumn get message => text()();
   DateTimeColumn get triggeredAt => dateTime().withDefault(currentDateAndTime)();
 }
+
+/// Simple key-value store for app-level state (e.g. data migration markers).
+@DataClassName('SettingRow')
+class Settings extends Table {
+  TextColumn get key => text()();
+  TextColumn get value => text().withDefault(const Constant(''))();
+
+  @override
+  Set<Column> get primaryKey => {key};
+}

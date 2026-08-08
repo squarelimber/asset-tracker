@@ -93,8 +93,11 @@ class _HoldingTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final type = AssetType.fromStorage(holding.assetType);
-    final marketValue = holding.quantity * holding.latestPrice;
-    final cost = holding.quantity * holding.costPrice;
+    final marketValue =
+        type.isAmountBased ? holding.quantity : holding.quantity * holding.latestPrice;
+    final cost = type.isAmountBased
+        ? (holding.costPrice > 0 ? holding.costPrice : holding.quantity)
+        : holding.quantity * holding.costPrice;
     final profit = marketValue - cost;
     final profitPct = cost == 0 ? 0.0 : profit / cost;
 
@@ -118,7 +121,9 @@ class _HoldingTile extends StatelessWidget {
                       overflow: TextOverflow.ellipsis,
                       style: Theme.of(context).textTheme.titleSmall),
                   Text(
-                    '${holding.symbol ?? ''}  ${MarketSource.fromStorage(holding.marketSource).label}',
+                    type.isAmountBased
+                        ? '持有 ${Formats.holdingDuration(holding.purchaseDate ?? holding.createdAt)}'
+                        : '${holding.symbol ?? ''}  ${MarketSource.fromStorage(holding.marketSource).label}',
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
                 ],

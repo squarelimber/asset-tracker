@@ -1,4 +1,4 @@
-import 'package:flutter_test/flutter_test.dart';
+﻿import 'package:flutter_test/flutter_test.dart';
 
 import 'package:asset_tracker/data/database.dart';
 import 'package:asset_tracker/domain/portfolio_calculator.dart';
@@ -53,12 +53,25 @@ void main() {
 
   test('liabilities reduce net worth but not assets', () {
     final s = calc.compute([
-      _holding(id: 1, type: 'cash', price: 500, cost: 500),
+      // Amount-based cash: quantity = 500 amount, costPrice = 500 invested.
+      _holding(id: 1, type: 'cash', quantity: 500, price: 1, cost: 500),
       _holding(id: 2, type: 'liability', price: 200, cost: 200),
     ]);
     expect(s.totalAssets, 500);
     expect(s.totalLiabilities, 200);
     expect(s.netWorth, 300);
+  });
+
+  test('amount-based assets use quantity as value and costPrice as invested', () {
+    final s = calc.compute([
+      // 10,000 yuan balance, 9,000 invested -> 1,000 profit.
+      _holding(id: 1, type: 'cash', quantity: 10000, price: 0, cost: 9000),
+      // No invested amount recorded -> cost falls back to current amount.
+      _holding(id: 2, type: 'liquid_wealth', quantity: 5000, price: 0, cost: 0),
+    ]);
+    expect(s.totalAssets, 15000);
+    expect(s.totalCost, 14000);
+    expect(s.profit, 1000);
   });
 
   test('breakdown is sorted desc and grouped by type', () {
@@ -76,7 +89,7 @@ void main() {
     final s = calc.compute(
       [
         _holding(id: 1, type: 'stock', symbol: 'sh600519', quantity: 2, price: 110, cost: 100),
-        _holding(id: 2, type: 'cash', price: 100, cost: 100),
+        _holding(id: 2, type: 'cash', quantity: 100, price: 1, cost: 100),
       ],
       prevPriceBySymbol: {'sh600519': 100},
     );

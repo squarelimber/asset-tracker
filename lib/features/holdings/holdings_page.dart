@@ -160,52 +160,82 @@ class _HoldingsPageState extends ConsumerState<HoldingsPage> {
               ValueListenableBuilder<AssetType>(
                 valueListenable: assetType,
                 builder: (context, type, _) {
-                  final symbolEnabled = type.isMarketLinked ||
-                      type == AssetType.bankWealth;
-                  return TextField(
-                    controller: symbolCtrl,
-                    decoration: InputDecoration(
-                      labelText: symbolEnabled ? '行情代码' : '（手动净值资产无需代码）',
-                      hintText: switch (type) {
-                        AssetType.stock || AssetType.etf => '如 sh600519 / sz159915',
-                        AssetType.mutualFund => '如 110022',
-                        AssetType.gold => 'AU99.99（自动金价）',
-                        AssetType.crypto => '如 bitcoin',
-                        AssetType.bankWealth => '填外汇代码如 USD 可自动汇率联动，留空手动净值',
-                        _ => null,
-                      },
-                    ),
-                    enabled: symbolEnabled,
+                  if (type.isAmountBased) {
+                    // Amount-based assets: plain balance + optional invested.
+                    return Column(
+                      children: [
+                        TextField(
+                          controller: quantityCtrl,
+                          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                          decoration: const InputDecoration(
+                            labelText: '当前金额',
+                            hintText: '如 50000',
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        TextField(
+                          controller: costPriceCtrl,
+                          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                          decoration: const InputDecoration(
+                            labelText: '累计投入（选填，用于计算收益）',
+                            hintText: '留空则视为与当前金额相同',
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                      ],
+                    );
+                  }
+                  final symbolEnabled =
+                      type.isMarketLinked || type == AssetType.bankWealth;
+                  return Column(
+                    children: [
+                      TextField(
+                        controller: symbolCtrl,
+                        decoration: InputDecoration(
+                          labelText: symbolEnabled ? '行情代码' : '（手动净值资产无需代码）',
+                          hintText: switch (type) {
+                            AssetType.stock || AssetType.etf => '如 sh600519 / sz159915',
+                            AssetType.mutualFund => '如 110022',
+                            AssetType.gold => 'AU99.99（自动金价）',
+                            AssetType.crypto => '如 bitcoin',
+                            AssetType.bankWealth => '填外汇代码如 USD 可自动汇率联动，留空手动净值',
+                            _ => null,
+                          },
+                        ),
+                        enabled: symbolEnabled,
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: quantityCtrl,
+                        keyboardType:
+                            const TextInputType.numberWithOptions(decimal: true),
+                        decoration:
+                            const InputDecoration(labelText: '数量 / 份额 / 克数'),
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: costPriceCtrl,
+                        keyboardType:
+                            const TextInputType.numberWithOptions(decimal: true),
+                        decoration: const InputDecoration(labelText: '成本单价'),
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: latestPriceCtrl,
+                        keyboardType:
+                            const TextInputType.numberWithOptions(decimal: true),
+                        decoration: InputDecoration(
+                          labelText: '最新净值（可选）',
+                          hintText: type.isMarketLinked
+                              ? '留空则保存后自动获取'
+                              : '手动净值资产建议填写',
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                    ],
                   );
                 },
               ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: quantityCtrl,
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                decoration: const InputDecoration(labelText: '数量 / 份额 / 克数'),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: costPriceCtrl,
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                decoration: const InputDecoration(labelText: '成本单价'),
-              ),
-              const SizedBox(height: 12),
-              ValueListenableBuilder<AssetType>(
-                valueListenable: assetType,
-                builder: (context, type, _) => TextField(
-                  controller: latestPriceCtrl,
-                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                  decoration: InputDecoration(
-                    labelText: '最新净值（可选）',
-                    hintText: type.isMarketLinked
-                        ? '留空则保存后自动获取'
-                        : '手动净值资产建议填写',
-                  ),
-                ),
-              ),
-              const SizedBox(height: 12),
               PurchaseDateField(value: purchaseDate),
               const SizedBox(height: 12),
               TextField(
@@ -220,16 +250,21 @@ class _HoldingsPageState extends ConsumerState<HoldingsPage> {
           FilledButton(
             onPressed: () async {
               final name = nameCtrl.text.trim();
+              final type = assetType.value;
               final qty = double.tryParse(quantityCtrl.text.trim());
-              final cost = double.tryParse(costPriceCtrl.text.trim());
-              if (name.isEmpty || qty == null || cost == null) {
+              final invested = double.tryParse(costPriceCtrl.text.trim());
+              final costRequired = type.isAmountBased ? 1 : 2;
+              if (name.isEmpty || qty == null || (costRequired == 2 && invested == null)) {
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('请填写名称、数量、成本单价')),
+                  SnackBar(
+                    content: Text(type.isAmountBased
+                        ? '请填写名称和当前金额'
+                        : '请填写名称、数量、成本单价'),
+                  ),
                 );
                 return;
               }
               final dao = ref.read(daoProvider);
-              final type = assetType.value;
               final symbol = symbolCtrl.text.trim();
               final marketSource = switch (type) {
                 AssetType.stock || AssetType.etf => 'sina',
@@ -247,8 +282,8 @@ class _HoldingsPageState extends ConsumerState<HoldingsPage> {
                 marketSource: Value(marketSource),
                 symbol: symbol.isNotEmpty ? Value(symbol) : const Value.absent(),
                 quantity: Value(qty),
-                costPrice: Value(cost),
-                latestPrice: Value(userPrice ?? 0),
+                costPrice: Value(type.isAmountBased ? (invested ?? qty) : (invested ?? 0)),
+                latestPrice: Value(type.isAmountBased ? 1 : (userPrice ?? 0)),
                 purchaseDate: Value(purchaseDate.value),
                 currency: Value(currencyCtrl.text.trim().toUpperCase().isEmpty
                     ? 'CNY'
@@ -321,8 +356,11 @@ class _HoldingCard extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final type = AssetType.fromStorage(holding.assetType);
-    final marketValue = holding.quantity * holding.latestPrice;
-    final cost = holding.quantity * holding.costPrice;
+    final marketValue =
+        type.isAmountBased ? holding.quantity : holding.quantity * holding.latestPrice;
+    final cost = type.isAmountBased
+        ? (holding.costPrice > 0 ? holding.costPrice : holding.quantity)
+        : holding.quantity * holding.costPrice;
     final profit = marketValue - cost;
     final profitPct = cost == 0 ? 0.0 : profit / cost;
 
@@ -354,7 +392,9 @@ class _HoldingCard extends ConsumerWidget {
                           style: Theme.of(context).textTheme.titleMedium,
                         ),
                         Text(
-                          '${holding.symbol ?? '手动净值'} · 持有 ${_holdingAge(holding)}',
+                          type.isAmountBased
+                              ? '持有 ${_holdingAge(holding)}'
+                              : '${holding.symbol ?? '手动净值'} · 持有 ${_holdingAge(holding)}',
                           style: Theme.of(context).textTheme.bodySmall,
                         ),
                       ],
@@ -366,14 +406,17 @@ class _HoldingCard extends ConsumerWidget {
                         case 'edit':
                           _showEditDialog(context, ref);
                         case 'update_price':
-                          _showUpdatePriceDialog(context, ref);
+                          if (!type.isAmountBased) {
+                            _showUpdatePriceDialog(context, ref);
+                          }
                         case 'delete':
                           _confirmDelete(context, ref);
                       }
                     },
                     itemBuilder: (_) => [
                       const PopupMenuItem(value: 'edit', child: Text('编辑')),
-                      const PopupMenuItem(value: 'update_price', child: Text('更新单价')),
+                      if (!type.isAmountBased)
+                        const PopupMenuItem(value: 'update_price', child: Text('更新单价')),
                       const PopupMenuItem(value: 'delete', child: Text('删除')),
                     ],
                   ),
@@ -478,6 +521,7 @@ class _HoldingCard extends ConsumerWidget {
   }
 
   Future<void> _showEditDialog(BuildContext context, WidgetRef ref) async {
+    final isAmountBased = AssetType.fromStorage(holding.assetType).isAmountBased;
     final nameCtrl = TextEditingController(text: holding.name);
     final quantityCtrl =
         TextEditingController(text: holding.quantity.toString());
@@ -502,20 +546,26 @@ class _HoldingCard extends ConsumerWidget {
               TextField(
                 controller: quantityCtrl,
                 keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                decoration: const InputDecoration(labelText: '数量 / 份额 / 克数'),
+                decoration: InputDecoration(
+                  labelText: isAmountBased ? '当前金额' : '数量 / 份额 / 克数',
+                ),
               ),
               const SizedBox(height: 12),
               TextField(
                 controller: costCtrl,
                 keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                decoration: const InputDecoration(labelText: '成本单价'),
+                decoration: InputDecoration(
+                  labelText: isAmountBased ? '累计投入' : '成本单价',
+                ),
               ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: priceCtrl,
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                decoration: const InputDecoration(labelText: '最新单价'),
-              ),
+              if (!isAmountBased) ...[
+                const SizedBox(height: 12),
+                TextField(
+                  controller: priceCtrl,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  decoration: const InputDecoration(labelText: '最新单价'),
+                ),
+              ],
               const SizedBox(height: 12),
               PurchaseDateField(value: purchaseDate),
               const SizedBox(height: 12),
@@ -536,14 +586,15 @@ class _HoldingCard extends ConsumerWidget {
     if (ok == true) {
       final qty = double.tryParse(quantityCtrl.text.trim());
       final cost = double.tryParse(costCtrl.text.trim());
+      if (qty == null) return;
       final price = double.tryParse(priceCtrl.text.trim());
-      if (qty == null || cost == null || price == null) return;
+      if (!isAmountBased && (cost == null || price == null)) return;
       await ref.read(daoProvider).updateHolding(
         holding.copyWith(
           name: nameCtrl.text.trim().isEmpty ? holding.name : nameCtrl.text.trim(),
           quantity: qty,
-          costPrice: cost,
-          latestPrice: price,
+          costPrice: isAmountBased ? (cost ?? qty) : (cost ?? holding.costPrice),
+          latestPrice: isAmountBased ? 1 : (price ?? holding.latestPrice),
           purchaseDate: Value(purchaseDate.value),
           note: noteCtrl.text.trim().isEmpty ? const Value.absent() : Value(noteCtrl.text.trim()),
         ),
@@ -587,8 +638,12 @@ class _HoldingDetailSheet extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final txns = ref.watch(transactionsByHoldingProvider(holding.id));
-    final marketValue = holding.quantity * holding.latestPrice;
-    final cost = holding.quantity * holding.costPrice;
+    final type = AssetType.fromStorage(holding.assetType);
+    final marketValue =
+        type.isAmountBased ? holding.quantity : holding.quantity * holding.latestPrice;
+    final cost = type.isAmountBased
+        ? (holding.costPrice > 0 ? holding.costPrice : holding.quantity)
+        : holding.quantity * holding.costPrice;
     final profitPct = cost == 0 ? 0.0 : (marketValue - cost) / cost;
     final buyDate = holding.purchaseDate ?? holding.createdAt;
     final days = DateTime.now().difference(buyDate).inDays;
@@ -604,9 +659,20 @@ class _HoldingDetailSheet extends ConsumerWidget {
             padding: const EdgeInsets.all(16),
             child: Column(
               children: [
-                _InfoRow(label: '最新单价', value: holding.latestPrice.toStringAsFixed(4)),
-                _InfoRow(label: '成本单价', value: holding.costPrice.toStringAsFixed(4)),
-                _InfoRow(label: '数量/份额', value: Formats.smartNum(holding.quantity)),
+                if (type.isAmountBased) ...[
+                  _InfoRow(label: '当前金额', value: '¥${Formats.amount(marketValue)}'),
+                  _InfoRow(label: '累计投入', value: '¥${Formats.amount(cost)}'),
+                  _InfoRow(
+                    label: '收益',
+                    value: '${profitPct >= 0 ? '+' : ''}¥${Formats.amount(marketValue - cost)}'
+                        ' (${Formats.pct(profitPct)})',
+                    valueColor: context.changeColor(marketValue - cost),
+                  ),
+                ] else ...[
+                  _InfoRow(label: '最新单价', value: holding.latestPrice.toStringAsFixed(4)),
+                  _InfoRow(label: '成本单价', value: holding.costPrice.toStringAsFixed(4)),
+                  _InfoRow(label: '数量/份额', value: Formats.smartNum(holding.quantity)),
+                ],
                 _InfoRow(label: '币种', value: holding.currency),
                 _InfoRow(label: '买入日期', value: Formats.date(buyDate)),
                 _InfoRow(label: '持有时间', value: Formats.holdingDuration(buyDate)),

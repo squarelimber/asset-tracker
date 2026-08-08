@@ -60,15 +60,20 @@ class PortfolioCalculator {
 
     for (final h in holdings) {
       final type = AssetType.fromStorage(h.assetType);
-      final marketValue = h.quantity * h.latestPrice;
+      // Amount-based assets: quantity = current amount, price is fixed at 1
+      // and costPrice stores the cumulative invested amount.
+      final marketValue =
+          type.isAmountBased ? h.quantity : h.quantity * h.latestPrice;
+      final holdingCost =
+          type.isAmountBased ? (h.costPrice > 0 ? h.costPrice : h.quantity) : h.quantity * h.costPrice;
       if (type == AssetType.liability) {
         liabilities += marketValue;
         continue;
       }
       assets += marketValue;
-      cost += h.quantity * h.costPrice;
+      cost += holdingCost;
       byType[type] = (byType[type] ?? 0) + marketValue;
-      costByType[type] = (costByType[type] ?? 0) + h.quantity * h.costPrice;
+      costByType[type] = (costByType[type] ?? 0) + holdingCost;
 
       final symbol = h.symbol;
       final prev = (symbol != null && prevPriceBySymbol.containsKey(symbol))

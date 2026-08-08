@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 enum AssetType {
   cash('现金', 'savings', Icons.payments_outlined, Color(0xFF42A5F5)),
   bankDeposit('银行存款', 'bank_deposit', Icons.account_balance_outlined, Color(0xFF26A69A)),
+  liquidWealth('活期理财', 'liquid_wealth', Icons.savings_outlined, Color(0xFF29B6F6)),
   bankWealth('银行理财', 'bank_wealth', Icons.handshake_outlined, Color(0xFFAB47BC)),
   stock('股票', 'stock', Icons.show_chart, Color(0xFFEF5350)),
   etf('场内基金', 'etf', Icons.candlestick_chart_outlined, Color(0xFFFFA726)),
@@ -34,6 +35,14 @@ enum AssetType {
   /// Whether this asset type is priced by market data.
   bool get isMarketLinked => switch (this) {
         stock || etf || mutualFund || gold || crypto => true,
+        _ => false,
+      };
+
+  /// Amount-based assets are tracked as a plain balance:
+  /// quantity = current amount, costPrice = cumulative invested (optional).
+  /// No price, no shares, no market code.
+  bool get isAmountBased => switch (this) {
+        cash || bankDeposit || liquidWealth => true,
         _ => false,
       };
 }

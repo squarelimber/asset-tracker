@@ -14,13 +14,14 @@ part 'database.g.dart';
     Snapshots,
     AlertRules,
     AlertEvents,
+    Settings,
   ],
 )
 class AppDatabase extends _$AppDatabase {
   AppDatabase([QueryExecutor? executor]) : super(executor ?? _openConnection());
 
   @override
-  int get schemaVersion => 2;
+  int get schemaVersion => 3;
 
   static QueryExecutor _openConnection() {
     return driftDatabase(name: 'asset_tracker');
@@ -39,6 +40,11 @@ class AppDatabase extends _$AppDatabase {
           if (from < 2) {
             final db = m.database as AppDatabase;
             await m.addColumn(db.holdings, db.holdings.purchaseDate);
+          }
+          // v2 -> v3: add settings table.
+          if (from < 3) {
+            final db = m.database as AppDatabase;
+            await m.createTable(db.settings);
           }
         },
       );
