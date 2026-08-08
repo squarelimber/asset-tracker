@@ -133,11 +133,11 @@ class _HoldingTile extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
                 Text(
-                  '¥${marketValue.toStringAsFixed(2)}',
+                  Formats.money(marketValue, holding.currency),
                   style: Theme.of(context).textTheme.titleSmall,
                 ),
                 Text(
-                  '${profit >= 0 ? '+' : ''}¥${profit.toStringAsFixed(2)} (${(profitPct * 100).toStringAsFixed(2)}%)',
+                  '${profit >= 0 ? '+' : ''}${Formats.money(profit, holding.currency)} (${(profitPct * 100).toStringAsFixed(2)}%)',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         color: profit >= 0 ? context.upColor() : context.downColor(),
                       ),
@@ -173,9 +173,9 @@ class _TransactionTile extends StatelessWidget {
               : '${txn.note} · ${Formats.dateTime(txn.occurredAt.toLocal())}',
         ),
         trailing: SizedBox(
-          width: 110,
+          width: 130,
           child: Text(
-            '${isIn ? '+' : '-'}¥${Formats.amount(txn.amount)}',
+            '${isIn ? '+' : '-'}${Formats.money(txn.amount, txn.currency)}',
             textAlign: TextAlign.end,
             style: TextStyle(
               color: isIn ? context.upColor() : context.downColor(),

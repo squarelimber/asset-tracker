@@ -241,9 +241,25 @@ class _HoldingsPageState extends ConsumerState<HoldingsPage> {
               ),
               PurchaseDateField(value: purchaseDate),
               const SizedBox(height: 12),
-              TextField(
-                controller: currencyCtrl,
-                decoration: const InputDecoration(labelText: '币种 (ISO 代码)'),
+              ValueListenableBuilder<AssetType>(
+                valueListenable: assetType,
+                builder: (context, type, _) {
+                  final autoCny = type.isMarketLinked ||
+                      type == AssetType.bankWealth;
+                  if (autoCny) {
+                    return const Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        '币种：人民币（行情自动折算）',
+                        style: TextStyle(fontSize: 13),
+                      ),
+                    );
+                  }
+                  return TextField(
+                    controller: currencyCtrl,
+                    decoration: const InputDecoration(labelText: '币种 (ISO 代码)'),
+                  );
+                },
               ),
             ],
           ),
@@ -278,6 +294,8 @@ class _HoldingsPageState extends ConsumerState<HoldingsPage> {
                 _ => 'manual',
               };
               final userPrice = double.tryParse(latestPriceCtrl.text.trim());
+              final autoCny =
+                  type.isMarketLinked || type == AssetType.bankWealth;
               final createdId = await dao.createHolding(HoldingsCompanion.insert(
                 accountId: accountId.value!,
                 name: name,
@@ -290,9 +308,11 @@ class _HoldingsPageState extends ConsumerState<HoldingsPage> {
                     : (invested ?? 0)),
                 latestPrice: Value(type.isAmountBased ? 1 : (userPrice ?? 0)),
                 purchaseDate: Value(purchaseDate.value),
-                currency: Value(currencyCtrl.text.trim().toUpperCase().isEmpty
+                currency: Value(autoCny
                     ? 'CNY'
-                    : currencyCtrl.text.trim().toUpperCase()),
+                    : (currencyCtrl.text.trim().toUpperCase().isEmpty
+                        ? 'CNY'
+                        : currencyCtrl.text.trim().toUpperCase())),
               ));
               if (context.mounted) Navigator.pop(context);
 
@@ -429,7 +449,7 @@ class _HoldingCard extends ConsumerWidget {
               ),
               const SizedBox(height: 12),
               Text(
-                '¥${Formats.amount(marketValue)}',
+                Formats.money(marketValue, holding.currency),
                 style: Theme.of(context).textTheme.titleLarge,
               ),
               const SizedBox(height: 4),
@@ -442,7 +462,7 @@ class _HoldingCard extends ConsumerWidget {
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         Text(
-                          '${profit >= 0 ? '+' : ''}¥${Formats.amount(profit)}',
+                          '${profit >= 0 ? '+' : ''}${Formats.money(profit, holding.currency)}',
                           style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                                 color: context.changeColor(profit),
                                 fontWeight: FontWeight.w600,
@@ -460,7 +480,7 @@ class _HoldingCard extends ConsumerWidget {
                   ),
                   const SizedBox(width: 8),
                   Text(
-                    '成本 ¥${Formats.amount(cost)}',
+                    '成本 ${Formats.money(cost, holding.currency)}',
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
                 ],
@@ -526,13 +546,17 @@ class _HoldingCard extends ConsumerWidget {
   }
 
   Future<void> _showEditDialog(BuildContext context, WidgetRef ref) async {
-    final isAmountBased = AssetType.fromStorage(holding.assetType).isAmountBased;
+    final type = AssetType.fromStorage(holding.assetType);
+    final isAmountBased = type.isAmountBased;
+    final autoCny = type.isMarketLinked || type == AssetType.bankWealth;
     final nameCtrl = TextEditingController(text: holding.name);
+    final symbolCtrl = TextEditingController(text: holding.symbol ?? '');
     final quantityCtrl =
         TextEditingController(text: holding.quantity.toString());
     final costCtrl = TextEditingController(text: holding.costPrice.toString());
     final priceCtrl =
         TextEditingController(text: holding.latestPrice.toString());
+    final currencyCtrl = TextEditingController(text: holding.currency);
     final noteCtrl = TextEditingController(text: holding.note ?? '');
     final purchaseDate = ValueNotifier<DateTime?>(
       holding.purchaseDate ?? holding.createdAt,
@@ -549,6 +573,16 @@ class _HoldingCard extends ConsumerWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: '名称')),
+              if (!isAmountBased) ...[
+                const SizedBox(height: 12),
+                TextField(
+                  controller: symbolCtrl,
+                  decoration: InputDecoration(
+                    labelText: '行情代码',
+                    hintText: '如 sh600519 / 110022 / AU99.99 / USD',
+                  ),
+                ),
+              ],
               const SizedBox(height: 12),
               TextField(
                 controller: quantityCtrl,
@@ -586,6 +620,20 @@ class _HoldingCard extends ConsumerWidget {
               const SizedBox(height: 12),
               PurchaseDateField(value: purchaseDate),
               const SizedBox(height: 12),
+              if (autoCny)
+                const Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    '币种：人民币（行情自动折算）',
+                    style: TextStyle(fontSize: 13),
+                  ),
+                )
+              else
+                TextField(
+                  controller: currencyCtrl,
+                  decoration: const InputDecoration(labelText: '币种 (ISO 代码)'),
+                ),
+              const SizedBox(height: 12),
               TextField(controller: noteCtrl, decoration: const InputDecoration(labelText: '备注')),
             ],
           ),
@@ -606,21 +654,43 @@ class _HoldingCard extends ConsumerWidget {
       final cost = double.tryParse(costCtrl.text.trim());
       final price = double.tryParse(priceCtrl.text.trim());
       if (!isAmountBased && (cost == null || price == null)) return;
-      await ref.read(daoProvider).updateHolding(
-        holding.copyWith(
-          name: nameCtrl.text.trim().isEmpty ? holding.name : nameCtrl.text.trim(),
-          quantity: qty,
-          costPrice: isAmountBased ? (investedResult ?? qty) : (cost ?? holding.costPrice),
-          latestPrice: isAmountBased ? 1 : (price ?? holding.latestPrice),
-          purchaseDate: Value(purchaseDate.value),
-          note: noteCtrl.text.trim().isEmpty ? const Value.absent() : Value(noteCtrl.text.trim()),
-        ),
+      final symbol = symbolCtrl.text.trim();
+      final updated = holding.copyWith(
+        name: nameCtrl.text.trim().isEmpty ? holding.name : nameCtrl.text.trim(),
+        quantity: qty,
+        costPrice: isAmountBased ? (investedResult ?? qty) : (cost ?? holding.costPrice),
+        latestPrice: isAmountBased ? 1 : (price ?? holding.latestPrice),
+        purchaseDate: Value(purchaseDate.value),
+        symbol: !isAmountBased ? (symbol.isEmpty ? const Value.absent() : Value(symbol)) : const Value.absent(),
+        currency: autoCny
+            ? 'CNY'
+            : (currencyCtrl.text.trim().toUpperCase().isEmpty
+                ? holding.currency
+                : currencyCtrl.text.trim().toUpperCase()),
+        note: noteCtrl.text.trim().isEmpty ? const Value.absent() : Value(noteCtrl.text.trim()),
       );
+      // Keep the market source in sync when the user changes the symbol.
+      if (!isAmountBased && symbol.isNotEmpty &&
+          MarketSource.fromStorage(holding.marketSource) == MarketSource.manual) {
+        updated.copyWith(
+          marketSource: switch (type) {
+            AssetType.stock || AssetType.etf => 'sina',
+            AssetType.mutualFund => 'eastmoney',
+            AssetType.gold => 'sge',
+            AssetType.crypto => 'coingecko',
+            AssetType.bankWealth => 'forex',
+            _ => holding.marketSource,
+          },
+        );
+      }
+      await ref.read(daoProvider).updateHolding(updated);
     }
     nameCtrl.dispose();
+    symbolCtrl.dispose();
     quantityCtrl.dispose();
     costCtrl.dispose();
     priceCtrl.dispose();
+    currencyCtrl.dispose();
     noteCtrl.dispose();
   }
 
@@ -677,11 +747,11 @@ class _HoldingDetailSheet extends ConsumerWidget {
             child: Column(
               children: [
                 if (type.isAmountBased) ...[
-                  _InfoRow(label: '当前金额', value: '¥${Formats.amount(marketValue)}'),
-                  _InfoRow(label: '累计投入', value: '¥${Formats.amount(cost)}'),
+                  _InfoRow(label: '当前金额', value: Formats.money(marketValue, holding.currency)),
+                  _InfoRow(label: '累计投入', value: Formats.money(cost, holding.currency)),
                   _InfoRow(
                     label: '收益',
-                    value: '${profitPct >= 0 ? '+' : ''}¥${Formats.amount(marketValue - cost)}'
+                    value: '${profitPct >= 0 ? '+' : ''}${Formats.money(marketValue - cost, holding.currency)}'
                         ' (${Formats.pct(profitPct)})',
                     valueColor: context.changeColor(marketValue - cost),
                   ),
@@ -782,7 +852,7 @@ class _TransactionTile extends StatelessWidget {
         trailing: SizedBox(
           width: 110,
           child: Text(
-            '${isIn ? '+' : '-'}¥${Formats.amount(txn.amount)}',
+            '${isIn ? '+' : '-'}${Formats.money(txn.amount, txn.currency)}',
             textAlign: TextAlign.end,
             style: TextStyle(
               color: context.changeColor(isIn ? 1 : -1),

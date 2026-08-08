@@ -45,7 +45,6 @@ class AccountsPage extends ConsumerWidget {
 
   Future<void> _showAccountDialog(BuildContext context, WidgetRef ref) async {
     final nameCtrl = TextEditingController();
-    final currencyCtrl = TextEditingController(text: 'CNY');
     final noteCtrl = TextEditingController();
 
     await showDialog<void>(
@@ -66,11 +65,6 @@ class AccountsPage extends ConsumerWidget {
               ),
               const SizedBox(height: 12),
               TextField(
-                controller: currencyCtrl,
-                decoration: const InputDecoration(labelText: '币种 (ISO 代码)'),
-              ),
-              const SizedBox(height: 12),
-              TextField(
                 controller: noteCtrl,
                 decoration: const InputDecoration(labelText: '备注（可选）'),
               ),
@@ -87,9 +81,7 @@ class AccountsPage extends ConsumerWidget {
               await dao.createAccount(AccountsCompanion.insert(
                 name: name,
                 type: 'general',
-                currency: Value(currencyCtrl.text.trim().toUpperCase().isEmpty
-                    ? 'CNY'
-                    : currencyCtrl.text.trim().toUpperCase()),
+                currency: const Value('CNY'),
                 note: noteCtrl.text.trim().isEmpty
                     ? const Value.absent()
                     : Value(noteCtrl.text.trim()),
@@ -158,7 +150,9 @@ class _AccountCard extends ConsumerWidget {
                         style: Theme.of(context).textTheme.titleMedium),
                     const SizedBox(height: 2),
                     Text(
-                      '${account.currency}${account.note == null || account.note!.isEmpty ? '' : ' · ${account.note}'}',
+                      account.note == null || account.note!.isEmpty
+                          ? account.currency
+                          : '${account.currency} · ${account.note}',
                       style: Theme.of(context).textTheme.bodySmall,
                     ),
                   ],

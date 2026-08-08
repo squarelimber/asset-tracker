@@ -40,6 +40,28 @@ class Formats {
     return _num.format(v);
   }
 
+  /// Currency symbol for common ISO codes, null when unknown.
+  static String? _currencySymbol(String code) => switch (code.toUpperCase()) {
+        'CNY' || 'RMB' => '¥',
+        'USD' => '\$',
+        'EUR' => '€',
+        'HKD' => 'HK\$',
+        'GBP' => '£',
+        'JPY' => 'JP¥',
+        'AUD' => 'A\$',
+        'CAD' => 'C\$',
+        'CHF' => 'CHF ',
+        'SGD' => 'S\$',
+        _ => null,
+      };
+
+  /// Money value with the right currency symbol:
+  /// e.g. money(1234.5, 'USD') -> "$1,234.50"; unknown codes -> "XXX 1,234.50".
+  static String money(double v, [String currency = 'CNY']) {
+    final symbol = _currencySymbol(currency);
+    return symbol == null ? '${currency.toUpperCase()} ${_amount.format(v)}' : '$symbol${_amount.format(v)}';
+  }
+
   /// Holding duration in a human-friendly form, e.g. "2年3个月",
   /// "8个月", "15天". [from] must not be after [to].
   static String holdingDuration(DateTime from, [DateTime? to]) {

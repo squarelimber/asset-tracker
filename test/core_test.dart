@@ -40,4 +40,13 @@ void main() {
   test('Formats.pct', () {
     expect(Formats.pct(0.1234), '12.34%');
   });
+
+  test('Formats.money respects currency', () {
+    expect(Formats.money(1234.5), '¥1,234.50');
+    expect(Formats.money(1234.5, 'USD'), '\$1,234.50');
+    expect(Formats.money(1234.5, 'EUR'), '€1,234.50');
+    expect(Formats.money(1234.5, 'HKD'), 'HK\$1,234.50');
+    expect(Formats.money(1234.5, 'XXX'), 'XXX 1,234.50');
+    expect(Formats.money(0), '¥0.00');
+  });
 }
