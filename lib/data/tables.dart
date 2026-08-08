@@ -1,0 +1,108 @@
+import 'package:drift/drift.dart';
+
+/// An account groups multiple holdings, e.g. a brokerage account,
+/// a bank card, or a dedicated fund account.
+@DataClassName('AccountRow')
+class Accounts extends Table {
+  IntColumn get id => integer().autoIncrement()();
+  TextColumn get name => text().withLength(min: 1, max: 64)();
+  TextColumn get type => text()();
+  TextColumn get currency => text().withDefault(const Constant('CNY'))();
+  TextColumn get note => text().nullable()();
+  DateTimeColumn get createdAt => dateTime().withDefault(currentDateAndTime)();
+}
+
+/// A single holding position within an account.
+@DataClassName('HoldingRow')
+class Holdings extends Table {
+  IntColumn get id => integer().autoIncrement()();
+  IntColumn get accountId => integer().references(Accounts, #id)();
+  TextColumn get name => text().withLength(min: 1, max: 64)();
+  TextColumn get assetType => text()();
+  TextColumn get marketSource => text().withDefault(const Constant('manual'))();
+  TextColumn get symbol => text().nullable()();
+  RealColumn get quantity => real().withDefault(const Constant(0))();
+  RealColumn get costPrice => real().withDefault(const Constant(0))();
+  RealColumn get latestPrice => real().withDefault(const Constant(0))();
+  TextColumn get currency => text().withDefault(const Constant('CNY'))();
+  TextColumn get note => text().nullable()();
+  DateTimeColumn get createdAt => dateTime().withDefault(currentDateAndTime)();
+  DateTimeColumn get updatedAt => dateTime().withDefault(currentDateAndTime)();
+
+  @override
+  List<Set<Column>> get uniqueKeys => [
+        {symbol},
+      ];
+}
+
+/// Buy / sell / dividend / transfer / income / expense records.
+/// The basis for cost basis and return calculations.
+@DataClassName('TransactionRow')
+class Transactions extends Table {
+  IntColumn get id => integer().autoIncrement()();
+  IntColumn get accountId => integer().references(Accounts, #id)();
+  IntColumn get holdingId => integer().nullable().references(Holdings, #id)();
+  TextColumn get type => text()();
+  RealColumn get quantity => real().nullable()();
+  RealColumn get price => real().nullable()();
+  RealColumn get amount => real()();
+  TextColumn get currency => text().withDefault(const Constant('CNY'))();
+  DateTimeColumn get occurredAt => dateTime()();
+  TextColumn get note => text().nullable()();
+
+  @override
+  List<Set<Column>> get uniqueKeys => [
+        {accountId, holdingId, type, occurredAt, amount},
+      ];
+}
+
+/// Latest market price cache written by the market data engine.
+@DataClassName('PriceCacheRow')
+class PriceCache extends Table {
+  TextColumn get symbol => text()();
+  TextColumn get source => text()();
+  TextColumn get name => text().withDefault(const Constant(''))();
+  RealColumn get price => real()();
+  TextColumn get currency => text().withDefault(const Constant('CNY'))();
+  RealColumn get prevClose => real().nullable()();
+  RealColumn get change => real().nullable()();
+  RealColumn get changePct => real().nullable()();
+  DateTimeColumn get fetchedAt => dateTime().withDefault(currentDateAndTime)();
+
+  @override
+  Set<Column> get primaryKey => {symbol};
+}
+
+/// Daily net worth snapshot, one row per day per currency.
+@DataClassName('SnapshotRow')
+class Snapshots extends Table {
+  TextColumn get date => text()();
+  TextColumn get currency => text().withDefault(const Constant('CNY'))();
+  RealColumn get totalValue => real()();
+  RealColumn get totalCost => real()();
+  DateTimeColumn get createdAt => dateTime().withDefault(currentDateAndTime)();
+
+  @override
+  Set<Column> get primaryKey => {date, currency};
+}
+
+/// Rule engine alert rules.
+@DataClassName('AlertRuleRow')
+class AlertRules extends Table {
+  IntColumn get id => integer().autoIncrement()();
+  TextColumn get type => text()();
+  TextColumn get name => text()();
+  TextColumn get params => text().withDefault(const Constant('{}'))();
+  BoolColumn get enabled => boolean().withDefault(const Constant(true))();
+  DateTimeColumn get createdAt => dateTime().withDefault(currentDateAndTime)();
+}
+
+/// Fired alert events, used for dedup and history.
+@DataClassName('AlertEventRow')
+class AlertEvents extends Table {
+  IntColumn get id => integer().autoIncrement()();
+  IntColumn get ruleId => integer().references(AlertRules, #id)();
+  TextColumn get title => text()();
+  TextColumn get message => text()();
+  DateTimeColumn get triggeredAt => dateTime().withDefault(currentDateAndTime)();
+}
