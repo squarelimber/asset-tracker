@@ -79,22 +79,34 @@ class ResponsiveGrid extends StatelessWidget {
       ));
     }
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        for (var r = 0; r < rows.length; r++) ...[
-          if (r > 0) SizedBox(height: spacing),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              for (var c = 0; c < rows[r].length; c++) ...[
-                if (c > 0) SizedBox(width: spacing),
-                Expanded(child: rows[r][c]),
-              ],
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // Standard card width for a full row; used for the last (partial)
+        // row so a single leftover card is not stretched across the page.
+        final cardWidth =
+            (constraints.maxWidth - spacing * (columns - 1)) / columns;
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            for (var r = 0; r < rows.length; r++) ...[
+              if (r > 0) SizedBox(height: spacing),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  for (var c = 0; c < rows[r].length; c++) ...[
+                    if (c > 0) SizedBox(width: spacing),
+                    if (r == rows.length - 1 && rows[r].length < columns)
+                      SizedBox(width: cardWidth, child: rows[r][c])
+                    else
+                      Expanded(child: rows[r][c]),
+                  ],
+                ],
+              ),
             ],
-          ),
-        ],
-      ],
+          ],
+        );
+      },
     );
   }
 }
