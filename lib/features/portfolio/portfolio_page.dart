@@ -105,13 +105,33 @@ class _PortfolioPageState extends ConsumerState<PortfolioPage> {
                     children: [
                       _SummaryHeader(summary: s),
                       const SizedBox(height: 16),
-                      ResponsiveGrid(
-                        children: [
-                          AllocationCard(summary: s),
-                          const SizedBox(height: 16),
-                          NetWorthChart(compact: Responsive.isPhone(context)),
-                        ],
-                      ),
+                      // On phone: allocation above net worth curve.
+                      // On tablet/desktop: side by side, curve on the right
+                      // filling the remaining width so cards align with the
+                      // header above.
+                      if (Responsive.isPhone(context))
+                        Column(
+                          children: [
+                            AllocationCard(summary: s),
+                            const SizedBox(height: 16),
+                            NetWorthChart(),
+                          ],
+                        )
+                      else
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Expanded(
+                              flex: 2,
+                              child: AllocationCard(summary: s),
+                            ),
+                            const SizedBox(width: 16),
+                            Expanded(
+                              flex: 3,
+                              child: NetWorthChart(),
+                            ),
+                          ],
+                        ),
                     ],
                   ),
                   loading: () => const Center(child: CircularProgressIndicator()),

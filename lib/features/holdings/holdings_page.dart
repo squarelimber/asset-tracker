@@ -61,9 +61,15 @@ class _HoldingsPageState extends ConsumerState<HoldingsPage> {
         data: (list) => list.isEmpty
             ? const _EmptyHoldings()
             : ResponsiveShell(
-                child: ResponsiveGrid(
+                // ListView so many holdings stay scrollable; grid rows are
+                // full-width with equal-width cards (no stray gaps).
+                child: ListView(
                   children: [
-                    for (final h in list) _HoldingCard(holding: h),
+                    ResponsiveGrid(
+                      children: [
+                        for (final h in list) _HoldingCard(holding: h),
+                      ],
+                    ),
                   ],
                 ),
               ),

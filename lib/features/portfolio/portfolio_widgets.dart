@@ -98,9 +98,7 @@ class AllocationCard extends ConsumerWidget {
 
 /// Net worth line chart from daily snapshots.
 class NetWorthChart extends ConsumerWidget {
-  const NetWorthChart({super.key, required this.compact});
-
-  final bool compact;
+  const NetWorthChart({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {

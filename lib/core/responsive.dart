@@ -19,7 +19,8 @@ class Responsive {
       isDesktop(context) ? 1280 : double.infinity;
 }
 
-/// A scrollable, centered content shell used by desktop layouts.
+/// A top-aligned, horizontally centered content shell used by desktop layouts.
+/// (Top alignment avoids the big gap above content when the page is short.)
 class ResponsiveShell extends StatelessWidget {
   const ResponsiveShell({super.key, required this.child, this.padding});
 
@@ -33,7 +34,8 @@ class ResponsiveShell extends StatelessWidget {
           horizontal: Responsive.isPhone(context) ? 16 : 24,
           vertical: 16,
         );
-    return Center(
+    return Align(
+      alignment: Alignment.topCenter,
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 1280),
         child: Padding(padding: effectivePadding, child: child),
@@ -42,28 +44,57 @@ class ResponsiveShell extends StatelessWidget {
   }
 }
 
-/// A simple responsive grid: 1 column on phone, 2 on tablet, 3 on desktop.
+/// A responsive grid of equal-width cards.
+///
+/// Unlike a `Wrap` of fixed-size tiles, cards are grouped into rows so every
+/// card in a row is exactly the same width and the row always spans the full
+/// available width (no leftover gap on the right). Cards keep their natural
+/// height and are top-aligned within the row.
 class ResponsiveGrid extends StatelessWidget {
-  const ResponsiveGrid({super.key, required this.children, this.spacing = 16});
+  const ResponsiveGrid({
+    super.key,
+    required this.children,
+    this.spacing = 16,
+    this.maxColumns,
+  });
 
   final List<Widget> children;
   final double spacing;
 
+  /// Override the column count (e.g. 2 on desktop). Defaults to
+  /// 1 phone / 2 tablet / 3 desktop.
+  final int? maxColumns;
+
   @override
   Widget build(BuildContext context) {
-    final columns = Responsive.isPhone(context) ? 1 : (Responsive.isTablet(context) ? 2 : 3);
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final width = (constraints.maxWidth - spacing * (columns - 1)) / columns;
-        final tiles = <Widget>[];
-        for (var i = 0; i < children.length; i++) {
-          tiles.add(SizedBox(width: width, child: children[i]));
-          if (i != children.length - 1) {
-            tiles.add(SizedBox(width: spacing));
-          }
-        }
-        return Wrap(spacing: 0, runSpacing: spacing, children: tiles);
-      },
+    if (children.isEmpty) return const SizedBox.shrink();
+    final columns = maxColumns ??
+        (Responsive.isPhone(context) ? 1 : (Responsive.isTablet(context) ? 2 : 3));
+
+    final rows = <List<Widget>>[];
+    for (var i = 0; i < children.length; i += columns) {
+      rows.add(children.sublist(
+        i,
+        i + columns > children.length ? children.length : i + columns,
+      ));
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        for (var r = 0; r < rows.length; r++) ...[
+          if (r > 0) SizedBox(height: spacing),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              for (var c = 0; c < rows[r].length; c++) ...[
+                if (c > 0) SizedBox(width: spacing),
+                Expanded(child: rows[r][c]),
+              ],
+            ],
+          ),
+        ],
+      ],
     );
   }
 }
