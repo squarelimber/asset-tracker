@@ -71,11 +71,12 @@ lib/
 ## Roadmap
 
 - [x] Project scaffold
-- [ ] Data layer (accounts, holdings, snapshots, alert rules)
-- [ ] Market data engine (A-share → funds → gold/FX → manual NAV)
-- [ ] Dashboard, net worth curve, reports
-- [ ] Rule engine alerts + local notifications
-- [ ] Backup/restore, CI, packaging
+- [x] Data layer (accounts, holdings, snapshots, alert rules)
+- [x] Market data engine (A-share → funds → gold/FX → manual NAV)
+- [x] Dashboard, net worth curve, reports
+- [x] Rule engine alerts (concentration / allocation / drawdown / cashflow)
+- [x] Backup/restore (JSON), CI (analyze + test + web/windows builds)
+- [ ] Android/iOS packaging, local notifications, transaction log UI
 
 ## Disclaimer
 
