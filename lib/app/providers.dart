@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../data/asset_dao.dart';
 import '../data/database.dart';
+import '../services/history_backfill_service.dart';
 import '../services/market/market_service.dart';
 
 /// App-wide database instance.
@@ -13,6 +14,11 @@ final daoProvider = Provider<AssetDao>((ref) => AssetDao(ref.watch(databaseProvi
 /// Market data orchestration engine.
 final marketServiceProvider = Provider<MarketService>(
   (ref) => MarketService(ref.watch(daoProvider)),
+);
+
+/// Historical net worth backfill engine.
+final historyBackfillServiceProvider = Provider<HistoryBackfillService>(
+  (ref) => HistoryBackfillService(ref.watch(daoProvider)),
 );
 
 // ---------------------------------------------------------------------------

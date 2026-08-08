@@ -8,6 +8,7 @@ import '../../core/enums.dart';
 import '../../core/formats.dart';
 import '../../core/responsive.dart';
 import '../../data/database.dart';
+import 'purchase_date_field.dart';
 
 final _refreshingProvider = StateProvider<bool>((ref) => false);
 
@@ -205,30 +206,7 @@ class _HoldingsPageState extends ConsumerState<HoldingsPage> {
                 ),
               ),
               const SizedBox(height: 12),
-              ValueListenableBuilder<DateTime?>(
-                valueListenable: purchaseDate,
-                builder: (context, value, _) => InkWell(
-                  onTap: () async {
-                    final picked = await showDatePicker(
-                      context: context,
-                      initialDate: value ?? DateTime.now(),
-                      firstDate: DateTime(2000),
-                      lastDate: DateTime.now(),
-                    );
-                    if (picked != null) purchaseDate.value = picked;
-                  },
-                  child: InputDecorator(
-                    decoration: const InputDecoration(labelText: '买入日期'),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.calendar_today_outlined, size: 16),
-                        const SizedBox(width: 8),
-                        Text(Formats.date(value ?? DateTime.now())),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
+              PurchaseDateField(value: purchaseDate),
               const SizedBox(height: 12),
               TextField(
                 controller: currencyCtrl,
@@ -539,30 +517,7 @@ class _HoldingCard extends ConsumerWidget {
                 decoration: const InputDecoration(labelText: '最新单价'),
               ),
               const SizedBox(height: 12),
-              ValueListenableBuilder<DateTime?>(
-                valueListenable: purchaseDate,
-                builder: (context, value, _) => InkWell(
-                  onTap: () async {
-                    final picked = await showDatePicker(
-                      context: context,
-                      initialDate: value ?? DateTime.now(),
-                      firstDate: DateTime(2000),
-                      lastDate: DateTime.now(),
-                    );
-                    if (picked != null) purchaseDate.value = picked;
-                  },
-                  child: InputDecorator(
-                    decoration: const InputDecoration(labelText: '买入日期'),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.calendar_today_outlined, size: 16),
-                        const SizedBox(width: 8),
-                        Text(Formats.date(value ?? DateTime.now())),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
+              PurchaseDateField(value: purchaseDate),
               const SizedBox(height: 12),
               TextField(controller: noteCtrl, decoration: const InputDecoration(labelText: '备注')),
             ],

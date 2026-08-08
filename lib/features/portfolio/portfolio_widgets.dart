@@ -104,8 +104,10 @@ class NetWorthChart extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final snapshots = ref.watch(snapshotsProvider);
     return Card(
+      // Transparent background so the chart blends with the page.
+      color: Colors.transparent,
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [

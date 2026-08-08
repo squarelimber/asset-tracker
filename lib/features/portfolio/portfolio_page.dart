@@ -38,13 +38,14 @@ class PortfolioPage extends ConsumerStatefulWidget {
 
 class _PortfolioPageState extends ConsumerState<PortfolioPage> {
   final _refreshing = ValueNotifier<bool>(false);
+  bool _backfillStarted = false;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      ref.read(snapshotServiceProvider).ensureTodaySnapshot();
       _refreshPrices(showSnack: false);
+      _backfillHistory();
     });
   }
 
@@ -52,6 +53,19 @@ class _PortfolioPageState extends ConsumerState<PortfolioPage> {
   void dispose() {
     _refreshing.dispose();
     super.dispose();
+  }
+
+  /// Backfills the net worth chart from the purchase dates, once per app run.
+  Future<void> _backfillHistory() async {
+    if (_backfillStarted) return;
+    _backfillStarted = true;
+    final result = await ref.read(historyBackfillServiceProvider).backfill();
+    if (!mounted) return;
+    if (result.ok && result.days > 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(result.message ?? '历史净值已回填')),
+      );
+    }
   }
 
   Future<void> _refreshPrices({bool showSnack = true}) async {
