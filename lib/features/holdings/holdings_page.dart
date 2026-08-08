@@ -284,10 +284,18 @@ class _HoldingCard extends ConsumerWidget {
                   ),
                   PopupMenuButton<String>(
                     onSelected: (v) {
-                      if (v == 'delete') _confirmDelete(context, ref);
+                      switch (v) {
+                        case 'edit':
+                          _showEditDialog(context, ref);
+                        case 'update_price':
+                          _showUpdatePriceDialog(context, ref);
+                        case 'delete':
+                          _confirmDelete(context, ref);
+                      }
                     },
                     itemBuilder: (_) => [
                       const PopupMenuItem(value: 'edit', child: Text('编辑')),
+                      const PopupMenuItem(value: 'update_price', child: Text('更新单价')),
                       const PopupMenuItem(value: 'delete', child: Text('删除')),
                     ],
                   ),
@@ -341,6 +349,115 @@ class _HoldingCard extends ConsumerWidget {
         ),
       ),
     );
+  }
+
+  Future<void> _showUpdatePriceDialog(BuildContext context, WidgetRef ref) async {
+    final priceCtrl = TextEditingController(
+      text: holding.latestPrice > 0 ? holding.latestPrice.toString() : '',
+    );
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('更新单价'),
+        content: TextField(
+          controller: priceCtrl,
+          autofocus: true,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          decoration: const InputDecoration(labelText: '最新单价'),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('取消')),
+          FilledButton(
+            onPressed: () {
+              final price = double.tryParse(priceCtrl.text.trim());
+              if (price == null || price <= 0) return;
+              Navigator.pop(context, true);
+            },
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
+    if (ok == true) {
+      final price = double.tryParse(priceCtrl.text.trim());
+      if (price != null && price > 0) {
+        await ref.read(daoProvider).updateHoldingPrice(holding.id, price);
+      }
+    }
+    priceCtrl.dispose();
+  }
+
+  Future<void> _showEditDialog(BuildContext context, WidgetRef ref) async {
+    final nameCtrl = TextEditingController(text: holding.name);
+    final quantityCtrl =
+        TextEditingController(text: holding.quantity.toString());
+    final costCtrl = TextEditingController(text: holding.costPrice.toString());
+    final priceCtrl =
+        TextEditingController(text: holding.latestPrice.toString());
+    final noteCtrl = TextEditingController(text: holding.note ?? '');
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('编辑持仓'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: '名称')),
+              const SizedBox(height: 12),
+              TextField(
+                controller: quantityCtrl,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                decoration: const InputDecoration(labelText: '数量 / 份额 / 克数'),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: costCtrl,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                decoration: const InputDecoration(labelText: '成本单价'),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: priceCtrl,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                decoration: const InputDecoration(labelText: '最新单价'),
+              ),
+              const SizedBox(height: 12),
+              TextField(controller: noteCtrl, decoration: const InputDecoration(labelText: '备注')),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('取消')),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
+
+    if (ok == true) {
+      final qty = double.tryParse(quantityCtrl.text.trim());
+      final cost = double.tryParse(costCtrl.text.trim());
+      final price = double.tryParse(priceCtrl.text.trim());
+      if (qty == null || cost == null || price == null) return;
+      await ref.read(daoProvider).updateHolding(
+        holding.copyWith(
+          name: nameCtrl.text.trim().isEmpty ? holding.name : nameCtrl.text.trim(),
+          quantity: qty,
+          costPrice: cost,
+          latestPrice: price,
+          note: noteCtrl.text.trim().isEmpty ? const Value.absent() : Value(noteCtrl.text.trim()),
+        ),
+      );
+    }
+    nameCtrl.dispose();
+    quantityCtrl.dispose();
+    costCtrl.dispose();
+    priceCtrl.dispose();
+    noteCtrl.dispose();
   }
 
   Future<void> _confirmDelete(BuildContext context, WidgetRef ref) async {
