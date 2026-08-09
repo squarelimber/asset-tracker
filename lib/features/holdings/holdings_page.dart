@@ -16,6 +16,23 @@ import 'purchase_date_field.dart';
 
 final _refreshingProvider = StateProvider<bool>((ref) => false);
 
+/// Sort modes for the holdings list.
+enum HoldingSort {
+  defaultOrder('默认'),
+  amountDesc('市值从高到低'),
+  amountAsc('市值从低到高'),
+  nameAsc('名称 A-Z');
+
+  const HoldingSort(this.label);
+
+  final String label;
+}
+
+double _holdingMarketValue(HoldingRow h) {
+  final type = AssetType.fromStorage(h.assetType);
+  return type.isAmountBased ? h.quantity : h.quantity * h.latestPrice;
+}
+
 class HoldingsPage extends ConsumerStatefulWidget {
   const HoldingsPage({super.key});
 
@@ -24,6 +41,8 @@ class HoldingsPage extends ConsumerStatefulWidget {
 }
 
 class _HoldingsPageState extends ConsumerState<HoldingsPage> {
+  HoldingSort _sort = HoldingSort.defaultOrder;
+
   @override
   void initState() {
     super.initState();
@@ -36,6 +55,21 @@ class _HoldingsPageState extends ConsumerState<HoldingsPage> {
     });
   }
 
+  List<HoldingRow> _sorted(List<HoldingRow> list) {
+    final sorted = [...list];
+    switch (_sort) {
+      case HoldingSort.defaultOrder:
+        break;
+      case HoldingSort.amountDesc:
+        sorted.sort((a, b) => _holdingMarketValue(b).compareTo(_holdingMarketValue(a)));
+      case HoldingSort.amountAsc:
+        sorted.sort((a, b) => _holdingMarketValue(a).compareTo(_holdingMarketValue(b)));
+      case HoldingSort.nameAsc:
+        sorted.sort((a, b) => a.name.compareTo(b.name));
+    }
+    return sorted;
+  }
+
   @override
   Widget build(BuildContext context) {
     final holdings = ref.watch(holdingsProvider);
@@ -44,6 +78,16 @@ class _HoldingsPageState extends ConsumerState<HoldingsPage> {
       appBar: AppBar(
         title: const Text('持仓'),
         actions: [
+          PopupMenuButton<HoldingSort>(
+            tooltip: '排序',
+            icon: const Icon(Icons.sort),
+            initialValue: _sort,
+            onSelected: (s) => setState(() => _sort = s),
+            itemBuilder: (_) => [
+              for (final s in HoldingSort.values)
+                PopupMenuItem(value: s, child: Text(s.label)),
+            ],
+          ),
           IconButton(
             tooltip: '刷新行情',
             onPressed: refreshing ? null : () => _refresh(showSnack: true),
@@ -72,7 +116,7 @@ class _HoldingsPageState extends ConsumerState<HoldingsPage> {
                   children: [
                     ResponsiveGrid(
                       children: [
-                        for (final h in list) _HoldingCard(holding: h),
+                        for (final h in _sorted(list)) _HoldingCard(holding: h),
                       ],
                     ),
                   ],
@@ -559,8 +603,11 @@ class _HoldingCard extends ConsumerWidget {
   }
 
   Future<void> _showEditDialog(BuildContext context, WidgetRef ref) async {
+    final accounts = await ref.read(accountsProvider.future);
+    if (!context.mounted) return;
     final initialType = AssetType.fromStorage(holding.assetType);
     final typeNotifier = ValueNotifier<AssetType>(initialType);
+    final accountIdNotifier = ValueNotifier<int>(holding.accountId);
     final nameCtrl = TextEditingController(text: holding.name);
     final symbolCtrl = TextEditingController(text: holding.symbol ?? '');
     final quantityCtrl =
@@ -592,6 +639,24 @@ class _HoldingCard extends ConsumerWidget {
                   TextField(
                     controller: nameCtrl,
                     decoration: const InputDecoration(labelText: '名称'),
+                  ),
+                  const SizedBox(height: 12),
+                  ValueListenableBuilder<int>(
+                    valueListenable: accountIdNotifier,
+                    builder: (context, accountId, _) =>
+                        DropdownButtonFormField<int>(
+                      initialValue: accountId,
+                      decoration: const InputDecoration(labelText: '所属账户'),
+                      items: [
+                        for (final a in accounts)
+                          DropdownMenuItem(value: a.id, child: Text(a.name)),
+                      ],
+                      onChanged: (v) {
+                        if (v != null) {
+                          setState(() => accountIdNotifier.value = v);
+                        }
+                      },
+                    ),
                   ),
                   const SizedBox(height: 12),
                   DropdownButtonFormField<AssetType>(
@@ -727,6 +792,7 @@ class _HoldingCard extends ConsumerWidget {
                     'manual',
                 };
       final updated = holding.copyWith(
+        accountId: accountIdNotifier.value,
         name: nameCtrl.text.trim().isEmpty ? holding.name : nameCtrl.text.trim(),
         assetType: type.storageName,
         marketSource: marketSource,
