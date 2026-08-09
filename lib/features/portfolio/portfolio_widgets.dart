@@ -114,6 +114,7 @@ class _NetWorthChartState extends ConsumerState<NetWorthChart> {
   static const _options = [
     RangeOption.month1,
     RangeOption.month3,
+    RangeOption.ytd,
     RangeOption.year1,
     RangeOption.year3,
     RangeOption.all,

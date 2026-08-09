@@ -9,6 +9,7 @@ import '../../core/enums.dart';
 import '../../core/formats.dart';
 import '../../core/responsive.dart';
 import '../../data/database.dart';
+import '../transactions/transaction_dialogs.dart';
 
 class AccountsPage extends ConsumerWidget {
   const AccountsPage({super.key});
@@ -27,8 +28,8 @@ class AccountsPage extends ConsumerWidget {
         data: (list) => list.isEmpty
             ? const _EmptyAccounts()
             : ResponsiveShell(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                // ListView so long account+holding lists stay scrollable.
+                child: ListView(
                   children: [
                     Text('共 ${list.length} 个账户', style: Theme.of(context).textTheme.bodyMedium),
                     const SizedBox(height: 12),
@@ -224,13 +225,14 @@ class _AccountCard extends ConsumerWidget {
 }
 
 /// Compact holding row shown inside an account card.
-class _HoldingMiniTile extends StatelessWidget {
+/// Tap opens the transaction dialog directly for that holding.
+class _HoldingMiniTile extends ConsumerWidget {
   const _HoldingMiniTile({required this.holding});
 
   final HoldingRow holding;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final type = AssetType.fromStorage(holding.assetType);
     final marketValue = type.isAmountBased
         ? holding.quantity
@@ -240,41 +242,46 @@ class _HoldingMiniTile extends StatelessWidget {
         : holding.quantity * holding.costPrice;
     final profit = marketValue - cost;
 
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 5),
-      child: Row(
-        children: [
-          Icon(type.icon, size: 16, color: type.color),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              holding.name,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.bodyMedium,
+    return InkWell(
+      borderRadius: BorderRadius.circular(8),
+      onTap: () => showHoldingTransactionDialog(context, ref, holding),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 5, horizontal: 4),
+        child: Row(
+          children: [
+            Icon(type.icon, size: 16, color: type.color),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                holding.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
             ),
-          ),
-          const SizedBox(width: 8),
-          Text(
-            Formats.money(marketValue, holding.currency),
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  fontWeight: FontWeight.w600,
-                  fontFeatures: const [FontFeature.tabularFigures()],
-                ),
-          ),
-          const SizedBox(width: 8),
-          SizedBox(
-            width: 90,
-            child: Text(
-              '${profit >= 0 ? '+' : ''}${Formats.money(profit, holding.currency)}',
-              textAlign: TextAlign.end,
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: context.changeColor(profit),
+            const SizedBox(width: 8),
+            Text(
+              Formats.money(marketValue, holding.currency),
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                     fontWeight: FontWeight.w600,
+                    fontFeatures: const [FontFeature.tabularFigures()],
                   ),
             ),
-          ),
-        ],
+            const SizedBox(width: 8),
+            SizedBox(
+              width: 90,
+              child: Text(
+                '${profit >= 0 ? '+' : ''}${Formats.money(profit, holding.currency)}',
+                textAlign: TextAlign.end,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: context.changeColor(profit),
+                      fontWeight: FontWeight.w600,
+                    ),
+              ),
+            ),
+            const Icon(Icons.chevron_right, size: 16),
+          ],
+        ),
       ),
     );
   }

@@ -6,6 +6,7 @@ import '../data/database.dart';
 enum RangeOption {
   month1('近1月'),
   month3('近3月'),
+  ytd('今年以来'),
   year1('近1年'),
   year3('近3年'),
   all('全部'),
@@ -19,6 +20,7 @@ enum RangeOption {
   DateTime? startDate(DateTime now) => switch (this) {
         month1 => DateTime(now.year, now.month - 1, now.day),
         month3 => DateTime(now.year, now.month - 3, now.day),
+        ytd => DateTime(now.year, 1, 1),
         year1 => DateTime(now.year - 1, now.month, now.day),
         year3 => DateTime(now.year - 3, now.month, now.day),
         all || custom => null,
