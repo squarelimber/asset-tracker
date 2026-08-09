@@ -1,4 +1,5 @@
 import '../../core/enums.dart';
+import '../../core/symbols.dart';
 import '../../data/asset_dao.dart';
 import '../../data/database.dart';
 import 'coingecko_source.dart';
@@ -56,11 +57,15 @@ class MarketService {
     final symbolOf = <int, String>{};
     for (final h in holdings) {
       final type = AssetType.fromStorage(h.assetType);
-      final symbol = (h.symbol != null && h.symbol!.isNotEmpty)
+      var symbol = (h.symbol != null && h.symbol!.isNotEmpty)
           ? h.symbol!
           : type.defaultSymbol;
       if (symbol == null) continue;
       final source = MarketSource.fromStorage(h.marketSource);
+      // Bare 6-digit A-share/ETF codes need the exchange prefix for Sina.
+      if (source == MarketSource.sina) {
+        symbol = normalizeSinaSymbol(symbol);
+      }
       bySource.putIfAbsent(source, () => []).add(symbol);
       symbolOf[h.id] = symbol;
     }
@@ -127,11 +132,15 @@ class MarketService {
   /// (holding row + price cache). Returns the fetched quote, or null.
   Future<MarketQuote?> refreshHolding(HoldingRow holding) async {
     final type = AssetType.fromStorage(holding.assetType);
-    final symbol = (holding.symbol != null && holding.symbol!.isNotEmpty)
+    var rawSymbol = (holding.symbol != null && holding.symbol!.isNotEmpty)
         ? holding.symbol!
         : type.defaultSymbol;
-    if (symbol == null) return null;
+    if (rawSymbol == null) return null;
     final source = MarketSource.fromStorage(holding.marketSource);
+    if (source == MarketSource.sina) {
+      rawSymbol = normalizeSinaSymbol(rawSymbol);
+    }
+    final symbol = rawSymbol;
     final quotes = await _fetchFromSource(source, [symbol]);
     if (quotes.isEmpty) return null;
     final quote = quotes.first;

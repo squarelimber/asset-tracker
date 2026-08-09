@@ -7,6 +7,7 @@ import '../../app/theme.dart';
 import '../../core/enums.dart';
 import '../../core/formats.dart';
 import '../../core/responsive.dart';
+import '../../core/symbols.dart';
 import '../../data/database.dart';
 import '../transactions/transaction_dialogs.dart';
 import 'invested_profit_field.dart';
@@ -198,7 +199,7 @@ class _HoldingsPageState extends ConsumerState<HoldingsPage> {
                         decoration: InputDecoration(
                           labelText: symbolEnabled ? '行情代码' : '（手动净值资产无需代码）',
                           hintText: switch (type) {
-                            AssetType.stock || AssetType.etf => '如 sh600519 / sz159915',
+                            AssetType.stock || AssetType.etf => '如 510880 / 159915（自动识别沪/深）',
                             AssetType.mutualFund => '如 110022',
                             AssetType.gold => 'AU99.99（自动金价）',
                             AssetType.crypto => '如 bitcoin',
@@ -285,9 +286,13 @@ class _HoldingsPageState extends ConsumerState<HoldingsPage> {
                 return;
               }
               final dao = ref.read(daoProvider);
-              final symbol = symbolCtrl.text.trim().isNotEmpty
+              var symbol = symbolCtrl.text.trim().isNotEmpty
                   ? symbolCtrl.text.trim()
                   : type.defaultSymbol;
+              // Auto-prefix bare 6-digit A-share/ETF codes (5/6 -> sh, 0/1/3 -> sz).
+              if (type == AssetType.stock || type == AssetType.etf) {
+                symbol = symbol == null ? null : normalizeSinaSymbol(symbol);
+              }
               final hasSymbol = symbol != null && symbol.isNotEmpty;
               final marketSource = switch (type) {
                 AssetType.stock || AssetType.etf => 'sina',

@@ -1,5 +1,6 @@
 import '../core/enums.dart';
 import '../core/formats.dart';
+import '../core/symbols.dart';
 import '../data/asset_dao.dart';
 import '../data/database.dart';
 import 'market/history_source.dart';
@@ -106,10 +107,14 @@ class HistoryBackfillService {
       final adapter = _sources[source];
       if (adapter == null) continue;
       final type = AssetType.fromStorage(h.assetType);
-      final symbol = (h.symbol != null && h.symbol!.isNotEmpty)
+      var rawSymbol = (h.symbol != null && h.symbol!.isNotEmpty)
           ? h.symbol!
           : type.defaultSymbol;
-      if (symbol == null) continue;
+      if (rawSymbol == null) continue;
+      if (source == MarketSource.sina) {
+        rawSymbol = normalizeSinaSymbol(rawSymbol);
+      }
+      final symbol = rawSymbol;
       futures.add(() async {
         final history = await adapter.fetch(symbol, windowStart, current);
         if (history.isNotEmpty) fillers[h.id] = _ForwardFiller(history);
