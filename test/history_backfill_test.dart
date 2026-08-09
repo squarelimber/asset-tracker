@@ -139,4 +139,40 @@ void main() {
     final snapshots = await dao.getSnapshots();
     expect(snapshots.single.totalValue, 888);
   });
+
+  test('holdings are excluded before their purchase date', () async {
+    final accountId = await dao.createAccount(AccountsCompanion.insert(
+      name: '测试账户',
+      type: 'general',
+    ));
+    // Bought 2026-07-03 with history covering the whole window.
+    final holdingId = await dao.createHolding(HoldingsCompanion.insert(
+      accountId: accountId,
+      name: '测试基金',
+      assetType: AssetType.mutualFund.storageName,
+      marketSource: Value(MarketSource.eastmoney.storageName),
+      symbol: const Value('110022'),
+      quantity: const Value(100),
+      costPrice: const Value(2.5),
+      latestPrice: const Value(2.6),
+      purchaseDate: Value(DateTime(2026, 7, 3)),
+    ));
+    final fake = _FakeHistorySource();
+    fake.data['110022'] = {
+      for (var d = DateTime(2026, 6, 29); !d.isAfter(DateTime(2026, 7, 7)); d = d.add(const Duration(days: 1)))
+        _FakeHistorySource.key(d): 2.6,
+    };
+
+    final service = HistoryBackfillService(dao, sources: {MarketSource.eastmoney: fake});
+    await service.backfill(now: DateTime(2026, 7, 8));
+
+    final snapshots = await dao.getSnapshots();
+    // Window 06-29..07-07 = 9 days; holding exists from 07-03 -> 5 days.
+    expect(snapshots, hasLength(5));
+    expect(snapshots.first.date, '2026-07-03');
+    for (final s in snapshots) {
+      expect(s.totalValue, closeTo(260, 1e-6));
+    }
+    expect(holdingId, isPositive);
+  });
 }

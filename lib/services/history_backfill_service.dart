@@ -1,5 +1,3 @@
-import 'package:drift/drift.dart';
-
 import '../core/enums.dart';
 import '../core/formats.dart';
 import '../data/asset_dao.dart';
@@ -52,9 +50,9 @@ class _ForwardFiller {
   }
 }
 
-/// Backfills historical daily net-worth snapshots from the purchase date
-/// onward, so the net worth chart shows the full holding period even for
-/// assets bought long before the app was first used.
+/// Backfills historical daily net-worth snapshots from each holding's
+/// purchase date onward, so the net worth chart shows the full holding
+/// period even for assets bought long before the app was first used.
 ///
 /// Data sources:
 /// - Mutual funds: Eastmoney NAV history
@@ -62,6 +60,10 @@ class _ForwardFiller {
 /// - Gold accumulation: Shanghai gold futures (AU0) history
 /// Manual-NAV assets (bank wealth etc.) are carried at their latest price
 /// across the backfill window (they only change when the user updates them).
+///
+/// Recomputation is atomic: new snapshots are fully computed first, then
+/// swapped in a single transaction. The UI therefore never shows a gap
+/// while the rebuild is running.
 class HistoryBackfillService {
   HistoryBackfillService(this._dao, {Map<MarketSource, HistoryDataSource>? sources})
       : _sources = sources ??
@@ -74,13 +76,10 @@ class HistoryBackfillService {
   final AssetDao _dao;
   final Map<MarketSource, HistoryDataSource> _sources;
 
-  /// Marker for the weekend forward-fill fix: forces one full recompute of
-  /// historical snapshots that were backfilled with the wrong fallback price.
-  static const _backfillV2Fixed = 'backfill_v2_forward_fill';
+  /// Marker for the weekend forward-fill fix + purchase-date filtering:
+  /// triggers one atomic recompute of historical snapshots.
+  static const _backfillV3Marker = 'backfill_v3_atomic';
 
-  /// Backfills snapshots for dates before today that are missing.
-  /// Existing snapshots are never overwritten, except for the one-time
-  /// recompute triggered by [_backfillV2Fixed].
   Future<BackfillResult> backfill({DateTime? now}) async {
     final current = (now ?? DateTime.now());
     final todayDate = DateTime(current.year, current.month, current.day);
@@ -99,19 +98,6 @@ class HistoryBackfillService {
     if (earliest == null) return const BackfillResult(ok: false, days: 0, holdings: 0);
     final windowStart = earliest;
 
-    // One-time recompute: earlier backfills used the current latest price
-    // for weekends, producing a jagged weekly pattern. Delete and rebuild
-    // historical snapshots (today's snapshot is never touched).
-    final marker = await _dao.getSetting(_backfillV2Fixed);
-    if (marker == null) {
-      await _dao.deleteSnapshotsBefore(todayKey(current));
-      await _dao.setSetting(_backfillV2Fixed, '${current.millisecondsSinceEpoch}');
-    }
-
-    // Existing snapshot dates (we only fill missing days).
-    final existing = await _dao.getSnapshots();
-    final existingDates = existing.map((s) => s.date).toSet();
-
     // Fetch history per holding (in parallel).
     final fillers = <int, _ForwardFiller>{};
     final futures = <Future<void>>[];
@@ -129,47 +115,72 @@ class HistoryBackfillService {
     await Future.wait(futures);
     final coveredHoldings = fillers.length;
 
-    // Walk day by day from the earliest date to yesterday.
+    final needFullRebuild = await _dao.getSetting(_backfillV3Marker) == null;
+    final existingDates = needFullRebuild
+        ? <String>{}
+        : (await _dao.getSnapshots()).map((s) => s.date).toSet();
+
+    // Compute the full window day by day.
     var day = DateTime(earliest.year, earliest.month, earliest.day);
-    var filled = 0;
+    final rows = <SnapshotRow>[];
     while (day.isBefore(todayDate)) {
       final key = todayKey(day);
-      if (!existingDates.contains(key)) {
-        var assets = 0.0;
-        var liabilities = 0.0;
-        var cost = 0.0;
-        var hasPrice = false;
-        for (final h in holdings) {
-          final type = AssetType.fromStorage(h.assetType);
-          final filler = fillers[h.id];
-          final price = filler?.priceOnOrBefore(key) ?? h.latestPrice;
-          if (price > 0) hasPrice = true;
-          final value = h.quantity * price;
-          if (type == AssetType.liability) {
-            liabilities += value;
-          } else {
-            assets += value;
-            cost += h.quantity * h.costPrice;
-          }
+      if (existingDates.contains(key)) {
+        day = day.add(const Duration(days: 1));
+        continue;
+      }
+      var assets = 0.0;
+      var liabilities = 0.0;
+      var cost = 0.0;
+      var hasPrice = false;
+      for (final h in holdings) {
+        final buy = h.purchaseDate ?? h.createdAt;
+        final buyDay = DateTime(buy.year, buy.month, buy.day);
+        // The holding did not exist yet on this day.
+        if (day.isBefore(buyDay)) continue;
+        final type = AssetType.fromStorage(h.assetType);
+        final filler = fillers[h.id];
+        final price = filler?.priceOnOrBefore(key) ?? h.latestPrice;
+        if (price > 0) hasPrice = true;
+        final value = h.quantity * price;
+        if (type == AssetType.liability) {
+          liabilities += value;
+        } else {
+          assets += value;
+          cost += h.quantity * h.costPrice;
         }
-        if (hasPrice) {
-          await _dao.upsertSnapshot(SnapshotsCompanion.insert(
-            date: key,
-            currency: const Value('CNY'),
-            totalValue: assets - liabilities,
-            totalCost: cost,
-          ));
-          filled++;
-        }
+      }
+      if (hasPrice) {
+        rows.add(SnapshotRow(
+          date: key,
+          currency: 'CNY',
+          totalValue: assets - liabilities,
+          totalCost: cost,
+          createdAt: current,
+        ));
       }
       day = day.add(const Duration(days: 1));
     }
 
+    // Swap atomically so the UI never sees an empty/mid-write state.
+    if (rows.isNotEmpty) {
+      await _dao.transaction(() async {
+        if (needFullRebuild) {
+          await _dao.deleteSnapshotsBefore(todayKey(current));
+        }
+        await _dao.batchInsertSnapshots(rows);
+      });
+    }
+    // Mark the rebuild done only after a successful swap.
+    if (needFullRebuild) {
+      await _dao.setSetting(_backfillV3Marker, '${current.millisecondsSinceEpoch}');
+    }
+
     return BackfillResult(
       ok: true,
-      days: filled,
+      days: rows.length,
       holdings: coveredHoldings,
-      message: filled == 0 ? '历史净值已是最新' : '已回填 $filled 天历史净值',
+      message: rows.isEmpty ? '历史净值已是最新' : '已回填 ${rows.length} 天历史净值',
     );
   }
 }

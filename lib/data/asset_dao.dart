@@ -183,6 +183,16 @@ class AssetDao {
     return (_db.delete(_db.snapshots)..where((t) => t.date.isSmallerThanValue(date))).go();
   }
 
+  /// Bulk-inserts snapshots in one transaction (much faster than per-row).
+  Future<void> batchInsertSnapshots(List<SnapshotRow> rows, {bool orReplace = true}) async {
+    await _db.batch((b) {
+      for (final row in rows) {
+        b.insert(_db.snapshots, row,
+            mode: orReplace ? InsertMode.replace : InsertMode.insert);
+      }
+    });
+  }
+
   // ---------------------------------------------------------------------------
   // Settings (key-value app state)
   // ---------------------------------------------------------------------------
