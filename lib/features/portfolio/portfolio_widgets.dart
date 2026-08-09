@@ -604,7 +604,7 @@ class _NetWorthChartState extends ConsumerState<NetWorthChart> {
                       const Padding(
                         padding: EdgeInsets.only(top: 6),
                         child: Text(
-                          '收益率为当前成本口径近似，已剔除转入资金的影响',
+                          '收益率自区间首日归零，与指数同起点对比；已剔除转入资金影响（成本口径近似）',
                           style: TextStyle(fontSize: 11),
                         ),
                       ),
@@ -800,12 +800,15 @@ class _TrendChart extends StatelessWidget {
     // not change with gains/losses (conveyed by the stats figures instead).
     final color = AppColors.up;
     final isRate = view == _TrendView.returnRate;
+    // Normalize the asset series to start at 0% at the range start, so it
+    // shares the same baseline as the normalized index benchmarks.
+    final rateBase = isRate && rates.isNotEmpty ? rates.first : 0.0;
 
     final points = <FlSpot>[];
     var minV = double.infinity;
     var maxV = 0.0;
     for (var i = 0; i < list.length; i++) {
-      final v = isRate ? rates[i] : list[i].totalValue;
+      final v = isRate ? rates[i] - rateBase : list[i].totalValue;
       points.add(FlSpot(i.toDouble(), v));
       if (v < minV) minV = v;
       if (v > maxV) maxV = v;
