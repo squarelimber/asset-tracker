@@ -159,4 +159,31 @@ void main() {
     expect(item.price, 2.1);
     expect(item.marketValue, closeTo(210, 1e-6));
   });
+
+  test('foreign currency holdings are converted into CNY in the total', () async {
+    await addHolding(
+      name: '美元现金', type: AssetType.bankDeposit,
+      quantity: 1000, costPrice: 1000, latestPrice: 1,
+    ).then((id) async {
+      final stmt = db.update(db.holdings)..where((t) => t.id.equals(id));
+      await stmt.write(const HoldingsCompanion(currency: Value('USD')));
+    });
+    await addHolding(
+      name: '人民币现金', type: AssetType.bankDeposit,
+      quantity: 2000, costPrice: 2000, latestPrice: 1,
+    );
+
+    final service = HoldingDetailService(dao, sources: {});
+    final detail = await service.compute(
+      DateTime(2026, 7, 4),
+      cnyRates: {'USD': 7.2},
+    );
+    expect(detail, isNotNull);
+    // Total = 1000*7.2 + 2000 = 9200 CNY (NOT 3000).
+    expect(detail!.totalValue, closeTo(9200, 1e-6));
+    final usd = detail.items.firstWhere((i) => i.holding.name == '美元现金');
+    expect(usd.marketValue, 1000); // own currency kept
+    expect(usd.marketValueCny, closeTo(7200, 1e-6));
+    expect(usd.ratio, closeTo(7200 / 9200, 1e-9));
+  });
 }

@@ -339,7 +339,7 @@ class _DayDetailSheet extends ConsumerWidget {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  '当日总资产 ${Formats.money(d.totalValue)}',
+                  '当日总资产（折算人民币）${Formats.money(d.totalValue)}',
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
                 const SizedBox(height: 12),
@@ -375,7 +375,10 @@ class _DayDetailSheet extends ConsumerWidget {
 }
 
 final _dayDetailProvider = FutureProvider.autoDispose.family<DayDetail?, DateTime>(
-  (ref, day) => ref.watch(holdingDetailServiceProvider).compute(day),
+  (ref, day) async {
+    final rates = await ref.watch(cnyRatesProvider.future);
+    return ref.watch(holdingDetailServiceProvider).compute(day, cnyRates: rates);
+  },
 );class _DetailRow extends StatelessWidget {
   const _DetailRow({required this.item});
 
@@ -404,7 +407,7 @@ final _dayDetailProvider = FutureProvider.autoDispose.family<DayDetail?, DateTim
                 Text(
                   type == AssetType.liability
                       ? '负债'
-                      : '单价 ${Formats.smartNum(item.price)} · 成本 ${Formats.money(item.cost, item.holding.currency)}',
+                      : '单价 ${Formats.smartNum(item.price)} · 成本 ${Formats.money(item.costCny)}',
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
               ],
@@ -413,7 +416,7 @@ final _dayDetailProvider = FutureProvider.autoDispose.family<DayDetail?, DateTim
           Expanded(
             flex: 1,
             child: Text(
-              Formats.money(item.marketValue, item.holding.currency),
+              Formats.money(item.marketValueCny),
               textAlign: TextAlign.end,
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                     fontWeight: FontWeight.w600,

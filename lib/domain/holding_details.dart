@@ -14,25 +14,42 @@ class HoldingDayDetail {
     required this.marketValue,
     required this.cost,
     required this.ratio,
+    this.cnyRate = 1,
   });
 
   final HoldingRow holding;
 
-  /// Unit price on that day (or latest for manual assets).
+  /// Unit price on that day (or latest for manual assets), in the
+  /// holding's own currency.
   final double price;
+
+  /// Market value in the holding's own currency.
   final double marketValue;
 
-  /// Cost basis (current cost semantics: invested for amount-based assets,
-  /// qty x unit cost otherwise).
+  /// Cost basis in the holding's own currency (current cost semantics:
+  /// invested for amount-based assets, qty x unit cost otherwise).
   final double cost;
 
   /// Share of total assets (0..1); liabilities are excluded from the base.
   final double ratio;
 
+  /// CNY per unit of the holding's currency (1 for CNY).
+  final double cnyRate;
+
   double get profit => marketValue - cost;
+
+  /// Market value converted to CNY.
+  double get marketValueCny => marketValue * cnyRate;
+
+  /// Cost converted to CNY.
+  double get costCny => cost * cnyRate;
+
+  double get profitCny => marketValueCny - costCny;
 }
 
 /// Full detail of one day: total value plus per-holding breakdown.
+/// [totalValue] is in CNY (converted); per-item values stay in the
+/// holding's own currency with [cnyRate] available for conversion.
 class DayDetail {
   const DayDetail({
     required this.date,
@@ -62,10 +79,22 @@ class HoldingDetailService {
 
   final Map<String, DayDetail> _cache = {};
 
-  Future<DayDetail?> compute(DateTime day) async {
+  /// Computes the day's per-holding breakdown.
+  /// [cnyRates] maps ISO currency code -> CNY per unit (default 1); the
+  /// total value is converted to CNY while per-item values keep their own
+  /// currency (with [HoldingDayDetail.cnyRate] for display conversion).
+  Future<DayDetail?> compute(
+    DateTime day, {
+    Map<String, double> cnyRates = const {},
+  }) async {
     final key = todayKey(day);
     final cached = _cache[key];
     if (cached != null) return cached;
+
+    double rateOf(String currency) {
+      final rate = cnyRates[currency.toUpperCase()];
+      return (rate == null || rate <= 0) ? 1 : rate;
+    }
 
     final holdings = await _dao.getHoldings();
     if (holdings.isEmpty) return null;
@@ -105,8 +134,8 @@ class HoldingDetailService {
     }
     await Future.wait(futures);
 
-    var assets = 0.0;
-    var liabilities = 0.0;
+    var assetsCny = 0.0;
+    var liabilitiesCny = 0.0;
     final rawItems = <HoldingDayDetail>[];
     for (final h in holdings) {
       final type = AssetType.fromStorage(h.assetType);
@@ -117,21 +146,23 @@ class HoldingDetailService {
 
       final lookup = lookups[h.id];
       final price = lookup?.priceOnOrBefore(key) ?? h.latestPrice;
+      final rate = rateOf(h.currency);
       final value = h.quantity * price;
       final cost = type.isAmountBased
           ? (h.costPrice > 0 ? h.costPrice : h.quantity)
           : h.quantity * h.costPrice;
 
       if (type == AssetType.liability) {
-        liabilities += value;
+        liabilitiesCny += value * rate;
       } else {
-        assets += value;
+        assetsCny += value * rate;
       }
       rawItems.add(HoldingDayDetail(
         holding: h,
         price: price,
         marketValue: value,
         cost: cost,
+        cnyRate: rate,
         ratio: 0,
       ));
     }
@@ -144,7 +175,8 @@ class HoldingDetailService {
             price: it.price,
             marketValue: it.marketValue,
             cost: it.cost,
-            ratio: assets == 0 ? 0 : it.marketValue / assets,
+            cnyRate: it.cnyRate,
+            ratio: assetsCny == 0 ? 0 : it.marketValueCny / assetsCny,
           )
         else
           it,
@@ -153,7 +185,7 @@ class HoldingDetailService {
 
     final detail = DayDetail(
       date: key,
-      totalValue: assets - liabilities,
+      totalValue: assetsCny - liabilitiesCny,
       items: items,
     );
     _cache[key] = detail;
