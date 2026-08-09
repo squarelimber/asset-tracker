@@ -216,17 +216,17 @@ class _NetWorthChartState extends ConsumerState<NetWorthChart> {
                         textBaseline: TextBaseline.alphabetic,
                         children: [
                           Text(
-                            '${stats.change >= 0 ? '+' : ''}${Formats.money(stats.change)}',
+                            '${stats.profit >= 0 ? '+' : ''}${Formats.money(stats.profit)}',
                             style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                                  color: context.changeColor(stats.change),
+                                  color: context.changeColor(stats.profit),
                                   fontWeight: FontWeight.w700,
                                 ),
                           ),
                           const SizedBox(width: 10),
                           Text(
-                            '${stats.changePct >= 0 ? '+' : ''}${Formats.pct(stats.changePct)}',
+                            '${stats.profitPct >= 0 ? '+' : ''}${Formats.pct(stats.profitPct)}',
                             style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                                  color: context.changeColor(stats.change),
+                                  color: context.changeColor(stats.profit),
                                   fontWeight: FontWeight.w600,
                                 ),
                           ),
@@ -242,7 +242,7 @@ class _NetWorthChartState extends ConsumerState<NetWorthChart> {
                     ],
                     _TrendChart(
                       list: list,
-                      up: stats == null || stats.change >= 0,
+                      up: stats == null || stats.profit >= 0,
                     ),
                   ],
                 );

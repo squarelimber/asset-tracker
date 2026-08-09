@@ -26,25 +26,43 @@ enum RangeOption {
 }
 
 /// Stats for a selected snapshot range.
+///
+/// The range profit is measured as the change in `market value - cost`
+/// between the first and last snapshot. This is unaffected by new money
+/// flowing in during the range (adding 1 yuan raises both value and cost),
+/// so it reflects actual gains instead of the net worth growth.
 class RangeStats {
   const RangeStats({
     required this.startValue,
     required this.endValue,
+    required this.startCost,
+    required this.endCost,
     required this.days,
   });
 
   final double startValue;
   final double endValue;
+  final double startCost;
+  final double endCost;
   final int days;
 
-  double get change => endValue - startValue;
-  double get changePct => startValue == 0 ? 0 : change / startValue;
+  /// Profit at range start (market value - cost).
+  double get startProfit => startValue - startCost;
+
+  /// Profit at range end (market value - cost).
+  double get endProfit => endValue - endCost;
+
+  /// Gain realized over the range, independent of new investments.
+  double get profit => endProfit - startProfit;
+
+  /// Return relative to the capital at range start.
+  double get profitPct => startCost == 0 ? 0 : profit / startCost;
 
   /// Annualized return over the range, null when not computable.
   double? get annualized {
-    if (days <= 0 || changePct <= -1) return null;
+    if (days <= 0 || profitPct <= -1) return null;
     final years = days / 365.0;
-    return pow(1 + changePct, 1 / years) - 1;
+    return pow(1 + profitPct, 1 / years) - 1;
   }
 }
 
@@ -56,14 +74,20 @@ class RangeStatsCalculator {
 
   RangeStats? compute(List<SnapshotRow> snapshots) {
     if (snapshots.length < 2) return null;
-    final start = snapshots.first.totalValue;
-    final end = snapshots.last.totalValue;
-    final first = DateTime.tryParse(snapshots.first.date);
-    final last = DateTime.tryParse(snapshots.last.date);
-    final days = (first != null && last != null)
-        ? last.difference(first).inDays
+    final first = snapshots.first;
+    final last = snapshots.last;
+    final firstDate = DateTime.tryParse(first.date);
+    final lastDate = DateTime.tryParse(last.date);
+    final days = (firstDate != null && lastDate != null)
+        ? lastDate.difference(firstDate).inDays
         : snapshots.length;
-    return RangeStats(startValue: start, endValue: end, days: days);
+    return RangeStats(
+      startValue: first.totalValue,
+      endValue: last.totalValue,
+      startCost: first.totalCost,
+      endCost: last.totalCost,
+      days: days,
+    );
   }
 
   /// Filters snapshots to [from]..[to] (dates are yyyy-MM-dd strings).
