@@ -131,6 +131,21 @@ class AssetDao {
   Future<int> createTransaction(TransactionsCompanion entry) =>
       _db.into(_db.transactions).insert(entry);
 
+  Future<TransactionRow?> getTransaction(int id) {
+    return (_db.select(_db.transactions)..where((t) => t.id.equals(id)))
+        .getSingleOrNull();
+  }
+
+  /// Whether another transaction exists for the same holding with a newer
+  /// entry order (larger id) — used for chronological reversal checks.
+  Future<bool> hasNewerTransaction(int holdingId, int id) async {
+    final rows = await (_db.select(_db.transactions)
+          ..where((t) => t.holdingId.equals(holdingId) & t.id.isBiggerThanValue(id))
+          ..limit(1))
+        .get();
+    return rows.isNotEmpty;
+  }
+
   Future<int> deleteTransaction(int id) =>
       (_db.delete(_db.transactions)..where((t) => t.id.equals(id))).go();
 

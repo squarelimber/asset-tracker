@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../data/asset_dao.dart';
 import '../data/database.dart';
+import '../domain/transaction_service.dart';
 import '../services/history_backfill_service.dart';
 import '../services/market/market_service.dart';
 
@@ -10,6 +11,11 @@ final databaseProvider = Provider<AppDatabase>((ref) => AppDatabase());
 
 /// Data access layer.
 final daoProvider = Provider<AssetDao>((ref) => AssetDao(ref.watch(databaseProvider)));
+
+/// Transaction recording / linkage engine.
+final transactionServiceProvider = Provider<TransactionService>(
+  (ref) => TransactionService(ref.watch(daoProvider)),
+);
 
 /// Market data orchestration engine.
 final marketServiceProvider = Provider<MarketService>(

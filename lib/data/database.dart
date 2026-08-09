@@ -21,7 +21,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase([QueryExecutor? executor]) : super(executor ?? _openConnection());
 
   @override
-  int get schemaVersion => 3;
+  int get schemaVersion => 4;
 
   static QueryExecutor _openConnection() {
     return driftDatabase(name: 'asset_tracker');
@@ -45,6 +45,12 @@ class AppDatabase extends _$AppDatabase {
           if (from < 3) {
             final db = m.database as AppDatabase;
             await m.createTable(db.settings);
+          }
+          // v3 -> v4: add cash linkage columns to transactions.
+          if (from < 4) {
+            final db = m.database as AppDatabase;
+            await m.addColumn(db.transactions, db.transactions.cashSourceId);
+            await m.addColumn(db.transactions, db.transactions.cashTargetId);
           }
         },
       );

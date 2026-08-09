@@ -38,6 +38,8 @@ class Transactions extends Table {
   IntColumn get id => integer().autoIncrement()();
   IntColumn get accountId => integer().references(Accounts, #id)();
   IntColumn get holdingId => integer().nullable().references(Holdings, #id)();
+  IntColumn get cashSourceId => integer().nullable().references(Holdings, #id)();
+  IntColumn get cashTargetId => integer().nullable().references(Holdings, #id)();
   TextColumn get type => text()();
   RealColumn get quantity => real().nullable()();
   RealColumn get price => real().nullable()();

@@ -8,6 +8,7 @@ import '../../core/enums.dart';
 import '../../core/formats.dart';
 import '../../core/responsive.dart';
 import '../../data/database.dart';
+import '../transactions/transaction_dialogs.dart';
 import 'invested_profit_field.dart';
 import 'purchase_date_field.dart';
 
@@ -742,7 +743,22 @@ class _HoldingDetailSheet extends ConsumerWidget {
       controller: scrollController,
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 32),
       children: [
-        Text(holding.name, style: Theme.of(context).textTheme.headlineSmall),
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                holding.name,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.headlineSmall,
+              ),
+            ),
+            FilledButton.tonalIcon(
+              onPressed: () => showHoldingTransactionDialog(context, ref, holding),
+              icon: const Icon(Icons.edit_note, size: 18),
+              label: const Text('记一笔'),
+            ),
+          ],
+        ),
         const SizedBox(height: 16),
         Card(
           child: Padding(
@@ -788,7 +804,7 @@ class _HoldingDetailSheet extends ConsumerWidget {
               : Column(
                   children: [
                     for (final t in list) ...[
-                      _TransactionTile(txn: t),
+                      _TransactionTile(txn: t, costPrice: holding.costPrice),
                       const SizedBox(height: 4),
                     ],
                   ],
@@ -834,34 +850,85 @@ class _InfoRow extends StatelessWidget {
   }
 }
 
-class _TransactionTile extends StatelessWidget {
-  const _TransactionTile({required this.txn});
+class _TransactionTile extends ConsumerWidget {
+  const _TransactionTile({required this.txn, this.costPrice});
 
   final TransactionRow txn;
+  final double? costPrice;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final type = TransactionType.fromStorage(txn.type);
     final isIn = type == TransactionType.buy ||
         type == TransactionType.transferIn ||
         type == TransactionType.income ||
         type == TransactionType.dividend;
+    final realized = type == TransactionType.sell &&
+            costPrice != null &&
+            txn.quantity != null
+        ? (txn.price! - costPrice!) * txn.quantity!
+        : null;
     return Card(
       child: ListTile(
         dense: true,
         leading: Icon(type.icon, size: 20, color: context.changeColor(isIn ? 1 : -1)),
         title: Text(type.label),
-        subtitle: Text(Formats.dateTime(txn.occurredAt.toLocal())),
-        trailing: SizedBox(
-          width: 110,
-          child: Text(
-            '${isIn ? '+' : '-'}${Formats.money(txn.amount, txn.currency)}',
-            textAlign: TextAlign.end,
-            style: TextStyle(
-              color: context.changeColor(isIn ? 1 : -1),
-              fontWeight: FontWeight.w600,
+        subtitle: Text(
+          realized == null
+              ? Formats.dateTime(txn.occurredAt.toLocal())
+              : '${Formats.dateTime(txn.occurredAt.toLocal())} · 落袋 '
+                  '${realized >= 0 ? '+' : ''}${Formats.money(realized, txn.currency)}',
+        ),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SizedBox(
+              width: 110,
+              child: Text(
+                '${isIn ? '+' : '-'}${Formats.money(txn.amount, txn.currency)}',
+                textAlign: TextAlign.end,
+                style: TextStyle(
+                  color: context.changeColor(isIn ? 1 : -1),
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
             ),
-          ),
+            IconButton(
+              visualDensity: VisualDensity.compact,
+              icon: const Icon(Icons.delete_outline, size: 18),
+              tooltip: '删除流水（自动回滚持仓）',
+              onPressed: () async {
+                final ok = await showDialog<bool>(
+                  context: context,
+                  builder: (context) => AlertDialog(
+                    title: const Text('删除流水'),
+                    content: const Text('删除后持仓会自动回滚到该笔交易前的状态。'),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(context, false),
+                        child: const Text('取消'),
+                      ),
+                      FilledButton(
+                        style: FilledButton.styleFrom(backgroundColor: AppColors.up),
+                        onPressed: () => Navigator.pop(context, true),
+                        child: const Text('删除'),
+                      ),
+                    ],
+                  ),
+                );
+                if (ok != true || !context.mounted) return;
+                final result =
+                    await ref.read(transactionServiceProvider).remove(txn.id);
+                if (!context.mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(result.ok ? '已删除并回滚' : (result.message ?? '删除失败')),
+                    backgroundColor: result.ok ? null : AppColors.up,
+                  ),
+                );
+              },
+            ),
+          ],
         ),
       ),
     );

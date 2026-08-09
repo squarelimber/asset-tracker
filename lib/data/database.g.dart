@@ -1235,6 +1235,34 @@ class $TransactionsTable extends Transactions
       'REFERENCES holdings (id)',
     ),
   );
+  static const VerificationMeta _cashSourceIdMeta = const VerificationMeta(
+    'cashSourceId',
+  );
+  @override
+  late final GeneratedColumn<int> cashSourceId = GeneratedColumn<int>(
+    'cash_source_id',
+    aliasedName,
+    true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'REFERENCES holdings (id)',
+    ),
+  );
+  static const VerificationMeta _cashTargetIdMeta = const VerificationMeta(
+    'cashTargetId',
+  );
+  @override
+  late final GeneratedColumn<int> cashTargetId = GeneratedColumn<int>(
+    'cash_target_id',
+    aliasedName,
+    true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'REFERENCES holdings (id)',
+    ),
+  );
   static const VerificationMeta _typeMeta = const VerificationMeta('type');
   @override
   late final GeneratedColumn<String> type = GeneratedColumn<String>(
@@ -1310,6 +1338,8 @@ class $TransactionsTable extends Transactions
     id,
     accountId,
     holdingId,
+    cashSourceId,
+    cashTargetId,
     type,
     quantity,
     price,
@@ -1345,6 +1375,24 @@ class $TransactionsTable extends Transactions
       context.handle(
         _holdingIdMeta,
         holdingId.isAcceptableOrUnknown(data['holding_id']!, _holdingIdMeta),
+      );
+    }
+    if (data.containsKey('cash_source_id')) {
+      context.handle(
+        _cashSourceIdMeta,
+        cashSourceId.isAcceptableOrUnknown(
+          data['cash_source_id']!,
+          _cashSourceIdMeta,
+        ),
+      );
+    }
+    if (data.containsKey('cash_target_id')) {
+      context.handle(
+        _cashTargetIdMeta,
+        cashTargetId.isAcceptableOrUnknown(
+          data['cash_target_id']!,
+          _cashTargetIdMeta,
+        ),
       );
     }
     if (data.containsKey('type')) {
@@ -1420,6 +1468,14 @@ class $TransactionsTable extends Transactions
         DriftSqlType.int,
         data['${effectivePrefix}holding_id'],
       ),
+      cashSourceId: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}cash_source_id'],
+      ),
+      cashTargetId: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}cash_target_id'],
+      ),
       type: attachedDatabase.typeMapping.read(
         DriftSqlType.string,
         data['${effectivePrefix}type'],
@@ -1461,6 +1517,8 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
   final int id;
   final int accountId;
   final int? holdingId;
+  final int? cashSourceId;
+  final int? cashTargetId;
   final String type;
   final double? quantity;
   final double? price;
@@ -1472,6 +1530,8 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
     required this.id,
     required this.accountId,
     this.holdingId,
+    this.cashSourceId,
+    this.cashTargetId,
     required this.type,
     this.quantity,
     this.price,
@@ -1487,6 +1547,12 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
     map['account_id'] = Variable<int>(accountId);
     if (!nullToAbsent || holdingId != null) {
       map['holding_id'] = Variable<int>(holdingId);
+    }
+    if (!nullToAbsent || cashSourceId != null) {
+      map['cash_source_id'] = Variable<int>(cashSourceId);
+    }
+    if (!nullToAbsent || cashTargetId != null) {
+      map['cash_target_id'] = Variable<int>(cashTargetId);
     }
     map['type'] = Variable<String>(type);
     if (!nullToAbsent || quantity != null) {
@@ -1511,6 +1577,12 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
       holdingId: holdingId == null && nullToAbsent
           ? const Value.absent()
           : Value(holdingId),
+      cashSourceId: cashSourceId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(cashSourceId),
+      cashTargetId: cashTargetId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(cashTargetId),
       type: Value(type),
       quantity: quantity == null && nullToAbsent
           ? const Value.absent()
@@ -1534,6 +1606,8 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
       id: serializer.fromJson<int>(json['id']),
       accountId: serializer.fromJson<int>(json['accountId']),
       holdingId: serializer.fromJson<int?>(json['holdingId']),
+      cashSourceId: serializer.fromJson<int?>(json['cashSourceId']),
+      cashTargetId: serializer.fromJson<int?>(json['cashTargetId']),
       type: serializer.fromJson<String>(json['type']),
       quantity: serializer.fromJson<double?>(json['quantity']),
       price: serializer.fromJson<double?>(json['price']),
@@ -1550,6 +1624,8 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
       'id': serializer.toJson<int>(id),
       'accountId': serializer.toJson<int>(accountId),
       'holdingId': serializer.toJson<int?>(holdingId),
+      'cashSourceId': serializer.toJson<int?>(cashSourceId),
+      'cashTargetId': serializer.toJson<int?>(cashTargetId),
       'type': serializer.toJson<String>(type),
       'quantity': serializer.toJson<double?>(quantity),
       'price': serializer.toJson<double?>(price),
@@ -1564,6 +1640,8 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
     int? id,
     int? accountId,
     Value<int?> holdingId = const Value.absent(),
+    Value<int?> cashSourceId = const Value.absent(),
+    Value<int?> cashTargetId = const Value.absent(),
     String? type,
     Value<double?> quantity = const Value.absent(),
     Value<double?> price = const Value.absent(),
@@ -1575,6 +1653,8 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
     id: id ?? this.id,
     accountId: accountId ?? this.accountId,
     holdingId: holdingId.present ? holdingId.value : this.holdingId,
+    cashSourceId: cashSourceId.present ? cashSourceId.value : this.cashSourceId,
+    cashTargetId: cashTargetId.present ? cashTargetId.value : this.cashTargetId,
     type: type ?? this.type,
     quantity: quantity.present ? quantity.value : this.quantity,
     price: price.present ? price.value : this.price,
@@ -1588,6 +1668,12 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
       id: data.id.present ? data.id.value : this.id,
       accountId: data.accountId.present ? data.accountId.value : this.accountId,
       holdingId: data.holdingId.present ? data.holdingId.value : this.holdingId,
+      cashSourceId: data.cashSourceId.present
+          ? data.cashSourceId.value
+          : this.cashSourceId,
+      cashTargetId: data.cashTargetId.present
+          ? data.cashTargetId.value
+          : this.cashTargetId,
       type: data.type.present ? data.type.value : this.type,
       quantity: data.quantity.present ? data.quantity.value : this.quantity,
       price: data.price.present ? data.price.value : this.price,
@@ -1606,6 +1692,8 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
           ..write('id: $id, ')
           ..write('accountId: $accountId, ')
           ..write('holdingId: $holdingId, ')
+          ..write('cashSourceId: $cashSourceId, ')
+          ..write('cashTargetId: $cashTargetId, ')
           ..write('type: $type, ')
           ..write('quantity: $quantity, ')
           ..write('price: $price, ')
@@ -1622,6 +1710,8 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
     id,
     accountId,
     holdingId,
+    cashSourceId,
+    cashTargetId,
     type,
     quantity,
     price,
@@ -1637,6 +1727,8 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
           other.id == this.id &&
           other.accountId == this.accountId &&
           other.holdingId == this.holdingId &&
+          other.cashSourceId == this.cashSourceId &&
+          other.cashTargetId == this.cashTargetId &&
           other.type == this.type &&
           other.quantity == this.quantity &&
           other.price == this.price &&
@@ -1650,6 +1742,8 @@ class TransactionsCompanion extends UpdateCompanion<TransactionRow> {
   final Value<int> id;
   final Value<int> accountId;
   final Value<int?> holdingId;
+  final Value<int?> cashSourceId;
+  final Value<int?> cashTargetId;
   final Value<String> type;
   final Value<double?> quantity;
   final Value<double?> price;
@@ -1661,6 +1755,8 @@ class TransactionsCompanion extends UpdateCompanion<TransactionRow> {
     this.id = const Value.absent(),
     this.accountId = const Value.absent(),
     this.holdingId = const Value.absent(),
+    this.cashSourceId = const Value.absent(),
+    this.cashTargetId = const Value.absent(),
     this.type = const Value.absent(),
     this.quantity = const Value.absent(),
     this.price = const Value.absent(),
@@ -1673,6 +1769,8 @@ class TransactionsCompanion extends UpdateCompanion<TransactionRow> {
     this.id = const Value.absent(),
     required int accountId,
     this.holdingId = const Value.absent(),
+    this.cashSourceId = const Value.absent(),
+    this.cashTargetId = const Value.absent(),
     required String type,
     this.quantity = const Value.absent(),
     this.price = const Value.absent(),
@@ -1688,6 +1786,8 @@ class TransactionsCompanion extends UpdateCompanion<TransactionRow> {
     Expression<int>? id,
     Expression<int>? accountId,
     Expression<int>? holdingId,
+    Expression<int>? cashSourceId,
+    Expression<int>? cashTargetId,
     Expression<String>? type,
     Expression<double>? quantity,
     Expression<double>? price,
@@ -1700,6 +1800,8 @@ class TransactionsCompanion extends UpdateCompanion<TransactionRow> {
       if (id != null) 'id': id,
       if (accountId != null) 'account_id': accountId,
       if (holdingId != null) 'holding_id': holdingId,
+      if (cashSourceId != null) 'cash_source_id': cashSourceId,
+      if (cashTargetId != null) 'cash_target_id': cashTargetId,
       if (type != null) 'type': type,
       if (quantity != null) 'quantity': quantity,
       if (price != null) 'price': price,
@@ -1714,6 +1816,8 @@ class TransactionsCompanion extends UpdateCompanion<TransactionRow> {
     Value<int>? id,
     Value<int>? accountId,
     Value<int?>? holdingId,
+    Value<int?>? cashSourceId,
+    Value<int?>? cashTargetId,
     Value<String>? type,
     Value<double?>? quantity,
     Value<double?>? price,
@@ -1726,6 +1830,8 @@ class TransactionsCompanion extends UpdateCompanion<TransactionRow> {
       id: id ?? this.id,
       accountId: accountId ?? this.accountId,
       holdingId: holdingId ?? this.holdingId,
+      cashSourceId: cashSourceId ?? this.cashSourceId,
+      cashTargetId: cashTargetId ?? this.cashTargetId,
       type: type ?? this.type,
       quantity: quantity ?? this.quantity,
       price: price ?? this.price,
@@ -1747,6 +1853,12 @@ class TransactionsCompanion extends UpdateCompanion<TransactionRow> {
     }
     if (holdingId.present) {
       map['holding_id'] = Variable<int>(holdingId.value);
+    }
+    if (cashSourceId.present) {
+      map['cash_source_id'] = Variable<int>(cashSourceId.value);
+    }
+    if (cashTargetId.present) {
+      map['cash_target_id'] = Variable<int>(cashTargetId.value);
     }
     if (type.present) {
       map['type'] = Variable<String>(type.value);
@@ -1778,6 +1890,8 @@ class TransactionsCompanion extends UpdateCompanion<TransactionRow> {
           ..write('id: $id, ')
           ..write('accountId: $accountId, ')
           ..write('holdingId: $holdingId, ')
+          ..write('cashSourceId: $cashSourceId, ')
+          ..write('cashTargetId: $cashTargetId, ')
           ..write('type: $type, ')
           ..write('quantity: $quantity, ')
           ..write('price: $price, ')
@@ -4147,24 +4261,6 @@ final class $$HoldingsTableReferences
       manager.$state.copyWith(prefetchedData: [item]),
     );
   }
-
-  static MultiTypedResultKey<$TransactionsTable, List<TransactionRow>>
-  _transactionsRefsTable(_$AppDatabase db) => MultiTypedResultKey.fromTable(
-    db.transactions,
-    aliasName: 'holdings__id__transactions__holding_id',
-  );
-
-  $$TransactionsTableProcessedTableManager get transactionsRefs {
-    final manager = $$TransactionsTableTableManager(
-      $_db,
-      $_db.transactions,
-    ).filter((f) => f.holdingId.id.sqlEquals($_itemColumn<int>('id')!));
-
-    final cache = $_typedResult.readTableOrNull(_transactionsRefsTable($_db));
-    return ProcessedTableManager(
-      manager.$state.copyWith(prefetchedData: cache),
-    );
-  }
 }
 
 class $$HoldingsTableFilterComposer
@@ -4262,31 +4358,6 @@ class $$HoldingsTableFilterComposer
           ),
     );
     return composer;
-  }
-
-  Expression<bool> transactionsRefs(
-    Expression<bool> Function($$TransactionsTableFilterComposer f) f,
-  ) {
-    final $$TransactionsTableFilterComposer composer = $composerBuilder(
-      composer: this,
-      getCurrentColumn: (t) => t.id,
-      referencedTable: $db.transactions,
-      getReferencedColumn: (t) => t.holdingId,
-      builder:
-          (
-            joinBuilder, {
-            $addJoinBuilderToRootComposer,
-            $removeJoinBuilderFromRootComposer,
-          }) => $$TransactionsTableFilterComposer(
-            $db: $db,
-            $table: $db.transactions,
-            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
-            joinBuilder: joinBuilder,
-            $removeJoinBuilderFromRootComposer:
-                $removeJoinBuilderFromRootComposer,
-          ),
-    );
-    return f(composer);
   }
 }
 
@@ -4464,31 +4535,6 @@ class $$HoldingsTableAnnotationComposer
     );
     return composer;
   }
-
-  Expression<T> transactionsRefs<T extends Object>(
-    Expression<T> Function($$TransactionsTableAnnotationComposer a) f,
-  ) {
-    final $$TransactionsTableAnnotationComposer composer = $composerBuilder(
-      composer: this,
-      getCurrentColumn: (t) => t.id,
-      referencedTable: $db.transactions,
-      getReferencedColumn: (t) => t.holdingId,
-      builder:
-          (
-            joinBuilder, {
-            $addJoinBuilderToRootComposer,
-            $removeJoinBuilderFromRootComposer,
-          }) => $$TransactionsTableAnnotationComposer(
-            $db: $db,
-            $table: $db.transactions,
-            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
-            joinBuilder: joinBuilder,
-            $removeJoinBuilderFromRootComposer:
-                $removeJoinBuilderFromRootComposer,
-          ),
-    );
-    return f(composer);
-  }
 }
 
 class $$HoldingsTableTableManager
@@ -4504,7 +4550,7 @@ class $$HoldingsTableTableManager
           $$HoldingsTableUpdateCompanionBuilder,
           (HoldingRow, $$HoldingsTableReferences),
           HoldingRow,
-          PrefetchHooks Function({bool accountId, bool transactionsRefs})
+          PrefetchHooks Function({bool accountId})
         > {
   $$HoldingsTableTableManager(_$AppDatabase db, $HoldingsTable table)
     : super(
@@ -4589,72 +4635,47 @@ class $$HoldingsTableTableManager
                 ),
               )
               .toList(),
-          prefetchHooksCallback:
-              ({accountId = false, transactionsRefs = false}) {
-                return PrefetchHooks(
-                  db: db,
-                  explicitlyWatchedTables: [
-                    if (transactionsRefs) db.transactions,
-                  ],
-                  addJoins:
-                      <
-                        T extends TableManagerState<
-                          dynamic,
-                          dynamic,
-                          dynamic,
-                          dynamic,
-                          dynamic,
-                          dynamic,
-                          dynamic,
-                          dynamic,
-                          dynamic,
-                          dynamic,
-                          dynamic
-                        >
-                      >(state) {
-                        if (accountId) {
-                          state =
-                              state.withJoin(
-                                    currentTable: table,
-                                    currentColumn: table.accountId,
-                                    referencedTable: $$HoldingsTableReferences
-                                        ._accountIdTable(db),
-                                    referencedColumn: $$HoldingsTableReferences
-                                        ._accountIdTable(db)
-                                        .id,
-                                  )
-                                  as T;
-                        }
+          prefetchHooksCallback: ({accountId = false}) {
+            return PrefetchHooks(
+              db: db,
+              explicitlyWatchedTables: [],
+              addJoins:
+                  <
+                    T extends TableManagerState<
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic
+                    >
+                  >(state) {
+                    if (accountId) {
+                      state =
+                          state.withJoin(
+                                currentTable: table,
+                                currentColumn: table.accountId,
+                                referencedTable: $$HoldingsTableReferences
+                                    ._accountIdTable(db),
+                                referencedColumn: $$HoldingsTableReferences
+                                    ._accountIdTable(db)
+                                    .id,
+                              )
+                              as T;
+                    }
 
-                        return state;
-                      },
-                  getPrefetchedDataCallback: (items) async {
-                    return [
-                      if (transactionsRefs)
-                        await $_getPrefetchedData<
-                          HoldingRow,
-                          $HoldingsTable,
-                          TransactionRow
-                        >(
-                          currentTable: table,
-                          referencedTable: $$HoldingsTableReferences
-                              ._transactionsRefsTable(db),
-                          managerFromTypedResult: (p0) =>
-                              $$HoldingsTableReferences(
-                                db,
-                                table,
-                                p0,
-                              ).transactionsRefs,
-                          referencedItemsForCurrentItem:
-                              (item, referencedItems) => referencedItems.where(
-                                (e) => e.holdingId == item.id,
-                              ),
-                          typedResults: items,
-                        ),
-                    ];
+                    return state;
                   },
-                );
+              getPrefetchedDataCallback: (items) async {
+                return [];
               },
+            );
+          },
         ),
       );
 }
@@ -4671,13 +4692,15 @@ typedef $$HoldingsTableProcessedTableManager =
       $$HoldingsTableUpdateCompanionBuilder,
       (HoldingRow, $$HoldingsTableReferences),
       HoldingRow,
-      PrefetchHooks Function({bool accountId, bool transactionsRefs})
+      PrefetchHooks Function({bool accountId})
     >;
 typedef $$TransactionsTableCreateCompanionBuilder =
     TransactionsCompanion Function({
       Value<int> id,
       required int accountId,
       Value<int?> holdingId,
+      Value<int?> cashSourceId,
+      Value<int?> cashTargetId,
       required String type,
       Value<double?> quantity,
       Value<double?> price,
@@ -4691,6 +4714,8 @@ typedef $$TransactionsTableUpdateCompanionBuilder =
       Value<int> id,
       Value<int> accountId,
       Value<int?> holdingId,
+      Value<int?> cashSourceId,
+      Value<int?> cashTargetId,
       Value<String> type,
       Value<double?> quantity,
       Value<double?> price,
@@ -4732,6 +4757,40 @@ final class $$TransactionsTableReferences
       $_db.holdings,
     ).filter((f) => f.id.sqlEquals($_column));
     final item = $_typedResult.readTableOrNull(_holdingIdTable($_db));
+    if (item == null) return manager;
+    return ProcessedTableManager(
+      manager.$state.copyWith(prefetchedData: [item]),
+    );
+  }
+
+  static $HoldingsTable _cashSourceIdTable(_$AppDatabase db) =>
+      db.holdings.createAlias('transactions__cash_source_id__holdings__id');
+
+  $$HoldingsTableProcessedTableManager? get cashSourceId {
+    final $_column = $_itemColumn<int>('cash_source_id');
+    if ($_column == null) return null;
+    final manager = $$HoldingsTableTableManager(
+      $_db,
+      $_db.holdings,
+    ).filter((f) => f.id.sqlEquals($_column));
+    final item = $_typedResult.readTableOrNull(_cashSourceIdTable($_db));
+    if (item == null) return manager;
+    return ProcessedTableManager(
+      manager.$state.copyWith(prefetchedData: [item]),
+    );
+  }
+
+  static $HoldingsTable _cashTargetIdTable(_$AppDatabase db) =>
+      db.holdings.createAlias('transactions__cash_target_id__holdings__id');
+
+  $$HoldingsTableProcessedTableManager? get cashTargetId {
+    final $_column = $_itemColumn<int>('cash_target_id');
+    if ($_column == null) return null;
+    final manager = $$HoldingsTableTableManager(
+      $_db,
+      $_db.holdings,
+    ).filter((f) => f.id.sqlEquals($_column));
+    final item = $_typedResult.readTableOrNull(_cashTargetIdTable($_db));
     if (item == null) return manager;
     return ProcessedTableManager(
       manager.$state.copyWith(prefetchedData: [item]),
@@ -4815,6 +4874,52 @@ class $$TransactionsTableFilterComposer
     final $$HoldingsTableFilterComposer composer = $composerBuilder(
       composer: this,
       getCurrentColumn: (t) => t.holdingId,
+      referencedTable: $db.holdings,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$HoldingsTableFilterComposer(
+            $db: $db,
+            $table: $db.holdings,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+
+  $$HoldingsTableFilterComposer get cashSourceId {
+    final $$HoldingsTableFilterComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.cashSourceId,
+      referencedTable: $db.holdings,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$HoldingsTableFilterComposer(
+            $db: $db,
+            $table: $db.holdings,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+
+  $$HoldingsTableFilterComposer get cashTargetId {
+    final $$HoldingsTableFilterComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.cashTargetId,
       referencedTable: $db.holdings,
       getReferencedColumn: (t) => t.id,
       builder:
@@ -4929,6 +5034,52 @@ class $$TransactionsTableOrderingComposer
     );
     return composer;
   }
+
+  $$HoldingsTableOrderingComposer get cashSourceId {
+    final $$HoldingsTableOrderingComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.cashSourceId,
+      referencedTable: $db.holdings,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$HoldingsTableOrderingComposer(
+            $db: $db,
+            $table: $db.holdings,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+
+  $$HoldingsTableOrderingComposer get cashTargetId {
+    final $$HoldingsTableOrderingComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.cashTargetId,
+      referencedTable: $db.holdings,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$HoldingsTableOrderingComposer(
+            $db: $db,
+            $table: $db.holdings,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
 }
 
 class $$TransactionsTableAnnotationComposer
@@ -5011,6 +5162,52 @@ class $$TransactionsTableAnnotationComposer
     );
     return composer;
   }
+
+  $$HoldingsTableAnnotationComposer get cashSourceId {
+    final $$HoldingsTableAnnotationComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.cashSourceId,
+      referencedTable: $db.holdings,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$HoldingsTableAnnotationComposer(
+            $db: $db,
+            $table: $db.holdings,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+
+  $$HoldingsTableAnnotationComposer get cashTargetId {
+    final $$HoldingsTableAnnotationComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.cashTargetId,
+      referencedTable: $db.holdings,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$HoldingsTableAnnotationComposer(
+            $db: $db,
+            $table: $db.holdings,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
 }
 
 class $$TransactionsTableTableManager
@@ -5026,7 +5223,12 @@ class $$TransactionsTableTableManager
           $$TransactionsTableUpdateCompanionBuilder,
           (TransactionRow, $$TransactionsTableReferences),
           TransactionRow,
-          PrefetchHooks Function({bool accountId, bool holdingId})
+          PrefetchHooks Function({
+            bool accountId,
+            bool holdingId,
+            bool cashSourceId,
+            bool cashTargetId,
+          })
         > {
   $$TransactionsTableTableManager(_$AppDatabase db, $TransactionsTable table)
     : super(
@@ -5044,6 +5246,8 @@ class $$TransactionsTableTableManager
                 Value<int> id = const Value.absent(),
                 Value<int> accountId = const Value.absent(),
                 Value<int?> holdingId = const Value.absent(),
+                Value<int?> cashSourceId = const Value.absent(),
+                Value<int?> cashTargetId = const Value.absent(),
                 Value<String> type = const Value.absent(),
                 Value<double?> quantity = const Value.absent(),
                 Value<double?> price = const Value.absent(),
@@ -5055,6 +5259,8 @@ class $$TransactionsTableTableManager
                 id: id,
                 accountId: accountId,
                 holdingId: holdingId,
+                cashSourceId: cashSourceId,
+                cashTargetId: cashTargetId,
                 type: type,
                 quantity: quantity,
                 price: price,
@@ -5068,6 +5274,8 @@ class $$TransactionsTableTableManager
                 Value<int> id = const Value.absent(),
                 required int accountId,
                 Value<int?> holdingId = const Value.absent(),
+                Value<int?> cashSourceId = const Value.absent(),
+                Value<int?> cashTargetId = const Value.absent(),
                 required String type,
                 Value<double?> quantity = const Value.absent(),
                 Value<double?> price = const Value.absent(),
@@ -5079,6 +5287,8 @@ class $$TransactionsTableTableManager
                 id: id,
                 accountId: accountId,
                 holdingId: holdingId,
+                cashSourceId: cashSourceId,
+                cashTargetId: cashTargetId,
                 type: type,
                 quantity: quantity,
                 price: price,
@@ -5095,60 +5305,100 @@ class $$TransactionsTableTableManager
                 ),
               )
               .toList(),
-          prefetchHooksCallback: ({accountId = false, holdingId = false}) {
-            return PrefetchHooks(
-              db: db,
-              explicitlyWatchedTables: [],
-              addJoins:
-                  <
-                    T extends TableManagerState<
-                      dynamic,
-                      dynamic,
-                      dynamic,
-                      dynamic,
-                      dynamic,
-                      dynamic,
-                      dynamic,
-                      dynamic,
-                      dynamic,
-                      dynamic,
-                      dynamic
-                    >
-                  >(state) {
-                    if (accountId) {
-                      state =
-                          state.withJoin(
-                                currentTable: table,
-                                currentColumn: table.accountId,
-                                referencedTable: $$TransactionsTableReferences
-                                    ._accountIdTable(db),
-                                referencedColumn: $$TransactionsTableReferences
-                                    ._accountIdTable(db)
-                                    .id,
-                              )
-                              as T;
-                    }
-                    if (holdingId) {
-                      state =
-                          state.withJoin(
-                                currentTable: table,
-                                currentColumn: table.holdingId,
-                                referencedTable: $$TransactionsTableReferences
-                                    ._holdingIdTable(db),
-                                referencedColumn: $$TransactionsTableReferences
-                                    ._holdingIdTable(db)
-                                    .id,
-                              )
-                              as T;
-                    }
+          prefetchHooksCallback:
+              ({
+                accountId = false,
+                holdingId = false,
+                cashSourceId = false,
+                cashTargetId = false,
+              }) {
+                return PrefetchHooks(
+                  db: db,
+                  explicitlyWatchedTables: [],
+                  addJoins:
+                      <
+                        T extends TableManagerState<
+                          dynamic,
+                          dynamic,
+                          dynamic,
+                          dynamic,
+                          dynamic,
+                          dynamic,
+                          dynamic,
+                          dynamic,
+                          dynamic,
+                          dynamic,
+                          dynamic
+                        >
+                      >(state) {
+                        if (accountId) {
+                          state =
+                              state.withJoin(
+                                    currentTable: table,
+                                    currentColumn: table.accountId,
+                                    referencedTable:
+                                        $$TransactionsTableReferences
+                                            ._accountIdTable(db),
+                                    referencedColumn:
+                                        $$TransactionsTableReferences
+                                            ._accountIdTable(db)
+                                            .id,
+                                  )
+                                  as T;
+                        }
+                        if (holdingId) {
+                          state =
+                              state.withJoin(
+                                    currentTable: table,
+                                    currentColumn: table.holdingId,
+                                    referencedTable:
+                                        $$TransactionsTableReferences
+                                            ._holdingIdTable(db),
+                                    referencedColumn:
+                                        $$TransactionsTableReferences
+                                            ._holdingIdTable(db)
+                                            .id,
+                                  )
+                                  as T;
+                        }
+                        if (cashSourceId) {
+                          state =
+                              state.withJoin(
+                                    currentTable: table,
+                                    currentColumn: table.cashSourceId,
+                                    referencedTable:
+                                        $$TransactionsTableReferences
+                                            ._cashSourceIdTable(db),
+                                    referencedColumn:
+                                        $$TransactionsTableReferences
+                                            ._cashSourceIdTable(db)
+                                            .id,
+                                  )
+                                  as T;
+                        }
+                        if (cashTargetId) {
+                          state =
+                              state.withJoin(
+                                    currentTable: table,
+                                    currentColumn: table.cashTargetId,
+                                    referencedTable:
+                                        $$TransactionsTableReferences
+                                            ._cashTargetIdTable(db),
+                                    referencedColumn:
+                                        $$TransactionsTableReferences
+                                            ._cashTargetIdTable(db)
+                                            .id,
+                                  )
+                                  as T;
+                        }
 
-                    return state;
+                        return state;
+                      },
+                  getPrefetchedDataCallback: (items) async {
+                    return [];
                   },
-              getPrefetchedDataCallback: (items) async {
-                return [];
+                );
               },
-            );
-          },
         ),
       );
 }
@@ -5165,7 +5415,12 @@ typedef $$TransactionsTableProcessedTableManager =
       $$TransactionsTableUpdateCompanionBuilder,
       (TransactionRow, $$TransactionsTableReferences),
       TransactionRow,
-      PrefetchHooks Function({bool accountId, bool holdingId})
+      PrefetchHooks Function({
+        bool accountId,
+        bool holdingId,
+        bool cashSourceId,
+        bool cashTargetId,
+      })
     >;
 typedef $$PriceCacheTableCreateCompanionBuilder =
     PriceCacheCompanion Function({

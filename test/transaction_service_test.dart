@@ -1,0 +1,306 @@
+import 'package:drift/drift.dart';
+import 'package:drift/native.dart';
+import 'package:flutter_test/flutter_test.dart';
+
+import 'package:asset_tracker/core/enums.dart';
+import 'package:asset_tracker/data/asset_dao.dart';
+import 'package:asset_tracker/data/database.dart';
+import 'package:asset_tracker/domain/transaction_service.dart';
+
+void main() {
+  late AppDatabase db;
+  late AssetDao dao;
+  late TransactionService service;
+
+  setUp(() async {
+    db = AppDatabase(NativeDatabase.memory());
+    dao = AssetDao(db);
+    service = TransactionService(dao);
+  });
+
+  tearDown(() async {
+    await db.close();
+  });
+
+  Future<int> addAccount(String name) {
+    return dao.createAccount(AccountsCompanion.insert(name: name, type: 'general'));
+  }
+
+  Future<int> addHolding({
+    required int accountId,
+    required String name,
+    required AssetType type,
+    double quantity = 0,
+    double costPrice = 0,
+    double latestPrice = 0,
+    String? symbol,
+  }) {
+    return dao.createHolding(HoldingsCompanion.insert(
+      accountId: accountId,
+      name: name,
+      assetType: type.storageName,
+      marketSource: Value(type.isMarketLinked ? 'sina' : 'manual'),
+      symbol: symbol == null ? const Value.absent() : Value(symbol),
+      quantity: Value(quantity),
+      costPrice: Value(costPrice),
+      latestPrice: Value(latestPrice),
+      currency: const Value('CNY'),
+    ));
+  }
+
+  group('buy', () {
+    test('increases quantity with moving average cost', () async {
+      final acc = await addAccount('A');
+      final fund = await addHolding(
+        accountId: acc, name: '基金', type: AssetType.mutualFund,
+        quantity: 100, costPrice: 10, latestPrice: 12,
+      );
+      // Buy 100 @ 20.
+      final r = await service.record(
+        accountId: acc, holdingId: fund, type: TransactionType.buy,
+        quantity: 100, price: 20, amount: 2000,
+      );
+      expect(r.ok, isTrue);
+      final h = (await dao.getHolding(fund))!;
+      expect(h.quantity, 200);
+      expect(h.costPrice, closeTo(15, 1e-9)); // (100*10+2000)/200
+    });
+
+    test('with cash source reduces the cash holding balance', () async {
+      final acc = await addAccount('A');
+      final cash = await addHolding(
+        accountId: acc, name: '现金', type: AssetType.bankDeposit,
+        quantity: 5000, costPrice: 5000, latestPrice: 1,
+      );
+      final fund = await addHolding(
+        accountId: acc, name: '基金', type: AssetType.mutualFund,
+        quantity: 0, costPrice: 0, latestPrice: 1,
+      );
+      await service.record(
+        accountId: acc, holdingId: fund, type: TransactionType.buy,
+        quantity: 100, price: 20, amount: 2000, cashSourceId: cash,
+      );
+      final cashAfter = (await dao.getHolding(cash))!;
+      expect(cashAfter.quantity, 3000);
+      expect(cashAfter.costPrice, 5000); // invested untouched
+    });
+  });
+
+  group('sell', () {
+    test('reduces quantity, cost unchanged, credits cash target', () async {
+      final acc = await addAccount('A');
+      final cash = await addHolding(
+        accountId: acc, name: '现金', type: AssetType.bankDeposit,
+        quantity: 0, costPrice: 0, latestPrice: 1,
+      );
+      final fund = await addHolding(
+        accountId: acc, name: '基金', type: AssetType.mutualFund,
+        quantity: 200, costPrice: 15, latestPrice: 20,
+      );
+      final r = await service.record(
+        accountId: acc, holdingId: fund, type: TransactionType.sell,
+        quantity: 50, price: 20, amount: 1000, cashTargetId: cash,
+      );
+      expect(r.ok, isTrue);
+      final fundAfter = (await dao.getHolding(fund))!;
+      expect(fundAfter.quantity, 150);
+      expect(fundAfter.costPrice, 15);
+      expect((await dao.getHolding(cash))!.quantity, 1000);
+    });
+
+    test('rejects selling more than owned', () async {
+      final acc = await addAccount('A');
+      final fund = await addHolding(
+        accountId: acc, name: '基金', type: AssetType.mutualFund,
+        quantity: 10, costPrice: 10, latestPrice: 10,
+      );
+      final r = await service.record(
+        accountId: acc, holdingId: fund, type: TransactionType.sell,
+        quantity: 100, price: 10, amount: 1000,
+      );
+      expect(r.ok, isFalse);
+      expect(r.message, contains('超过'));
+    });
+  });
+
+  group('transfer', () {
+    test('moves cash between holdings', () async {
+      final acc = await addAccount('A');
+      final a = await addHolding(
+        accountId: acc, name: '现金A', type: AssetType.bankDeposit,
+        quantity: 10000, costPrice: 9000, latestPrice: 1,
+      );
+      final b = await addHolding(
+        accountId: acc, name: '现金B', type: AssetType.liquidWealth,
+        quantity: 1000, costPrice: 1000, latestPrice: 1,
+      );
+      final r = await service.record(
+        accountId: acc, type: TransactionType.transferOut,
+        amount: 3000, cashSourceId: a, cashTargetId: b,
+      );
+      expect(r.ok, isTrue);
+      expect((await dao.getHolding(a))!.quantity, 7000);
+      expect((await dao.getHolding(b))!.quantity, 4000);
+      // Invested untouched on plain transfers.
+      expect((await dao.getHolding(a))!.costPrice, 9000);
+    });
+
+    test('repaying a liability reduces both balances', () async {
+      final acc = await addAccount('A');
+      final cash = await addHolding(
+        accountId: acc, name: '现金', type: AssetType.bankDeposit,
+        quantity: 5000, costPrice: 5000, latestPrice: 1,
+      );
+      final loan = await addHolding(
+        accountId: acc, name: '贷款', type: AssetType.liability,
+        quantity: 2000, costPrice: 2000, latestPrice: 1,
+      );
+      // Repay 1500: cash falls, debt falls.
+      await service.record(
+        accountId: acc, type: TransactionType.transferOut,
+        amount: 1500, cashSourceId: cash, cashTargetId: loan,
+      );
+      expect((await dao.getHolding(cash))!.quantity, 3500);
+      expect((await dao.getHolding(loan))!.quantity, 500);
+    });
+
+    test('borrowing increases cash and debt', () async {
+      final acc = await addAccount('A');
+      final cash = await addHolding(
+        accountId: acc, name: '现金', type: AssetType.bankDeposit,
+        quantity: 1000, costPrice: 1000, latestPrice: 1,
+      );
+      final loan = await addHolding(
+        accountId: acc, name: '贷款', type: AssetType.liability,
+        quantity: 3000, costPrice: 3000, latestPrice: 1,
+      );
+      // Loan payout of 2000: cash rises, debt rises.
+      await service.record(
+        accountId: acc, type: TransactionType.transferIn,
+        amount: 2000, cashSourceId: loan, cashTargetId: cash,
+      );
+      expect((await dao.getHolding(cash))!.quantity, 3000);
+      expect((await dao.getHolding(loan))!.quantity, 5000);
+    });
+  });
+
+  group('income/expense/dividend', () {
+    test('income adds cash AND invested (excluded from P/L)', () async {
+      final acc = await addAccount('A');
+      final cash = await addHolding(
+        accountId: acc, name: '现金', type: AssetType.bankDeposit,
+        quantity: 10000, costPrice: 8000, latestPrice: 1,
+      );
+      await service.record(
+        accountId: acc, type: TransactionType.income,
+        amount: 2000, cashTargetId: cash,
+      );
+      final h = (await dao.getHolding(cash))!;
+      expect(h.quantity, 12000);
+      expect(h.costPrice, 10000); // profit stays 2000 (unchanged)
+    });
+
+    test('expense reduces cash AND invested', () async {
+      final acc = await addAccount('A');
+      final cash = await addHolding(
+        accountId: acc, name: '现金', type: AssetType.bankDeposit,
+        quantity: 10000, costPrice: 10000, latestPrice: 1,
+      );
+      await service.record(
+        accountId: acc, type: TransactionType.expense,
+        amount: 3000, cashTargetId: cash,
+      );
+      final h = (await dao.getHolding(cash))!;
+      expect(h.quantity, 7000);
+      expect(h.costPrice, 7000);
+    });
+
+    test('dividend adds cash but keeps invested', () async {
+      final acc = await addAccount('A');
+      final cash = await addHolding(
+        accountId: acc, name: '现金', type: AssetType.bankDeposit,
+        quantity: 1000, costPrice: 900, latestPrice: 1,
+      );
+      await service.record(
+        accountId: acc, type: TransactionType.dividend,
+        amount: 100, cashTargetId: cash,
+      );
+      final h = (await dao.getHolding(cash))!;
+      expect(h.quantity, 1100);
+      expect(h.costPrice, 900); // counts as gain
+    });
+  });
+
+  group('remove', () {
+    test('removing a buy reverses quantity/cost and refunds cash', () async {
+      final acc = await addAccount('A');
+      final cash = await addHolding(
+        accountId: acc, name: '现金', type: AssetType.bankDeposit,
+        quantity: 3000, costPrice: 3000, latestPrice: 1,
+      );
+      final fund = await addHolding(
+        accountId: acc, name: '基金', type: AssetType.mutualFund,
+        quantity: 100, costPrice: 10, latestPrice: 10,
+      );
+      final id = await service.record(
+        accountId: acc, holdingId: fund, type: TransactionType.buy,
+        quantity: 100, price: 20, amount: 2000, cashSourceId: cash,
+      );
+      expect(id.ok, isTrue);
+      final txnId = (await dao.getTransactions()).single.id;
+
+      final r = await service.remove(txnId);
+      expect(r.ok, isTrue);
+      final fundAfter = (await dao.getHolding(fund))!;
+      expect(fundAfter.quantity, 100);
+      expect(fundAfter.costPrice, closeTo(10, 1e-9));
+      // Cash was debited 2000 on buy and refunded on remove: 3000.
+      expect((await dao.getHolding(cash))!.quantity, 3000);
+      expect(await dao.getTransactions(), isEmpty);
+    });
+
+    test('buy with newer transactions refuses to delete', () async {
+      final acc = await addAccount('A');
+      final fund = await addHolding(
+        accountId: acc, name: '基金', type: AssetType.mutualFund,
+        quantity: 0, costPrice: 0, latestPrice: 10,
+      );
+      await service.record(
+        accountId: acc, holdingId: fund, type: TransactionType.buy,
+        quantity: 100, price: 10, amount: 1000,
+      );
+      final firstTxnId = (await dao.getTransactions()).first.id;
+      await service.record(
+        accountId: acc, holdingId: fund, type: TransactionType.buy,
+        quantity: 100, price: 20, amount: 2000,
+      );
+
+      final r = await service.remove(firstTxnId);
+      expect(r.ok, isFalse);
+      expect(r.message, contains('更晚'));
+      // Deleting the newest one works.
+      final secondTxnId = (await dao.getTransactions()).last.id;
+      expect((await service.remove(secondTxnId)).ok, isTrue);
+      final h = (await dao.getHolding(fund))!;
+      expect(h.quantity, 100);
+      expect(h.costPrice, closeTo(10, 1e-9));
+    });
+
+    test('removing an expense refunds cash and invested', () async {
+      final acc = await addAccount('A');
+      final cash = await addHolding(
+        accountId: acc, name: '现金', type: AssetType.bankDeposit,
+        quantity: 7000, costPrice: 7000, latestPrice: 1,
+      );
+      await service.record(
+        accountId: acc, type: TransactionType.expense,
+        amount: 3000, cashTargetId: cash,
+      );
+      final txnId = (await dao.getTransactions()).single.id;
+      await service.remove(txnId);
+      final h = (await dao.getHolding(cash))!;
+      expect(h.quantity, 7000);
+      expect(h.costPrice, 7000);
+    });
+  });
+}

@@ -6,6 +6,7 @@ import '../../app/theme.dart';
 import '../../core/enums.dart';
 import '../../core/formats.dart';
 import '../../data/database.dart';
+import '../transactions/transaction_dialogs.dart';
 
 /// Account detail page: holdings + transactions of one account.
 class AccountDetailPage extends ConsumerWidget {
@@ -26,6 +27,13 @@ class AccountDetailPage extends ConsumerWidget {
           loading: () => const Text('账户'),
           error: (_, _) => const Text('账户'),
         ),
+        actions: [
+          IconButton(
+            tooltip: '记流水',
+            icon: const Icon(Icons.edit_note),
+            onPressed: () => showAccountTransactionDialog(context, ref, accountId),
+          ),
+        ],
       ),
       body: ListView(
         padding: const EdgeInsets.all(16),
@@ -151,13 +159,13 @@ class _HoldingTile extends StatelessWidget {
   }
 }
 
-class _TransactionTile extends StatelessWidget {
+class _TransactionTile extends ConsumerWidget {
   const _TransactionTile({required this.txn});
 
   final TransactionRow txn;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final type = TransactionType.fromStorage(txn.type);
     final isIn = type == TransactionType.buy ||
         type == TransactionType.transferIn ||
@@ -172,16 +180,56 @@ class _TransactionTile extends StatelessWidget {
               ? Formats.dateTime(txn.occurredAt.toLocal())
               : '${txn.note} · ${Formats.dateTime(txn.occurredAt.toLocal())}',
         ),
-        trailing: SizedBox(
-          width: 130,
-          child: Text(
-            '${isIn ? '+' : '-'}${Formats.money(txn.amount, txn.currency)}',
-            textAlign: TextAlign.end,
-            style: TextStyle(
-              color: isIn ? context.upColor() : context.downColor(),
-              fontWeight: FontWeight.w600,
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SizedBox(
+              width: 130,
+              child: Text(
+                '${isIn ? '+' : '-'}${Formats.money(txn.amount, txn.currency)}',
+                textAlign: TextAlign.end,
+                style: TextStyle(
+                  color: isIn ? context.upColor() : context.downColor(),
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
             ),
-          ),
+            IconButton(
+              visualDensity: VisualDensity.compact,
+              icon: const Icon(Icons.delete_outline, size: 18),
+              tooltip: '删除流水（自动回滚持仓）',
+              onPressed: () async {
+                final ok = await showDialog<bool>(
+                  context: context,
+                  builder: (context) => AlertDialog(
+                    title: const Text('删除流水'),
+                    content: const Text('删除后持仓会自动回滚到该笔交易前的状态。'),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(context, false),
+                        child: const Text('取消'),
+                      ),
+                      FilledButton(
+                        style: FilledButton.styleFrom(backgroundColor: context.upColor()),
+                        onPressed: () => Navigator.pop(context, true),
+                        child: const Text('删除'),
+                      ),
+                    ],
+                  ),
+                );
+                if (ok != true || !context.mounted) return;
+                final result =
+                    await ref.read(transactionServiceProvider).remove(txn.id);
+                if (!context.mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(result.ok ? '已删除并回滚' : (result.message ?? '删除失败')),
+                    backgroundColor: result.ok ? null : context.upColor(),
+                  ),
+                );
+              },
+            ),
+          ],
         ),
       ),
     );
