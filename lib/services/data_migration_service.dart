@@ -14,8 +14,17 @@ class DataMigrationService {
 
   static const _amountBasedMigrated = 'amount_based_migrated_v3';
 
+  /// Fills the default market code (AU99.99) for gold holdings that were
+  /// created without one, so they auto-sync like other market-linked assets.
+  static const _goldSymbolMigrated = 'gold_symbol_filled';
+
   /// Runs all pending one-time migrations. Safe to call on every launch.
   Future<void> run() async {
+    await _migrateAmountBased();
+    await _migrateGoldSymbol();
+  }
+
+  Future<void> _migrateAmountBased() async {
     final marker = await _getSetting(_amountBasedMigrated);
     if (marker != null) return;
 
@@ -38,6 +47,24 @@ class DataMigrationService {
     }
 
     await _setSetting(_amountBasedMigrated, '${DateTime.now().millisecondsSinceEpoch}');
+  }
+
+  Future<void> _migrateGoldSymbol() async {
+    final marker = await _getSetting(_goldSymbolMigrated);
+    if (marker != null) return;
+
+    final golds = await (_db.select(_db.holdings)
+          ..where((t) => t.assetType.equals('gold') & t.symbol.isNull()))
+        .get();
+
+    for (final h in golds) {
+      final stmt = _db.update(_db.holdings)..where((t) => t.id.equals(h.id));
+      await stmt.write(
+        const HoldingsCompanion(symbol: Value('AU99.99')),
+      );
+    }
+
+    await _setSetting(_goldSymbolMigrated, '${DateTime.now().millisecondsSinceEpoch}');
   }
 
   Future<String?> _getSetting(String key) async {

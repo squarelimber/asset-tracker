@@ -105,8 +105,11 @@ class HistoryBackfillService {
       final source = MarketSource.fromStorage(h.marketSource);
       final adapter = _sources[source];
       if (adapter == null) continue;
-      final symbol = h.symbol;
-      if (symbol == null || symbol.isEmpty) continue;
+      final type = AssetType.fromStorage(h.assetType);
+      final symbol = (h.symbol != null && h.symbol!.isNotEmpty)
+          ? h.symbol!
+          : type.defaultSymbol;
+      if (symbol == null) continue;
       futures.add(() async {
         final history = await adapter.fetch(symbol, windowStart, current);
         if (history.isNotEmpty) fillers[h.id] = _ForwardFiller(history);

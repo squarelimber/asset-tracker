@@ -284,13 +284,16 @@ class _HoldingsPageState extends ConsumerState<HoldingsPage> {
                 return;
               }
               final dao = ref.read(daoProvider);
-              final symbol = symbolCtrl.text.trim();
+              final symbol = symbolCtrl.text.trim().isNotEmpty
+                  ? symbolCtrl.text.trim()
+                  : type.defaultSymbol;
+              final hasSymbol = symbol != null && symbol.isNotEmpty;
               final marketSource = switch (type) {
                 AssetType.stock || AssetType.etf => 'sina',
                 AssetType.mutualFund => 'eastmoney',
                 AssetType.gold => 'sge',
                 AssetType.crypto => 'coingecko',
-                AssetType.bankWealth when symbol.isNotEmpty => 'forex',
+                AssetType.bankWealth when hasSymbol => 'forex',
                 _ => 'manual',
               };
               final userPrice = double.tryParse(latestPriceCtrl.text.trim());
@@ -301,7 +304,7 @@ class _HoldingsPageState extends ConsumerState<HoldingsPage> {
                 name: name,
                 assetType: type.storageName,
                 marketSource: Value(marketSource),
-                symbol: symbol.isNotEmpty ? Value(symbol) : const Value.absent(),
+                symbol: hasSymbol ? Value(symbol) : const Value.absent(),
                 quantity: Value(qty),
                 costPrice: Value(type.isAmountBased
                     ? (investedResult ?? qty)
@@ -318,7 +321,7 @@ class _HoldingsPageState extends ConsumerState<HoldingsPage> {
 
               // Auto-fetch the latest price for market-linked holdings
               // unless the user already entered one.
-              if (marketSource != 'manual' && symbol.isNotEmpty) {
+              if (marketSource != 'manual' && hasSymbol) {
                 final created = await dao.getHolding(createdId);
                 if (created != null) {
                   final quote =

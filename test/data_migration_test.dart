@@ -1,4 +1,4 @@
-import 'package:drift/drift.dart';
+import 'package:drift/drift.dart' hide isNull;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -100,5 +100,38 @@ void main() {
     await DataMigrationService(db).run();
     final holdings = await dao.getHoldings();
     expect(holdings.single.costPrice, 4000);
+  });
+
+  test('gold holdings without a symbol get AU99.99', () async {
+    final accountId = await dao.createAccount(AccountsCompanion.insert(
+      name: '测试',
+      type: 'general',
+    ));
+    await dao.createHolding(HoldingsCompanion.insert(
+      accountId: accountId,
+      name: '积存金',
+      assetType: 'gold',
+      marketSource: const Value('sge'),
+      quantity: const Value(70.9),
+      costPrice: const Value(1063),
+      latestPrice: const Value(941.92),
+    ));
+    // A fund without symbol must NOT be touched.
+    await dao.createHolding(HoldingsCompanion.insert(
+      accountId: accountId,
+      name: '现金宝',
+      assetType: 'liquid_wealth',
+      marketSource: const Value('manual'),
+      quantity: const Value(500),
+      costPrice: const Value(500),
+      latestPrice: const Value(1),
+    ));
+
+    await DataMigrationService(db).run();
+    final holdings = await dao.getHoldings();
+    final gold = holdings.firstWhere((h) => h.name == '积存金');
+    expect(gold.symbol, 'AU99.99');
+    final wealth = holdings.firstWhere((h) => h.name == '现金宝');
+    expect(wealth.symbol, isNull);
   });
 }

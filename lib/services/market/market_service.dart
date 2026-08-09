@@ -43,20 +43,26 @@ class MarketService {
   /// Refresh prices for all market-linked holdings.
   Future<MarketRefreshResult> refreshAll() async {
     final holdings = (await _dao.getHoldings())
-        .where((h) => AssetType.fromStorage(h.assetType).isMarketLinked &&
-            (h.symbol != null && h.symbol!.isNotEmpty))
+        .where((h) => AssetType.fromStorage(h.assetType).isMarketLinked)
         .toList();
 
     if (holdings.isEmpty) {
       return MarketRefreshResult(updated: 0, failed: 0, fetchedAt: DateTime.now());
     }
 
-    // Group symbols by source.
+    // Group symbols by source. Holdings without a code use the type's
+    // default symbol (e.g. gold -> AU99.99) so they stay auto-synced.
     final bySource = <MarketSource, List<String>>{};
+    final symbolOf = <int, String>{};
     for (final h in holdings) {
+      final type = AssetType.fromStorage(h.assetType);
+      final symbol = (h.symbol != null && h.symbol!.isNotEmpty)
+          ? h.symbol!
+          : type.defaultSymbol;
+      if (symbol == null) continue;
       final source = MarketSource.fromStorage(h.marketSource);
-      // Gold holdings use the combined gold/fx source.
-      bySource.putIfAbsent(source, () => []).add(h.symbol!);
+      bySource.putIfAbsent(source, () => []).add(symbol);
+      symbolOf[h.id] = symbol;
     }
 
     final quoteMap = <String, MarketQuote>{};
@@ -76,14 +82,16 @@ class MarketService {
     var failed = 0;
     await _dao.transaction(() async {
       for (final h in holdings) {
-        final quote = quoteMap[h.symbol!];
+        final symbol = symbolOf[h.id];
+        if (symbol == null) continue;
+        final quote = quoteMap[symbol];
         if (quote == null || !quote.isSuccess) {
           failed++;
           continue;
         }
         await _dao.updateHoldingPrice(h.id, quote.price);
         await _dao.upsertPriceCache(PriceCacheRow(
-          symbol: h.symbol!,
+          symbol: symbol,
           source: quote.source.storageName,
           name: quote.name,
           price: quote.price,
@@ -118,8 +126,11 @@ class MarketService {
   /// Fetches the latest price for a single holding and writes it back
   /// (holding row + price cache). Returns the fetched quote, or null.
   Future<MarketQuote?> refreshHolding(HoldingRow holding) async {
-    final symbol = holding.symbol;
-    if (symbol == null || symbol.isEmpty) return null;
+    final type = AssetType.fromStorage(holding.assetType);
+    final symbol = (holding.symbol != null && holding.symbol!.isNotEmpty)
+        ? holding.symbol!
+        : type.defaultSymbol;
+    if (symbol == null) return null;
     final source = MarketSource.fromStorage(holding.marketSource);
     final quotes = await _fetchFromSource(source, [symbol]);
     if (quotes.isEmpty) return null;
@@ -128,7 +139,7 @@ class MarketService {
     await _dao.transaction(() async {
       await _dao.updateHoldingPrice(holding.id, quote.price);
       await _dao.upsertPriceCache(PriceCacheRow(
-        symbol: holding.symbol!,
+        symbol: symbol,
         source: quote.source.storageName,
         name: quote.name,
         price: quote.price,

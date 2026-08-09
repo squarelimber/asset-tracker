@@ -45,6 +45,13 @@ enum AssetType {
         cash || bankDeposit || liquidWealth => true,
         _ => false,
       };
+
+  /// Default market code for asset types with a standard quote symbol.
+  /// Used when the user leaves the code empty (e.g. gold -> AU99.99).
+  String? get defaultSymbol => switch (this) {
+        gold => 'AU99.99',
+        _ => null,
+      };
 }
 
 /// Where the latest price comes from.
