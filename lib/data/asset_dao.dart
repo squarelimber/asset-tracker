@@ -178,6 +178,27 @@ class AssetDao {
     return _db.into(_db.snapshots).insertOnConflictUpdate(entry);
   }
 
+  /// Deletes snapshots strictly before [date] (yyyy-MM-dd).
+  Future<void> deleteSnapshotsBefore(String date) {
+    return (_db.delete(_db.snapshots)..where((t) => t.date.isSmallerThanValue(date))).go();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Settings (key-value app state)
+  // ---------------------------------------------------------------------------
+
+  Future<String?> getSetting(String key) async {
+    final row = await (_db.select(_db.settings)..where((t) => t.key.equals(key)))
+        .getSingleOrNull();
+    return row?.value;
+  }
+
+  Future<void> setSetting(String key, String value) {
+    return _db.into(_db.settings).insertOnConflictUpdate(
+      SettingsCompanion.insert(key: key, value: Value(value)),
+    );
+  }
+
   // ---------------------------------------------------------------------------
   // Alert rules
   // ---------------------------------------------------------------------------
