@@ -10,6 +10,7 @@ import '../../data/database.dart';
 import '../../domain/holding_details.dart';
 import '../../domain/portfolio_calculator.dart';
 import '../../domain/range_stats.dart';
+import '../../domain/rate_series.dart';
 import '../../services/market/history_lookup.dart';
 import '../../services/market/history_source.dart';
 
@@ -116,15 +117,15 @@ class _NetWorthChartState extends ConsumerState<NetWorthChart> {
   DateTime? _customTo;
   bool _showBenchmark = false;
   HistoryPriceLookup? _benchmark;
+  _TrendView _view = _TrendView.returnRate;
 
-  static const _options = [
+  /// Segmented range presets (all/custom live behind the calendar button).
+  static const _rangeOptions = [
     RangeOption.month1,
     RangeOption.month3,
     RangeOption.ytd,
     RangeOption.year1,
     RangeOption.year3,
-    RangeOption.all,
-    RangeOption.custom,
   ];
 
   Future<void> _toggleBenchmark(bool on) async {
@@ -147,6 +148,34 @@ class _NetWorthChartState extends ConsumerState<NetWorthChart> {
       } catch (_) {
         if (mounted) setState(() => _showBenchmark = false);
       }
+    }
+  }
+
+  Future<void> _showRangeMenu() async {
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              title: const Text('全部'),
+              onTap: () => Navigator.pop(context, 'all'),
+            ),
+            ListTile(
+              title: const Text('自定义日期'),
+              onTap: () => Navigator.pop(context, 'custom'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (!mounted) return;
+    if (choice == 'all') {
+      setState(() => _range = RangeOption.all);
+    } else if (choice == 'custom') {
+      await _pickCustomRange();
     }
   }
 
@@ -185,26 +214,62 @@ class _NetWorthChartState extends ConsumerState<NetWorthChart> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('资产走势', style: Theme.of(context).textTheme.titleMedium),
-            const SizedBox(height: 12),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
+            // Toolbar: title + view toggle + benchmark chip.
+            Row(
               children: [
-                for (final opt in _options)
-                  ChoiceChip(
-                    label: Text(opt.label),
-                    selected: _range == opt,
-                    showCheckmark: false,
+                Expanded(
+                  child: Text('资产走势', style: Theme.of(context).textTheme.titleMedium),
+                ),
+                SegmentedButton<_TrendView>(
+                  segments: const [
+                    ButtonSegment(value: _TrendView.returnRate, label: Text('收益率')),
+                    ButtonSegment(value: _TrendView.netValue, label: Text('净值')),
+                  ],
+                  selected: {_view},
+                  showSelectedIcon: false,
+                  style: const ButtonStyle(
                     visualDensity: VisualDensity.compact,
-                    onSelected: (_) {
-                      if (opt == RangeOption.custom) {
-                        _pickCustomRange();
-                      } else {
-                        setState(() => _range = opt);
-                      }
-                    },
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                   ),
+                  onSelectionChanged: (s) =>
+                      setState(() => _view = s.first),
+                ),
+                const SizedBox(width: 8),
+                FilterChip(
+                  label: const Text('沪深300'),
+                  selected: _showBenchmark,
+                  showCheckmark: false,
+                  visualDensity: VisualDensity.compact,
+                  onSelected: _toggleBenchmark,
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            // Range presets + all/custom menu.
+            Row(
+              children: [
+                Expanded(
+                  child: SegmentedButton<RangeOption>(
+                    segments: [
+                      for (final opt in _rangeOptions)
+                        ButtonSegment(value: opt, label: Text(opt.label)),
+                    ],
+                    selected: {_range},
+                    showSelectedIcon: false,
+                    style: const ButtonStyle(
+                      visualDensity: VisualDensity.compact,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                    onSelectionChanged: (s) => setState(() => _range = s.first),
+                  ),
+                ),
+                const SizedBox(width: 4),
+                IconButton(
+                  tooltip: '全部 / 自定义日期',
+                  icon: const Icon(Icons.calendar_month_outlined, size: 20),
+                  visualDensity: VisualDensity.compact,
+                  onPressed: _showRangeMenu,
+                ),
               ],
             ),
             if (_range == RangeOption.custom && _customFrom != null)
@@ -215,17 +280,12 @@ class _NetWorthChartState extends ConsumerState<NetWorthChart> {
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
               ),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                const Text('对比沪深300', style: TextStyle(fontSize: 13)),
-                Switch(
-                  value: _showBenchmark,
-                  onChanged: _toggleBenchmark,
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
+            if (_range == RangeOption.all)
+              const Padding(
+                padding: EdgeInsets.only(top: 8),
+                child: Text('全部历史', style: TextStyle(fontSize: 12)),
+              ),
+            const SizedBox(height: 12),
             snapshots.when(
               data: (all) {
                 final now = DateTime.now();
@@ -247,6 +307,18 @@ class _NetWorthChartState extends ConsumerState<NetWorthChart> {
                   );
                 }
                 final stats = const RangeStatsCalculator().compute(list);
+                final isRate = _view == _TrendView.returnRate;
+                final rates = const RateSeriesCalculator().ratesOf(list);
+                final rateDelta = const RateSeriesCalculator().rangeRatePct(list);
+                final rateAnnualized =
+                    const RateSeriesCalculator().annualizedFromRange(list);
+                final mainValue = isRate
+                    ? (rateDelta ?? 0)
+                    : (stats?.profit ?? 0);
+                final mainPct = isRate
+                    ? (rateDelta ?? 0) / 100
+                    : (stats?.profitPct ?? 0);
+                final color = context.changeColor(mainValue);
                 return Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -256,35 +328,69 @@ class _NetWorthChartState extends ConsumerState<NetWorthChart> {
                         textBaseline: TextBaseline.alphabetic,
                         children: [
                           Text(
-                            '${stats.profit >= 0 ? '+' : ''}${Formats.money(stats.profit)}',
+                            isRate
+                                ? '${mainValue >= 0 ? '+' : ''}${Formats.pct(mainPct)}'
+                                : '${mainValue >= 0 ? '+' : ''}${Formats.money(mainValue)}',
                             style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                                  color: context.changeColor(stats.profit),
+                                  color: color,
                                   fontWeight: FontWeight.w700,
                                 ),
                           ),
-                          const SizedBox(width: 10),
-                          Text(
-                            '${stats.profitPct >= 0 ? '+' : ''}${Formats.pct(stats.profitPct)}',
-                            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                                  color: context.changeColor(stats.profit),
-                                  fontWeight: FontWeight.w600,
-                                ),
-                          ),
+                          if (!isRate) ...[
+                            const SizedBox(width: 10),
+                            Text(
+                              '${stats.profitPct >= 0 ? '+' : ''}${Formats.pct(stats.profitPct)}',
+                              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                                    color: color,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                            ),
+                          ],
                         ],
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        '区间年化 ${stats.annualized == null ? '--' : Formats.pct(stats.annualized!)}'
-                        ' · ${stats.days} 天',
+                        isRate
+                            ? '区间收益 ${stats.profit >= 0 ? '+' : ''}${Formats.money(stats.profit)}'
+                                ' · 年化 ${rateAnnualized == null ? '--' : Formats.pct(rateAnnualized)} · ${stats.days} 天'
+                            : '区间年化 ${stats.annualized == null ? '--' : Formats.pct(stats.annualized!)}'
+                                ' · ${stats.days} 天',
                         style: Theme.of(context).textTheme.bodySmall,
                       ),
                       const SizedBox(height: 12),
                     ],
+                    // Legend above the chart (no overlay).
+                    if (_showBenchmark && _benchmark != null)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            _LegendDot(color: AppColors.up, label: '资产'),
+                            const SizedBox(width: 14),
+                            _LegendDot(
+                              color: Theme.of(context).colorScheme.outline,
+                              label: '沪深300',
+                              dashed: true,
+                            ),
+                          ],
+                        ),
+                      ),
                     _TrendChart(
                       list: list,
+                      view: _view,
+                      rates: rates,
                       benchmark: _showBenchmark ? _benchmark : null,
                       onDayTap: (date) => _showDayDetail(context, date),
                     ),
+                    if (isRate)
+                      const Padding(
+                        padding: EdgeInsets.only(top: 6),
+                        child: Text(
+                          '收益率为当前成本口径近似，已剔除转入资金的影响',
+                          style: TextStyle(fontSize: 11),
+                        ),
+                      ),
                   ],
                 );
               },
@@ -437,12 +543,26 @@ final _dayDetailProvider = FutureProvider.autoDispose.family<DayDetail?, DateTim
   }
 }
 
+enum _TrendView { returnRate, netValue }
+
 class _TrendChart extends StatelessWidget {
-  const _TrendChart({required this.list, this.benchmark, this.onDayTap});
+  const _TrendChart({
+    required this.list,
+    required this.view,
+    required this.rates,
+    this.benchmark,
+    this.onDayTap,
+  });
 
   final List<SnapshotRow> list;
 
-  /// CSI300 index history for a normalized benchmark overlay.
+  /// Current view mode.
+  final _TrendView view;
+
+  /// Daily return rates (%) aligned with [list] (return-rate view).
+  final List<double> rates;
+
+  /// CSI300 index history for the benchmark overlay.
   final HistoryPriceLookup? benchmark;
 
   /// Called with the tapped snapshot date (yyyy-MM-dd).
@@ -453,53 +573,50 @@ class _TrendChart extends StatelessWidget {
     // Fixed red brand color for a positive, energetic feel; the line does
     // not change with gains/losses (conveyed by the stats figures instead).
     final color = AppColors.up;
+    final isRate = view == _TrendView.returnRate;
+
     final points = <FlSpot>[];
     var minV = double.infinity;
     var maxV = 0.0;
     for (var i = 0; i < list.length; i++) {
-      final v = list[i].totalValue;
+      final v = isRate ? rates[i] : list[i].totalValue;
       points.add(FlSpot(i.toDouble(), v));
       if (v < minV) minV = v;
       if (v > maxV) maxV = v;
     }
     final span = maxV - minV;
-    final pad = span == 0 ? maxV * 0.05 : span * 0.1;
+    final pad = span == 0 ? maxV.abs() * 0.05 : span * 0.12;
     final longRange = list.length > 250;
 
-    // Benchmark: CSI300 normalized to the same starting value (100%).
+    // Benchmark: CSI300 normalized return rate (%), same start point as the
+    // portfolio return-rate view: (price / base - 1) * 100.
     final benchSpots = <FlSpot>[];
-    if (benchmark != null) {
+    if (isRate && benchmark != null) {
       var base = 0.0;
       for (var i = 0; i < list.length; i++) {
         final idx = benchmark!.priceOnOrBefore(list[i].date);
         if (idx == null || idx <= 0) continue;
         if (base == 0) base = idx;
-        benchSpots.add(FlSpot(i.toDouble(), idx / base));
-      }
-      // Align scales: multiply the benchmark line so it overlays the net
-      // worth curve (both start at 100% of their own series).
-      if (benchSpots.isNotEmpty) {
-        final netBase = list.first.totalValue;
-        for (final s in benchSpots) {
-          benchSpots[benchSpots.indexOf(s)] = FlSpot(s.x, s.y * netBase);
-        }
+        benchSpots.add(FlSpot(i.toDouble(), (idx / base - 1) * 100));
       }
     }
 
+    String valueText(double v) => isRate
+        ? '${v >= 0 ? '+' : ''}${Formats.pct(v / 100)}'
+        : Formats.amountCompact(v);
+
     return SizedBox(
       height: 240,
-      child: Stack(
-        children: [
-          LineChart(
+      child: LineChart(
         LineChartData(
-          minY: (minV - pad).clamp(0, double.infinity),
+          minY: (minV - pad).clamp(double.negativeInfinity, double.infinity),
           maxY: maxV + pad,
           gridData: FlGridData(
             show: true,
             drawVerticalLine: false,
             horizontalInterval: span == 0 ? 1 : span / 4,
             getDrawingHorizontalLine: (v) => FlLine(
-              color: Theme.of(context).colorScheme.outlineVariant.withValues(alpha: 0.3),
+              color: Theme.of(context).colorScheme.outlineVariant.withValues(alpha: 0.18),
               strokeWidth: 1,
             ),
           ),
@@ -510,8 +627,10 @@ class _TrendChart extends StatelessWidget {
                 showTitles: true,
                 reservedSize: 56,
                 getTitlesWidget: (v, meta) => Text(
-                  Formats.amountCompact(v),
-                  style: Theme.of(context).textTheme.bodySmall,
+                  valueText(v),
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: Theme.of(context).colorScheme.outline,
+                      ),
                 ),
               ),
             ),
@@ -526,7 +645,12 @@ class _TrendChart extends StatelessWidget {
                   final d = DateTime.tryParse(list[i].date);
                   if (d == null) return const SizedBox.shrink();
                   final label = longRange ? '${d.year % 100}-${d.month}' : '${d.month}-${d.day}';
-                  return Text(label, style: Theme.of(context).textTheme.bodySmall);
+                  return Text(
+                    label,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: Theme.of(context).colorScheme.outline,
+                        ),
+                  );
                 },
               ),
             ),
@@ -535,13 +659,18 @@ class _TrendChart extends StatelessWidget {
           ),
           lineTouchData: LineTouchData(
             touchTooltipData: LineTouchTooltipData(
+              getTooltipColor: (_) => Theme.of(context).colorScheme.surface,
+              tooltipBorder: BorderSide(
+                color: Theme.of(context).colorScheme.outlineVariant,
+              ),
+              tooltipBorderRadius: BorderRadius.circular(8),
               getTooltipItems: (spots) => [
                 for (final spot in spots)
                   LineTooltipItem(
                     '${Formats.date(DateTime.parse(list[spot.x.toInt()].date))}\n'
-                    '${Formats.money(spot.y)}',
+                    '${isRate ? valueText(spot.y) : Formats.money(spot.y)}',
                     TextStyle(
-                      color: Colors.white,
+                      color: Theme.of(context).colorScheme.onSurface,
                       fontWeight: FontWeight.w600,
                       fontFeatures: const [FontFeature.tabularFigures()],
                     ),
@@ -567,7 +696,7 @@ class _TrendChart extends StatelessWidget {
               isCurved: true,
               curveSmoothness: 0.25,
               color: color,
-              barWidth: 2,
+              barWidth: 2.5,
               dotData: const FlDotData(show: false),
               belowBarData: BarAreaData(
                 show: true,
@@ -575,7 +704,7 @@ class _TrendChart extends StatelessWidget {
                   begin: Alignment.topCenter,
                   end: Alignment.bottomCenter,
                   colors: [
-                    color.withValues(alpha: 0.25),
+                    color.withValues(alpha: 0.22),
                     color.withValues(alpha: 0.02),
                   ],
                 ),
@@ -588,30 +717,66 @@ class _TrendChart extends StatelessWidget {
                 curveSmoothness: 0.25,
                 color: Theme.of(context).colorScheme.outline,
                 barWidth: 1.5,
-                dashArray: [6, 4],
+                dashArray: [4, 4],
                 dotData: const FlDotData(show: false),
               ),
           ],
         ),
       ),
-        Positioned(
-          left: 0,
-          bottom: 0,
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(width: 12, height: 2, color: color),
-              const SizedBox(width: 4),
-              Text('资产', style: Theme.of(context).textTheme.bodySmall),
-              const SizedBox(width: 12),
-              Container(width: 12, height: 2, color: Theme.of(context).colorScheme.outline),
-              const SizedBox(width: 4),
-              Text('沪深300', style: Theme.of(context).textTheme.bodySmall),
-            ],
-          ),
-        ),
-      ],
-      ),
     );
   }
+}
+
+class _LegendDot extends StatelessWidget {
+  const _LegendDot({required this.color, required this.label, this.dashed = false});
+
+  final Color color;
+  final String label;
+  final bool dashed;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        CustomPaint(
+          size: const Size(14, 3),
+          painter: _LinePainter(color: color, dashed: dashed),
+        ),
+        const SizedBox(width: 5),
+        Text(label, style: Theme.of(context).textTheme.bodySmall),
+      ],
+    );
+  }
+}
+
+class _LinePainter extends CustomPainter {
+  const _LinePainter({required this.color, required this.dashed});
+
+  final Color color;
+  final bool dashed;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = color
+      ..strokeWidth = 2
+      ..strokeCap = StrokeCap.round;
+    if (!dashed) {
+      canvas.drawLine(Offset.zero, Offset(size.width, 0), paint);
+      return;
+    }
+    const dash = 4.0;
+    const gap = 3.0;
+    var x = 0.0;
+    while (x < size.width) {
+      final end = (x + dash).clamp(0.0, size.width);
+      canvas.drawLine(Offset(x, 0), Offset(end, 0), paint);
+      x += dash + gap;
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _LinePainter oldDelegate) =>
+      oldDelegate.color != color || oldDelegate.dashed != dashed;
 }
