@@ -243,7 +243,6 @@ class _NetWorthChartState extends ConsumerState<NetWorthChart> {
                     ],
                     _TrendChart(
                       list: list,
-                      up: stats == null || stats.profit >= 0,
                     ),
                   ],
                 );
@@ -262,14 +261,15 @@ class _NetWorthChartState extends ConsumerState<NetWorthChart> {
 }
 
 class _TrendChart extends StatelessWidget {
-  const _TrendChart({required this.list, required this.up});
+  const _TrendChart({required this.list});
 
   final List<SnapshotRow> list;
-  final bool up;
 
   @override
   Widget build(BuildContext context) {
-    final color = up ? AppColors.up : AppColors.down;
+    // Fixed brand color: the line keeps one style regardless of gains
+    // or losses (up/down is conveyed by the stats figures instead).
+    final color = AppColors.primary;
     final points = <FlSpot>[];
     var minV = double.infinity;
     var maxV = 0.0;
