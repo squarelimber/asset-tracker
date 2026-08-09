@@ -1,0 +1,312 @@
+import 'package:fl_chart/fl_chart.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../app/theme.dart';
+import '../../core/formats.dart';
+import '../../core/responsive.dart';
+import '../../services/market/futures_kline_source.dart';
+import '../../services/market/global_quote_source.dart';
+import '../../services/market/history_lookup.dart';
+import '../../services/market/history_source.dart';
+
+final _quotesProvider = FutureProvider<List<GlobalQuote>>((ref) async {
+  return GlobalQuoteSource().fetch();
+});
+
+/// Trend history for a quote code, when available:
+/// A-share indices via the Sina K-line API; commodities via domestic futures.
+final _trendProvider = FutureProvider.autoDispose.family<List<FlSpot>, String>(
+  (ref, code) async {
+    final symbol = _historySymbol(code);
+    if (symbol == null) return const [];
+    final now = DateTime.now();
+    final source = code.startsWith('hf_')
+        ? FuturesKLineSource()
+        : SinaKLineSource();
+    final history = await source.fetch(symbol, now.subtract(const Duration(days: 900)), now);
+    if (history.isEmpty) return const [];
+    final lookup = HistoryPriceLookup(history);
+    final keys = history.keys.toList()..sort();
+    return [
+      for (var i = 0; i < keys.length; i++)
+        FlSpot(i.toDouble(), lookup.priceOnOrBefore(keys[i]) ?? 0),
+    ];
+  },
+);
+
+String? _historySymbol(String code) {
+  if (code.startsWith('sh') || code.startsWith('sz')) return code;
+  if (code.startsWith('hf_')) {
+    return switch (code) {
+      'hf_XAU' || 'hf_GC' => 'AU0', // 沪金
+      'hf_CL' || 'hf_OIL' => 'SC0', // 沪油
+      'hf_HG' => 'CU0', // 沪铜
+      _ => null,
+    };
+  }
+  return null;
+}
+
+class MarketsPage extends ConsumerWidget {
+  const MarketsPage({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final quotes = ref.watch(_quotesProvider);
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('行情'),
+        actions: [
+          IconButton(
+            tooltip: '刷新行情',
+            icon: const Icon(Icons.refresh),
+            onPressed: () => ref.invalidate(_quotesProvider),
+          ),
+        ],
+      ),
+      body: quotes.when(
+        data: (list) {
+          if (list.isEmpty) {
+            return const Center(child: Text('行情加载失败，请检查网络后刷新'));
+          }
+          final groups = <String, List<GlobalQuote>>{};
+          for (final q in list) {
+            groups.putIfAbsent(q.group, () => []).add(q);
+          }
+          final groupNames = ['A股', '亚太', '欧美', '大宗商品', '货币'];
+          return ResponsiveShell(
+            child: ListView(
+              children: [
+                for (final name in groupNames)
+                  if (groups.containsKey(name)) ...[
+                    Text(name, style: Theme.of(context).textTheme.titleMedium),
+                    const SizedBox(height: 8),
+                    Card(
+                      child: Column(
+                        children: [
+                          for (final q in groups[name]!) ...[
+                            _QuoteTile(quote: q),
+                            if (q != groups[name]!.last) const Divider(height: 1),
+                          ],
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                  ],
+                const SizedBox(height: 8),
+                Text(
+                  '数据来自新浪财经公开接口，仅供参考。海外指数暂不支持历史走势。',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ],
+            ),
+          );
+        },
+        loading: () => const Center(child: CircularProgressIndicator()),
+        error: (e, _) => Center(child: Text('加载失败: $e')),
+      ),
+    );
+  }
+}
+
+class _QuoteTile extends ConsumerWidget {
+  const _QuoteTile({required this.quote});
+
+  final GlobalQuote quote;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final up = quote.change >= 0;
+    final color = up ? AppColors.up : AppColors.down;
+    return InkWell(
+      onTap: () {
+        if (_historySymbol(quote.code) != null) {
+          _showTrend(context, ref);
+        }
+      },
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        child: Row(
+          children: [
+            Expanded(
+              flex: 2,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    quote.fxSymbol != null
+                        ? '1 ${quote.fxSymbol} = ${Formats.amount(quote.price)} CNY'
+                        : quote.name,
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
+                  ),
+                  if (quote.fxSymbol == null)
+                    Text(
+                      quote.unit == null ? '指数' : quote.unit!,
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                ],
+              ),
+            ),
+            Expanded(
+              flex: 1,
+              child: Text(
+                quote.fxSymbol == null
+                    ? Formats.amount(quote.price)
+                    : '',
+                textAlign: TextAlign.end,
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
+              ),
+            ),
+            SizedBox(
+              width: 110,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text(
+                    '${quote.change >= 0 ? '+' : ''}${Formats.amount(quote.change)}',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(color: color),
+                  ),
+                  Text(
+                    '${quote.changePct >= 0 ? '+' : ''}${Formats.pct(quote.changePct)}',
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: color,
+                          fontWeight: FontWeight.w700,
+                        ),
+                  ),
+                ],
+              ),
+            ),
+            if (_historySymbol(quote.code) != null)
+              const Icon(Icons.chevron_right, size: 16),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showTrend(BuildContext context, WidgetRef ref) async {
+    final symbol = _historySymbol(quote.code)!;
+    final isCommodity = quote.code.startsWith('hf_');
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) => _QuoteTrendSheet(
+        title: quote.name,
+        symbol: symbol,
+        unitLabel: isCommodity ? '（${symbol == 'AU0' ? '沪金·元/克' : symbol == 'SC0' ? '沪油·元/桶' : '沪铜·元/吨'}）' : '',
+        trend: ref.watch(_trendProvider(quote.code)),
+      ),
+    );
+  }
+}
+
+class _QuoteTrendSheet extends StatelessWidget {
+  const _QuoteTrendSheet({
+    required this.title,
+    required this.symbol,
+    required this.unitLabel,
+    required this.trend,
+  });
+
+  final String title;
+  final String symbol;
+  final String unitLabel;
+  final AsyncValue<List<FlSpot>> trend;
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('$title 近三年走势$unitLabel',
+                style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 16),
+            SizedBox(
+              height: 240,
+              child: trend.when(
+                data: (spots) {
+                  if (spots.isEmpty) {
+                    return const Center(child: Text('暂无历史数据'));
+                  }
+                  var minV = double.infinity;
+                  var maxV = 0.0;
+                  for (final s in spots) {
+                    if (s.y < minV) minV = s.y;
+                    if (s.y > maxV) maxV = s.y;
+                  }
+                  final span = maxV - minV;
+                  final pad = span == 0 ? maxV * 0.05 : span * 0.1;
+                  return LineChart(
+                    LineChartData(
+                      minY: (minV - pad).clamp(0, double.infinity),
+                      maxY: maxV + pad,
+                      gridData: FlGridData(
+                        show: true,
+                        drawVerticalLine: false,
+                        horizontalInterval: span == 0 ? 1 : span / 4,
+                        getDrawingHorizontalLine: (v) => FlLine(
+                          color: Theme.of(context)
+                              .colorScheme
+                              .outlineVariant
+                              .withValues(alpha: 0.3),
+                          strokeWidth: 1,
+                        ),
+                      ),
+                      borderData: FlBorderData(show: false),
+                      titlesData: FlTitlesData(
+                        leftTitles: AxisTitles(
+                          sideTitles: SideTitles(
+                            showTitles: true,
+                            reservedSize: 52,
+                            getTitlesWidget: (v, meta) => Text(
+                              Formats.amountCompact(v),
+                              style: Theme.of(context).textTheme.bodySmall,
+                            ),
+                          ),
+                        ),
+                        bottomTitles: const AxisTitles(
+                          sideTitles: SideTitles(showTitles: false),
+                        ),
+                        topTitles: const AxisTitles(
+                          sideTitles: SideTitles(showTitles: false),
+                        ),
+                        rightTitles: const AxisTitles(
+                          sideTitles: SideTitles(showTitles: false),
+                        ),
+                      ),
+                      lineBarsData: [
+                        LineChartBarData(
+                          spots: spots,
+                          isCurved: true,
+                          curveSmoothness: 0.25,
+                          color: AppColors.up,
+                          barWidth: 2,
+                          dotData: const FlDotData(show: false),
+                          belowBarData: BarAreaData(
+                            show: true,
+                            color: AppColors.up.withValues(alpha: 0.08),
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+                loading: () => const Center(child: CircularProgressIndicator()),
+                error: (e, _) => Center(child: Text('加载失败: $e')),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}

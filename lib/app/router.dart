@@ -5,6 +5,7 @@ import '../features/accounts/account_detail_page.dart';
 import '../features/accounts/accounts_page.dart';
 import '../features/alerts/alerts_page.dart';
 import '../features/holdings/holdings_page.dart';
+import '../features/markets/markets_page.dart';
 import '../features/portfolio/portfolio_page.dart';
 import '../features/settings/settings_page.dart';
 import '../features/shell_page.dart';
@@ -36,6 +37,10 @@ final routerProvider = Provider<GoRouter>((ref) {
                 ),
               ),
             ],
+          ),
+          GoRoute(
+            path: '/markets',
+            builder: (context, state) => const MarketsPage(),
           ),
           GoRoute(
             path: '/stats',
