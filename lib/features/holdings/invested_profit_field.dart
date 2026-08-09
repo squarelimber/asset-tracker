@@ -1,8 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
-import '../../core/formats.dart';
-
 /// Linked entry for amount-based assets with two modes:
 /// - cumulative invested (cost)
 /// - current profit (amount - invested)
@@ -42,7 +40,7 @@ class _InvestedProfitFieldState extends State<InvestedProfitField> {
     // (the invested amount defaults to the current amount on save).
     final invested = widget.initialInvested;
     _investedCtrl = TextEditingController(
-      text: (invested != null && invested > 0) ? Formats.smartNum(invested) : '',
+      text: (invested != null && invested > 0) ? _plainNum(invested) : '',
     );
     _profitCtrl = TextEditingController(
       text: (invested != null && invested > 0) ? _profitText(invested) : '',
@@ -64,9 +62,18 @@ class _InvestedProfitFieldState extends State<InvestedProfitField> {
 
   double get _amount => widget.amount.value;
 
+  /// Plain number without thousands separators, so the text stays
+  /// directly parseable by double.tryParse (Formats.smartNum adds commas).
+  static String _plainNum(double v) {
+    if (v == v.roundToDouble()) return v.toInt().toString();
+    var s = v.toStringAsFixed(4);
+    s = s.replaceFirst(RegExp(r'\.?0+$'), '');
+    return s;
+  }
+
   String _profitText(double invested) {
     if (_amount <= 0) return '';
-    return Formats.smartNum(_amount - invested);
+    return _plainNum(_amount - invested);
   }
 
   void _emit() {
@@ -84,7 +91,7 @@ class _InvestedProfitFieldState extends State<InvestedProfitField> {
       _profitCtrl.text = _profitText(invested);
     } else if (profit != null && _amount > 0) {
       // Only profit entered so far -> derive invested from it.
-      _investedCtrl.text = Formats.smartNum(_amount - profit);
+      _investedCtrl.text = _plainNum(_amount - profit);
     }
     _syncing = false;
     _emit();
@@ -105,7 +112,7 @@ class _InvestedProfitFieldState extends State<InvestedProfitField> {
     final profit = double.tryParse(_profitCtrl.text.trim());
     if (profit != null && _amount > 0) {
       final invested = _amount - profit;
-      _investedCtrl.text = invested > 0 ? Formats.smartNum(invested) : '0';
+      _investedCtrl.text = invested > 0 ? _plainNum(invested) : '0';
     }
     _syncing = false;
     _emit();
