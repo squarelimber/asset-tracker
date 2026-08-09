@@ -267,9 +267,9 @@ class _TrendChart extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Fixed brand color: the line keeps one style regardless of gains
-    // or losses (up/down is conveyed by the stats figures instead).
-    final color = AppColors.primary;
+    // Fixed red brand color for a positive, energetic feel; the line does
+    // not change with gains/losses (conveyed by the stats figures instead).
+    final color = AppColors.up;
     final points = <FlSpot>[];
     var minV = double.infinity;
     var maxV = 0.0;
