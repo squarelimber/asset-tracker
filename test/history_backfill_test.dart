@@ -175,4 +175,33 @@ void main() {
     }
     expect(holdingId, isPositive);
   });
+
+  test('amount-based assets count costPrice as invested, not qty x cost', () async {
+    final accountId = await dao.createAccount(AccountsCompanion.insert(
+      name: '测试账户',
+      type: 'general',
+    ));
+    // Amount-based: quantity = 5000 balance, costPrice = 4000 invested.
+    await dao.createHolding(HoldingsCompanion.insert(
+      accountId: accountId,
+      name: '现金',
+      assetType: AssetType.bankDeposit.storageName,
+      marketSource: const Value('manual'),
+      quantity: const Value(5000),
+      costPrice: const Value(4000),
+      latestPrice: const Value(1),
+      purchaseDate: Value(DateTime(2026, 7, 1)),
+    ));
+
+    final service = HistoryBackfillService(dao, sources: {});
+    await service.backfill(now: DateTime(2026, 7, 3));
+
+    final snapshots = await dao.getSnapshots();
+    expect(snapshots, isNotEmpty);
+    for (final s in snapshots) {
+      expect(s.totalValue, closeTo(5000, 1e-6));
+      // Cost must be 4000 (invested), NOT 5000 * 4000.
+      expect(s.totalCost, closeTo(4000, 1e-6));
+    }
+  });
 }

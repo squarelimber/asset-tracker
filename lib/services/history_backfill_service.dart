@@ -78,7 +78,7 @@ class HistoryBackfillService {
 
   /// Marker for the weekend forward-fill fix + purchase-date filtering:
   /// triggers one atomic recompute of historical snapshots.
-  static const _backfillV3Marker = 'backfill_v3_atomic';
+  static const _backfillV3Marker = 'backfill_v4_cost_fix';
 
   Future<BackfillResult> backfill({DateTime? now}) async {
     final current = (now ?? DateTime.now());
@@ -147,7 +147,11 @@ class HistoryBackfillService {
           liabilities += value;
         } else {
           assets += value;
-          cost += h.quantity * h.costPrice;
+          // Amount-based assets store the cumulative invested amount in
+          // costPrice; unit-based assets store the per-unit cost.
+          cost += type.isAmountBased
+              ? (h.costPrice > 0 ? h.costPrice : h.quantity)
+              : h.quantity * h.costPrice;
         }
       }
       if (hasPrice) {
