@@ -80,19 +80,22 @@ class MarketsPage extends ConsumerWidget {
               children: [
                 for (final name in groupNames)
                   if (groups.containsKey(name)) ...[
-                    Text(name, style: Theme.of(context).textTheme.titleMedium),
-                    const SizedBox(height: 8),
-                    Card(
-                      child: Column(
-                        children: [
-                          for (final q in groups[name]!) ...[
-                            _QuoteTile(quote: q),
-                            if (q != groups[name]!.last) const Divider(height: 1),
-                          ],
-                        ],
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4, bottom: 8),
+                      child: Text(name, style: Theme.of(context).textTheme.titleMedium),
+                    ),
+                    // Xueqiu-style horizontal card strip.
+                    SizedBox(
+                      height: 118,
+                      child: ListView.separated(
+                        scrollDirection: Axis.horizontal,
+                        itemCount: groups[name]!.length,
+                        separatorBuilder: (_, _) => const SizedBox(width: 12),
+                        itemBuilder: (context, i) =>
+                            _QuoteCard(quote: groups[name]![i]),
                       ),
                     ),
-                    const SizedBox(height: 16),
+                    const SizedBox(height: 20),
                   ],
                 const SizedBox(height: 8),
                 Text(
@@ -110,8 +113,9 @@ class MarketsPage extends ConsumerWidget {
   }
 }
 
-class _QuoteTile extends ConsumerWidget {
-  const _QuoteTile({required this.quote});
+/// Xueqiu-style quote card: name, big price, colored change badge.
+class _QuoteCard extends ConsumerWidget {
+  const _QuoteCard({required this.quote});
 
   final GlobalQuote quote;
 
@@ -119,71 +123,88 @@ class _QuoteTile extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final up = quote.change >= 0;
     final color = up ? AppColors.up : AppColors.down;
-    return InkWell(
-      onTap: () {
-        if (_historySymbol(quote.code) != null) {
-          _showTrend(context, ref);
-        }
-      },
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-        child: Row(
-          children: [
-            Expanded(
-              flex: 2,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    quote.fxSymbol != null
-                        ? '1 ${quote.fxSymbol} = ${Formats.amount(quote.price)} CNY'
-                        : quote.name,
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          fontWeight: FontWeight.w600,
-                        ),
-                  ),
-                  if (quote.fxSymbol == null)
-                    Text(
-                      quote.unit == null ? '指数' : quote.unit!,
-                      style: Theme.of(context).textTheme.bodySmall,
+    final hasTrend = _historySymbol(quote.code) != null;
+    return SizedBox(
+      width: 176,
+      child: Card(
+        child: InkWell(
+          borderRadius: BorderRadius.circular(16),
+          onTap: hasTrend ? () => _showTrend(context, ref) : null,
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        quote.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
                     ),
-                ],
-              ),
-            ),
-            Expanded(
-              flex: 1,
-              child: Text(
-                quote.fxSymbol == null
-                    ? Formats.amount(quote.price)
-                    : '',
-                textAlign: TextAlign.end,
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      fontWeight: FontWeight.w600,
-                    ),
-              ),
-            ),
-            SizedBox(
-              width: 110,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  Text(
-                    '${quote.change >= 0 ? '+' : ''}${Formats.amount(quote.change)}',
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(color: color),
-                  ),
-                  Text(
-                    '${quote.changePct >= 0 ? '+' : ''}${Formats.pct(quote.changePct)}',
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: color,
+                    if (hasTrend)
+                      const Icon(Icons.chevron_right, size: 14),
+                  ],
+                ),
+                const Spacer(),
+                Text(
+                  quote.fxSymbol != null
+                      ? Formats.amount(quote.price)
+                      : Formats.amount(quote.price),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.w700,
+                        fontSize: quote.fxSymbol == null ? 22 : 18,
+                      ),
+                ),
+                const SizedBox(height: 6),
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: color,
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(
+                        '${quote.changePct >= 0 ? '+' : ''}${Formats.pct(quote.changePct)}',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 12,
                           fontWeight: FontWeight.w700,
                         ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        '${quote.change >= 0 ? '+' : ''}${Formats.amount(quote.change)}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: color,
+                            ),
+                      ),
+                    ),
+                  ],
+                ),
+                if (quote.fxSymbol != null) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    '1 ${quote.fxSymbol} = ${Formats.amount(quote.price)} CNY',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.bodySmall,
                   ),
                 ],
-              ),
+              ],
             ),
-            if (_historySymbol(quote.code) != null)
-              const Icon(Icons.chevron_right, size: 16),
-          ],
+          ),
         ),
       ),
     );
