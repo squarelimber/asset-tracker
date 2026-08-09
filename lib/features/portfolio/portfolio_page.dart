@@ -119,16 +119,15 @@ class _PortfolioPageState extends ConsumerState<PortfolioPage> {
                     children: [
                       _SummaryHeader(summary: s),
                       const SizedBox(height: 16),
-                      // On phone: allocation above net worth curve.
-                      // On tablet/desktop: side by side, curve on the right
-                      // filling the remaining width so cards align with the
-                      // header above.
+                      // On phone: net worth trend first, then allocation.
+                      // On tablet/desktop: side by side, trend on the right
+                      // filling the remaining width.
                       if (Responsive.isPhone(context))
                         Column(
                           children: [
-                            AllocationCard(summary: s),
-                            const SizedBox(height: 16),
                             NetWorthChart(),
+                            const SizedBox(height: 16),
+                            AllocationCard(summary: s),
                           ],
                         )
                       else
