@@ -400,6 +400,10 @@ class _HoldingsPageState extends ConsumerState<HoldingsPage> {
         ],
       ),
     );
+    // Wait for the dialog's exit animation to finish before releasing the
+    // controllers: otherwise a rebuild during the animation accesses an
+    // already-disposed controller (crashes the save flow).
+    await Future<void>.delayed(const Duration(milliseconds: 350));
     nameCtrl.dispose();
     symbolCtrl.dispose();
     quantityCtrl.dispose();
@@ -811,6 +815,8 @@ class _HoldingCard extends ConsumerWidget {
       await ref.read(daoProvider).updateHolding(updated);
       ref.read(daoProvider).setSetting(historySyncDirtyKey, historyDirtySet);
     }
+    // Wait for the dialog's exit animation before releasing controllers.
+    await Future<void>.delayed(const Duration(milliseconds: 350));
     nameCtrl.dispose();
     symbolCtrl.dispose();
     quantityCtrl.dispose();
