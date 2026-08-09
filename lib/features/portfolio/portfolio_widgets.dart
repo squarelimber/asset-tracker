@@ -10,6 +10,8 @@ import '../../data/database.dart';
 import '../../domain/holding_details.dart';
 import '../../domain/portfolio_calculator.dart';
 import '../../domain/range_stats.dart';
+import '../../services/market/history_lookup.dart';
+import '../../services/market/history_source.dart';
 
 /// Asset allocation donut chart with legend.
 class AllocationCard extends ConsumerWidget {
@@ -112,6 +114,8 @@ class _NetWorthChartState extends ConsumerState<NetWorthChart> {
   RangeOption _range = RangeOption.year1;
   DateTime? _customFrom;
   DateTime? _customTo;
+  bool _showBenchmark = false;
+  HistoryPriceLookup? _benchmark;
 
   static const _options = [
     RangeOption.month1,
@@ -122,6 +126,29 @@ class _NetWorthChartState extends ConsumerState<NetWorthChart> {
     RangeOption.all,
     RangeOption.custom,
   ];
+
+  Future<void> _toggleBenchmark(bool on) async {
+    setState(() => _showBenchmark = on);
+    if (on && _benchmark == null) {
+      try {
+        final now = DateTime.now();
+        final source = SinaKLineSource();
+        // 1000 trading days (~4 years) covers most ranges.
+        final history = await source.fetch(
+          'sh000300',
+          now.subtract(const Duration(days: 1500)),
+          now,
+        );
+        if (history.isNotEmpty && mounted) {
+          setState(() => _benchmark = HistoryPriceLookup(history));
+        } else if (mounted) {
+          setState(() => _showBenchmark = false);
+        }
+      } catch (_) {
+        if (mounted) setState(() => _showBenchmark = false);
+      }
+    }
+  }
 
   Future<void> _pickCustomRange() async {
     final now = DateTime.now();
@@ -188,7 +215,17 @@ class _NetWorthChartState extends ConsumerState<NetWorthChart> {
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
               ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                const Text('对比沪深300', style: TextStyle(fontSize: 13)),
+                Switch(
+                  value: _showBenchmark,
+                  onChanged: _toggleBenchmark,
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
             snapshots.when(
               data: (all) {
                 final now = DateTime.now();
@@ -245,6 +282,7 @@ class _NetWorthChartState extends ConsumerState<NetWorthChart> {
                     ],
                     _TrendChart(
                       list: list,
+                      benchmark: _showBenchmark ? _benchmark : null,
                       onDayTap: (date) => _showDayDetail(context, date),
                     ),
                   ],
@@ -397,9 +435,12 @@ final _dayDetailProvider = FutureProvider.autoDispose.family<DayDetail?, DateTim
 }
 
 class _TrendChart extends StatelessWidget {
-  const _TrendChart({required this.list, this.onDayTap});
+  const _TrendChart({required this.list, this.benchmark, this.onDayTap});
 
   final List<SnapshotRow> list;
+
+  /// CSI300 index history for a normalized benchmark overlay.
+  final HistoryPriceLookup? benchmark;
 
   /// Called with the tapped snapshot date (yyyy-MM-dd).
   final ValueChanged<String>? onDayTap;
@@ -422,9 +463,31 @@ class _TrendChart extends StatelessWidget {
     final pad = span == 0 ? maxV * 0.05 : span * 0.1;
     final longRange = list.length > 250;
 
+    // Benchmark: CSI300 normalized to the same starting value (100%).
+    final benchSpots = <FlSpot>[];
+    if (benchmark != null) {
+      var base = 0.0;
+      for (var i = 0; i < list.length; i++) {
+        final idx = benchmark!.priceOnOrBefore(list[i].date);
+        if (idx == null || idx <= 0) continue;
+        if (base == 0) base = idx;
+        benchSpots.add(FlSpot(i.toDouble(), idx / base));
+      }
+      // Align scales: multiply the benchmark line so it overlays the net
+      // worth curve (both start at 100% of their own series).
+      if (benchSpots.isNotEmpty) {
+        final netBase = list.first.totalValue;
+        for (final s in benchSpots) {
+          benchSpots[benchSpots.indexOf(s)] = FlSpot(s.x, s.y * netBase);
+        }
+      }
+    }
+
     return SizedBox(
       height: 240,
-      child: LineChart(
+      child: Stack(
+        children: [
+          LineChart(
         LineChartData(
           minY: (minV - pad).clamp(0, double.infinity),
           maxY: maxV + pad,
@@ -515,8 +578,36 @@ class _TrendChart extends StatelessWidget {
                 ),
               ),
             ),
+            if (benchSpots.isNotEmpty)
+              LineChartBarData(
+                spots: benchSpots,
+                isCurved: true,
+                curveSmoothness: 0.25,
+                color: Theme.of(context).colorScheme.outline,
+                barWidth: 1.5,
+                dashArray: [6, 4],
+                dotData: const FlDotData(show: false),
+              ),
           ],
         ),
+      ),
+        Positioned(
+          left: 0,
+          bottom: 0,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(width: 12, height: 2, color: color),
+              const SizedBox(width: 4),
+              Text('资产', style: Theme.of(context).textTheme.bodySmall),
+              const SizedBox(width: 12),
+              Container(width: 12, height: 2, color: Theme.of(context).colorScheme.outline),
+              const SizedBox(width: 4),
+              Text('沪深300', style: Theme.of(context).textTheme.bodySmall),
+            ],
+          ),
+        ),
+      ],
       ),
     );
   }

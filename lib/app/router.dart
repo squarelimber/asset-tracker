@@ -8,6 +8,7 @@ import '../features/holdings/holdings_page.dart';
 import '../features/portfolio/portfolio_page.dart';
 import '../features/settings/settings_page.dart';
 import '../features/shell_page.dart';
+import '../features/stats/stats_page.dart';
 
 final routerProvider = Provider<GoRouter>((ref) {
   return GoRouter(
@@ -35,6 +36,10 @@ final routerProvider = Provider<GoRouter>((ref) {
                 ),
               ),
             ],
+          ),
+          GoRoute(
+            path: '/stats',
+            builder: (context, state) => const StatsPage(),
           ),
           GoRoute(
             path: '/alerts',

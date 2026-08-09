@@ -15,6 +15,7 @@ class ShellPage extends StatelessWidget {
     (icon: Icons.donut_large_outlined, activeIcon: Icons.donut_large, label: '总览', path: '/portfolio'),
     (icon: Icons.pie_chart_outline, activeIcon: Icons.pie_chart, label: '持仓', path: '/holdings'),
     (icon: Icons.account_balance_wallet_outlined, activeIcon: Icons.account_balance_wallet, label: '账户', path: '/accounts'),
+    (icon: Icons.assessment_outlined, activeIcon: Icons.assessment, label: '统计', path: '/stats'),
     (icon: Icons.notifications_outlined, activeIcon: Icons.notifications, label: '提醒', path: '/alerts'),
     (icon: Icons.settings_outlined, activeIcon: Icons.settings, label: '设置', path: '/settings'),
   ];

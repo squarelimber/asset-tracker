@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:file_selector/file_selector.dart';
@@ -6,8 +7,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/providers.dart';
 import '../../app/theme.dart';
+import '../../core/formats.dart';
 import '../../core/responsive.dart';
 import '../../services/backup_service.dart';
+import '../../services/csv_export.dart';
 
 final backupServiceProvider = Provider<BackupService>(
   (ref) => BackupService(ref.watch(daoProvider)),
@@ -46,6 +49,35 @@ class SettingsPage extends ConsumerWidget {
                     title: const Text('导入备份'),
                     subtitle: const Text('从 JSON 文件恢复（将覆盖当前全部数据）'),
                     onTap: () => _import(context, ref),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 24),
+            const Divider(),
+            const SizedBox(height: 8),
+            Text('导出数据', style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 8),
+            const Text(
+              '导出为 Excel 可打开的 CSV（UTF-8）。',
+              style: TextStyle(fontSize: 13),
+            ),
+            const SizedBox(height: 16),
+            Card(
+              child: Column(
+                children: [
+                  ListTile(
+                    leading: const Icon(Icons.table_chart_outlined),
+                    title: const Text('导出持仓 CSV'),
+                    subtitle: const Text('账户、持仓明细、市值与收益'),
+                    onTap: () => _exportCsv(context, ref, csv: true, holdings: true),
+                  ),
+                  const Divider(height: 1),
+                  ListTile(
+                    leading: const Icon(Icons.receipt_long_outlined),
+                    title: const Text('导出流水 CSV'),
+                    subtitle: const Text('全部交易记录'),
+                    onTap: () => _exportCsv(context, ref, csv: true, holdings: false),
                   ),
                 ],
               ),
@@ -116,6 +148,37 @@ class SettingsPage extends ConsumerWidget {
         content: Text(result.message),
         backgroundColor: result.ok ? null : AppColors.up,
       ),
+    );
+  }
+
+  Future<void> _exportCsv(
+    BuildContext context,
+    WidgetRef ref, {
+    required bool csv,
+    required bool holdings,
+  }) async {
+    final dao = ref.read(daoProvider);
+    final accounts = await dao.getAccounts();
+    final accountName = {for (final a in accounts) a.id: a.name};
+    final allHoldings = await dao.getHoldings();
+    final holdingName = {for (final h in allHoldings) h.id: h.name};
+
+    final csvExport = const CsvExport();
+    final content = holdings
+        ? csvExport.holdings(allHoldings, accountName)
+        : csvExport.transactions(await dao.getTransactions(), holdingName);
+
+    const typeGroup = XTypeGroup(label: 'CSV', extensions: ['csv']);
+    final location = await getSaveLocation(
+      suggestedName: holdings ? '持仓_${todayKey()}.csv' : '流水_${todayKey()}.csv',
+      acceptedTypeGroups: [typeGroup],
+    );
+    if (location == null) return;
+    final file = File(location.path);
+    await file.writeAsString(content, encoding: utf8);
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('已导出 ${location.path}')),
     );
   }
 }

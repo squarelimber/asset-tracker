@@ -42,6 +42,9 @@ class HoldingsPage extends ConsumerStatefulWidget {
 
 class _HoldingsPageState extends ConsumerState<HoldingsPage> {
   HoldingSort _sort = HoldingSort.defaultOrder;
+  bool _searching = false;
+  final _searchCtrl = TextEditingController();
+  String _query = '';
 
   @override
   void initState() {
@@ -55,19 +58,31 @@ class _HoldingsPageState extends ConsumerState<HoldingsPage> {
     });
   }
 
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
   List<HoldingRow> _sorted(List<HoldingRow> list) {
-    final sorted = [...list];
+    final filtered = _query.trim().isEmpty
+        ? [...list]
+        : list
+            .where((h) =>
+                h.name.toLowerCase().contains(_query.toLowerCase()) ||
+                (h.symbol ?? '').toLowerCase().contains(_query.toLowerCase()))
+            .toList();
     switch (_sort) {
       case HoldingSort.defaultOrder:
         break;
       case HoldingSort.amountDesc:
-        sorted.sort((a, b) => _holdingMarketValue(b).compareTo(_holdingMarketValue(a)));
+        filtered.sort((a, b) => _holdingMarketValue(b).compareTo(_holdingMarketValue(a)));
       case HoldingSort.amountAsc:
-        sorted.sort((a, b) => _holdingMarketValue(a).compareTo(_holdingMarketValue(b)));
+        filtered.sort((a, b) => _holdingMarketValue(a).compareTo(_holdingMarketValue(b)));
       case HoldingSort.nameAsc:
-        sorted.sort((a, b) => a.name.compareTo(b.name));
+        filtered.sort((a, b) => a.name.compareTo(b.name));
     }
-    return sorted;
+    return filtered;
   }
 
   @override
@@ -76,8 +91,29 @@ class _HoldingsPageState extends ConsumerState<HoldingsPage> {
     final refreshing = ref.watch(_refreshingProvider);
     return Scaffold(
       appBar: AppBar(
-        title: const Text('持仓'),
+        title: _searching
+            ? TextField(
+                controller: _searchCtrl,
+                autofocus: true,
+                decoration: const InputDecoration(
+                  hintText: '搜索名称或代码',
+                  border: InputBorder.none,
+                ),
+                onChanged: (v) => setState(() => _query = v),
+              )
+            : const Text('持仓'),
         actions: [
+          IconButton(
+            tooltip: '搜索',
+            icon: Icon(_searching ? Icons.close : Icons.search),
+            onPressed: () => setState(() {
+              _searching = !_searching;
+              if (!_searching) {
+                _query = '';
+                _searchCtrl.clear();
+              }
+            }),
+          ),
           PopupMenuButton<HoldingSort>(
             tooltip: '排序',
             icon: const Icon(Icons.sort),

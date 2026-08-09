@@ -1,7 +1,7 @@
 import '../core/enums.dart';
 import '../data/database.dart';
 
-/// Per-asset-type breakdown entry.
+/// Per-asset-type breakdown entry (CNY-converted values).
 class TypeBreakdown {
   const TypeBreakdown({required this.type, required this.marketValue, required this.cost});
 
@@ -14,6 +14,7 @@ class TypeBreakdown {
 }
 
 /// Aggregated portfolio figures computed from holdings.
+/// All amounts are in CNY (per-holding currency converted via [cnyRates]).
 class PortfolioSummary {
   const PortfolioSummary({
     required this.totalAssets,
@@ -22,6 +23,7 @@ class PortfolioSummary {
     required this.todayChange,
     required this.todayChangePct,
     required this.breakdown,
+    this.realizedProfit = 0,
   });
 
   final double totalAssets;
@@ -31,9 +33,16 @@ class PortfolioSummary {
   final double? todayChangePct;
   final List<TypeBreakdown> breakdown;
 
+  /// Sum of realized gains from sell transactions (approximate: computed
+  /// with the current unit cost when the average cost may have changed).
+  final double realizedProfit;
+
   double get netWorth => totalAssets - totalLiabilities;
   double get profit => totalAssets - totalCost;
   double get profitPct => totalCost == 0 ? 0 : profit / totalCost;
+
+  /// Unrealized profit (floating) = total profit minus realized gains.
+  double get unrealizedProfit => profit - realizedProfit;
 }
 
 /// Pure portfolio math, unit-testable without widgets or DB.
@@ -42,13 +51,22 @@ class PortfolioCalculator {
 
   /// Computes the summary from holdings and cached previous prices.
   ///
-  /// [prevPriceBySymbol] maps symbol -> previous close (CNY) used to
-  /// compute today's change. Holdings without a previous price are
-  /// excluded from the change figure.
+  /// [prevPriceBySymbol] maps symbol -> previous close price (same currency
+  /// as the holding) used to compute today's change.
+  /// [cnyRates] maps ISO currency code -> CNY per unit (default 1 = CNY),
+  /// applied to convert every holding's market value and cost into CNY.
+  /// [sellTransactions] (optional) feeds the realized-profit estimate.
   PortfolioSummary compute(
     List<HoldingRow> holdings, {
     Map<String, double> prevPriceBySymbol = const {},
+    Map<String, double> cnyRates = const {},
+    List<TransactionRow> sellTransactions = const [],
   }) {
+    double rateOf(String currency) {
+      final rate = cnyRates[currency.toUpperCase()];
+      return (rate == null || rate <= 0) ? 1 : rate;
+    }
+
     var assets = 0.0;
     var liabilities = 0.0;
     var cost = 0.0;
@@ -60,12 +78,15 @@ class PortfolioCalculator {
 
     for (final h in holdings) {
       final type = AssetType.fromStorage(h.assetType);
-      // Amount-based assets: quantity = current amount, price is fixed at 1
-      // and costPrice stores the cumulative invested amount.
+      final rate = rateOf(h.currency);
+      // Amount-based assets: quantity = current amount, price fixed at 1 and
+      // costPrice stores the cumulative invested amount (in the currency).
       final marketValue =
-          type.isAmountBased ? h.quantity : h.quantity * h.latestPrice;
-      final holdingCost =
-          type.isAmountBased ? (h.costPrice > 0 ? h.costPrice : h.quantity) : h.quantity * h.costPrice;
+          (type.isAmountBased ? h.quantity : h.quantity * h.latestPrice) * rate;
+      final holdingCost = (type.isAmountBased
+              ? (h.costPrice > 0 ? h.costPrice : h.quantity)
+              : h.quantity * h.costPrice) *
+          rate;
       if (type == AssetType.liability) {
         liabilities += marketValue;
         continue;
@@ -80,8 +101,8 @@ class PortfolioCalculator {
           ? prevPriceBySymbol[symbol]
           : null;
       if (prev != null && prev > 0) {
-        todayChange += (h.latestPrice - prev) * h.quantity;
-        prevTotal += prev * h.quantity;
+        todayChange += (h.latestPrice - prev) * h.quantity * rate;
+        prevTotal += prev * h.quantity * rate;
       }
     }
 
@@ -94,6 +115,8 @@ class PortfolioCalculator {
         ),
     ]..sort((a, b) => b.marketValue.compareTo(a.marketValue));
 
+    final realized = _realizedProfit(holdings, sellTransactions);
+
     return PortfolioSummary(
       totalAssets: assets,
       totalLiabilities: liabilities,
@@ -101,6 +124,27 @@ class PortfolioCalculator {
       todayChange: todayChange,
       todayChangePct: prevTotal == 0 ? null : todayChange / prevTotal,
       breakdown: breakdown,
+      realizedProfit: realized,
     );
+  }
+
+  /// Sum of realized gains over all sell transactions.
+  /// Estimated with the holding's current unit cost, which is exact when no
+  /// purchase happened after the sell (moving average otherwise approximates).
+  double _realizedProfit(List<HoldingRow> holdings, List<TransactionRow> sells) {
+    if (sells.isEmpty) return 0;
+    final costByHolding = <int, double>{
+      for (final h in holdings) h.id: h.costPrice,
+    };
+    var total = 0.0;
+    for (final t in sells) {
+      final holdingId = t.holdingId;
+      if (holdingId == null) continue;
+      final unitCost = costByHolding[holdingId] ?? 0;
+      final qty = t.quantity ?? 0;
+      final price = t.price ?? 0;
+      total += (price - unitCost) * qty;
+    }
+    return total;
   }
 }

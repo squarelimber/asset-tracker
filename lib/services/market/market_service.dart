@@ -128,6 +128,33 @@ class MarketService {
     return _fetchFromSource(source, symbols);
   }
 
+  /// CNY per unit for the given currency codes, combining the cached rates
+  /// with a live fetch for missing ones. Unknown/failed codes are omitted.
+  Future<Map<String, double>> loadCnyRates(List<String> currencies) async {
+    final unique = currencies.map((c) => c.toUpperCase()).toSet().toList();
+    if (unique.isEmpty) return const {};
+    final rates = <String, double>{};
+
+    final cached = await _dao.getCachedPrices(unique);
+    for (final c in unique) {
+      final row = cached[c];
+      if (row != null && row.price > 0) rates[c] = row.price;
+    }
+
+    final missing = unique.where((c) => !rates.containsKey(c)).toList();
+    if (missing.isNotEmpty) {
+      try {
+        final quotes = await fetchQuotes(MarketSource.forex, missing);
+        for (final q in quotes) {
+          if (q.isSuccess && q.price > 0) rates[q.symbol] = q.price;
+        }
+      } catch (_) {
+        // Keep whatever we got from the cache.
+      }
+    }
+    return rates;
+  }
+
   /// Fetches the latest price for a single holding and writes it back
   /// (holding row + price cache). Returns the fetched quote, or null.
   Future<MarketQuote?> refreshHolding(HoldingRow holding) async {

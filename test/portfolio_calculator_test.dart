@@ -104,4 +104,45 @@ void main() {
     expect(s.todayChange, 0);
     expect(s.todayChangePct, isNull);
   });
+
+  test('non-CNY holdings are converted into CNY', () {
+    final s = calc.compute(
+      [
+        _holding(id: 1, type: 'stock', price: 100, cost: 80), // CNY
+        _holding(id: 2, type: 'cash', quantity: 1000, price: 1, cost: 1000)
+            .copyWith(currency: 'USD'), // USD cash
+      ],
+      cnyRates: {'USD': 7.2},
+    );
+    // 100 CNY + 1000 USD * 7.2 = 7300 CNY.
+    expect(s.totalAssets, closeTo(7300, 1e-6));
+    expect(s.totalCost, closeTo(80 + 7200, 1e-6));
+  });
+
+  test('realized profit sums sell gains using current unit cost', () {
+    final s = calc.compute(
+      [
+        _holding(id: 1, type: 'stock', quantity: 100, price: 20, cost: 10),
+      ],
+      sellTransactions: [
+        TransactionRow(
+          id: 1,
+          accountId: 1,
+          holdingId: 1,
+          cashSourceId: null,
+          cashTargetId: null,
+          type: 'sell',
+          quantity: 50,
+          price: 15,
+          amount: 750,
+          currency: 'CNY',
+          occurredAt: DateTime(2026, 1, 1),
+          note: null,
+        ),
+      ],
+    );
+    // (15 - 10) * 50 = 250 realized; total profit = (20-10)*100 = 1000.
+    expect(s.realizedProfit, closeTo(250, 1e-6));
+    expect(s.unrealizedProfit, closeTo(750, 1e-6));
+  });
 }

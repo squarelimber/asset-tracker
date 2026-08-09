@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/providers.dart';
 import '../../app/theme.dart';
+import '../../core/enums.dart';
 import '../../core/formats.dart';
 import '../../core/history_sync.dart';
 import '../../core/responsive.dart';
@@ -27,7 +28,20 @@ final _summaryProvider = FutureProvider<PortfolioSummary>((ref) async {
     for (final entry in cache.entries)
       if (entry.value.prevClose != null) entry.key: entry.value.prevClose!,
   };
-  return const PortfolioCalculator().compute(holdings, prevPriceBySymbol: prev);
+  // Convert non-CNY holdings into CNY using current FX rates.
+  final currencies =
+      holdings.map((h) => h.currency).where((c) => c != 'CNY').toList();
+  final cnyRates = await ref.read(marketServiceProvider).loadCnyRates(currencies);
+  // Realized gains from sell transactions.
+  final sells = (await dao.getTransactions())
+      .where((t) => t.type == TransactionType.sell.storageName)
+      .toList();
+  return const PortfolioCalculator().compute(
+    holdings,
+    prevPriceBySymbol: prev,
+    cnyRates: cnyRates,
+    sellTransactions: sells,
+  );
 });
 
 class PortfolioPage extends ConsumerStatefulWidget {
@@ -213,6 +227,20 @@ class _SummaryHeader extends StatelessWidget {
                   value: '${summary.profit >= 0 ? '+' : ''}¥${Formats.amount(summary.profit)}',
                   color: context.changeColor(summary.profit),
                 ),
+                if (summary.realizedProfit != 0)
+                  _Chip(
+                    label: '已落袋收益',
+                    value:
+                        '${summary.realizedProfit >= 0 ? '+' : ''}¥${Formats.amount(summary.realizedProfit)}',
+                    color: context.changeColor(summary.realizedProfit),
+                  ),
+                if (summary.unrealizedProfit != 0)
+                  _Chip(
+                    label: '当前浮盈',
+                    value:
+                        '${summary.unrealizedProfit >= 0 ? '+' : ''}¥${Formats.amount(summary.unrealizedProfit)}',
+                    color: context.changeColor(summary.unrealizedProfit),
+                  ),
                 if (summary.totalLiabilities > 0)
                   _Chip(
                     label: '负债',
