@@ -18,10 +18,55 @@ class DataMigrationService {
   /// created without one, so they auto-sync like other market-linked assets.
   static const _goldSymbolMigrated = 'gold_symbol_filled';
 
+  /// Rebuilds the holdings table without the legacy UNIQUE(symbol)
+  /// constraint (present in databases created at schema v1).
+  static const _holdingsRebuilt = 'holdings_rebuilt_v5';
+
   /// Runs all pending one-time migrations. Safe to call on every launch.
   Future<void> run() async {
     await _migrateAmountBased();
     await _migrateGoldSymbol();
+    await _rebuildHoldingsTable();
+  }
+
+  /// SQLite cannot drop a UNIQUE constraint without rebuilding the table.
+  /// Recreate `holdings` identically but without UNIQUE(symbol) so the same
+  /// market code can exist across multiple holdings/accounts.
+  Future<void> _rebuildHoldingsTable() async {
+    final marker = await _getSetting(_holdingsRebuilt);
+    if (marker != null) return;
+
+    await _db.customStatement('ALTER TABLE holdings RENAME TO holdings_tmp;');
+    await _db.customStatement('''
+      CREATE TABLE holdings (
+        id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+        account_id INTEGER NOT NULL REFERENCES accounts (id),
+        name TEXT NOT NULL,
+        asset_type TEXT NOT NULL,
+        market_source TEXT NOT NULL DEFAULT 'manual',
+        symbol TEXT NULL,
+        quantity REAL NOT NULL DEFAULT 0.0,
+        cost_price REAL NOT NULL DEFAULT 0.0,
+        latest_price REAL NOT NULL DEFAULT 0.0,
+        currency TEXT NOT NULL DEFAULT 'CNY',
+        note TEXT NULL,
+        created_at INTEGER NOT NULL DEFAULT (CAST(strftime('%s', CURRENT_TIMESTAMP) AS INTEGER)),
+        updated_at INTEGER NOT NULL DEFAULT (CAST(strftime('%s', CURRENT_TIMESTAMP) AS INTEGER)),
+        purchase_date INTEGER NULL
+      );
+    ''');
+    await _db.customStatement('''
+      INSERT INTO holdings (id, account_id, name, asset_type, market_source, symbol,
+                            quantity, cost_price, latest_price, currency, note,
+                            created_at, updated_at, purchase_date)
+      SELECT id, account_id, name, asset_type, market_source, symbol,
+             quantity, cost_price, latest_price, currency, note,
+             created_at, updated_at, purchase_date
+      FROM holdings_tmp;
+    ''');
+    await _db.customStatement('DROP TABLE holdings_tmp;');
+
+    await _setSetting(_holdingsRebuilt, '${DateTime.now().millisecondsSinceEpoch}');
   }
 
   Future<void> _migrateAmountBased() async {

@@ -350,24 +350,34 @@ class _HoldingsPageState extends ConsumerState<HoldingsPage> {
               final userPrice = double.tryParse(latestPriceCtrl.text.trim());
               final autoCny =
                   type.isMarketLinked || type == AssetType.bankWealth;
-              final createdId = await dao.createHolding(HoldingsCompanion.insert(
-                accountId: accountId.value!,
-                name: name,
-                assetType: type.storageName,
-                marketSource: Value(marketSource),
-                symbol: hasSymbol ? Value(symbol) : const Value.absent(),
-                quantity: Value(qty),
-                costPrice: Value(type.isAmountBased
-                    ? (investedResult ?? qty)
-                    : (invested ?? 0)),
-                latestPrice: Value(type.isAmountBased ? 1 : (userPrice ?? 0)),
-                purchaseDate: Value(purchaseDate.value),
-                currency: Value(autoCny
-                    ? 'CNY'
-                    : (currencyCtrl.text.trim().toUpperCase().isEmpty
-                        ? 'CNY'
-                        : currencyCtrl.text.trim().toUpperCase())),
-              ));
+              int createdId;
+              try {
+                createdId = await dao.createHolding(HoldingsCompanion.insert(
+                  accountId: accountId.value!,
+                  name: name,
+                  assetType: type.storageName,
+                  marketSource: Value(marketSource),
+                  symbol: hasSymbol ? Value(symbol) : const Value.absent(),
+                  quantity: Value(qty),
+                  costPrice: Value(type.isAmountBased
+                      ? (investedResult ?? qty)
+                      : (invested ?? 0)),
+                  latestPrice: Value(type.isAmountBased ? 1 : (userPrice ?? 0)),
+                  purchaseDate: Value(purchaseDate.value),
+                  currency: Value(autoCny
+                      ? 'CNY'
+                      : (currencyCtrl.text.trim().toUpperCase().isEmpty
+                          ? 'CNY'
+                          : currencyCtrl.text.trim().toUpperCase())),
+                ));
+              } catch (e) {
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('保存失败：$e')),
+                  );
+                }
+                return;
+              }
               if (context.mounted) Navigator.pop(context);
 
               // Auto-fetch the latest price for market-linked holdings

@@ -134,4 +134,40 @@ void main() {
     final wealth = holdings.firstWhere((h) => h.name == '现金宝');
     expect(wealth.symbol, isNull);
   });
+
+  test('rebuild drops the legacy UNIQUE(symbol) constraint', () async {
+    // Simulate a v1-era database: holdings table with UNIQUE(symbol).
+    await db.customStatement(
+      'ALTER TABLE holdings RENAME TO holdings_v1;'
+      "CREATE TABLE holdings (id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT, "
+      "account_id INTEGER NOT NULL, name TEXT NOT NULL, asset_type TEXT NOT NULL, "
+      "market_source TEXT NOT NULL DEFAULT 'manual', symbol TEXT NULL, "
+      "quantity REAL NOT NULL DEFAULT 0.0, cost_price REAL NOT NULL DEFAULT 0.0, "
+      "latest_price REAL NOT NULL DEFAULT 0.0, currency TEXT NOT NULL DEFAULT 'CNY', "
+      "note TEXT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, "
+      "purchase_date INTEGER NULL, UNIQUE (symbol));"
+      'INSERT INTO holdings (account_id, name, asset_type, symbol, quantity, cost_price, latest_price, created_at, updated_at) '
+      "VALUES (0, '旧基金', 'mutual_fund', '110022', 100, 1.0, 1.0, 0, 0);"
+      'DROP TABLE holdings_v1;',
+    );
+
+    await DataMigrationService(db).run();
+
+    // Same symbol can now be inserted twice (the old constraint is gone).
+    await dao.createHolding(HoldingsCompanion.insert(
+      accountId: 0,
+      name: '新基金',
+      assetType: 'mutual_fund',
+      marketSource: const Value('eastmoney'),
+      symbol: const Value('110022'),
+      quantity: const Value(100),
+      costPrice: const Value(1.5),
+      latestPrice: const Value(1.6),
+      purchaseDate: Value(DateTime(2026, 7, 1)),
+    ));
+
+    final holdings = await dao.getHoldings();
+    expect(holdings, hasLength(2));
+    expect(holdings.map((h) => h.symbol).toSet(), {'110022'});
+  });
 }
