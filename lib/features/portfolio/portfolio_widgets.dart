@@ -441,7 +441,6 @@ class _NetWorthChartState extends ConsumerState<NetWorthChart> {
                                   label: _benchIndexes
                                       .firstWhere((b) => b.code == code)
                                       .label,
-                                  dashed: true,
                                 ),
                           ],
                         ),
@@ -673,10 +672,6 @@ class _TrendChart extends StatelessWidget {
       if (v < minV) minV = v;
       if (v > maxV) maxV = v;
     }
-    final span = maxV - minV;
-    final pad = span == 0 ? maxV.abs() * 0.05 : span * 0.12;
-    final longRange = list.length > 250;
-
     // Benchmarks: normalized return rates (%), same start point as the
     // portfolio return-rate view: (price / base - 1) * 100.
     final benchSeries = <_BenchSeries, List<FlSpot>>{};
@@ -695,6 +690,17 @@ class _TrendChart extends StatelessWidget {
       }
     }
 
+    // Include benchmark values in the Y range so lines never overflow the
+    // chart when an index moves far beyond the portfolio series.
+    for (final spots in benchSeries.values) {
+      for (final s in spots) {
+        if (s.y < minV) minV = s.y;
+        if (s.y > maxV) maxV = s.y;
+      }
+    }
+    final span = maxV - minV;
+    final pad = span == 0 ? maxV.abs() * 0.05 : span * 0.12;
+    final longRange = list.length > 250;
     String valueText(double v) => isRate
         ? '${v >= 0 ? '+' : ''}${Formats.pct(v / 100)}'
         : Formats.amountCompact(v);
@@ -809,9 +815,8 @@ class _TrendChart extends StatelessWidget {
                 spots: entry.value,
                 isCurved: true,
                 curveSmoothness: 0.25,
-                color: entry.key.color,
+                color: entry.key.color.withValues(alpha: 0.8),
                 barWidth: 1.5,
-                dashArray: [4, 4],
                 dotData: const FlDotData(show: false),
               ),
           ],
@@ -822,11 +827,10 @@ class _TrendChart extends StatelessWidget {
 }
 
 class _LegendDot extends StatelessWidget {
-  const _LegendDot({required this.color, required this.label, this.dashed = false});
+  const _LegendDot({required this.color, required this.label});
 
   final Color color;
   final String label;
-  final bool dashed;
 
   @override
   Widget build(BuildContext context) {
@@ -835,7 +839,7 @@ class _LegendDot extends StatelessWidget {
       children: [
         CustomPaint(
           size: const Size(14, 3),
-          painter: _LinePainter(color: color, dashed: dashed),
+          painter: _LinePainter(color: color),
         ),
         const SizedBox(width: 5),
         Text(label, style: Theme.of(context).textTheme.bodySmall),
@@ -845,10 +849,9 @@ class _LegendDot extends StatelessWidget {
 }
 
 class _LinePainter extends CustomPainter {
-  const _LinePainter({required this.color, required this.dashed});
+  const _LinePainter({required this.color});
 
   final Color color;
-  final bool dashed;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -856,21 +859,10 @@ class _LinePainter extends CustomPainter {
       ..color = color
       ..strokeWidth = 2
       ..strokeCap = StrokeCap.round;
-    if (!dashed) {
-      canvas.drawLine(Offset.zero, Offset(size.width, 0), paint);
-      return;
-    }
-    const dash = 4.0;
-    const gap = 3.0;
-    var x = 0.0;
-    while (x < size.width) {
-      final end = (x + dash).clamp(0.0, size.width);
-      canvas.drawLine(Offset(x, 0), Offset(end, 0), paint);
-      x += dash + gap;
-    }
+    canvas.drawLine(Offset.zero, Offset(size.width, 0), paint);
   }
 
   @override
   bool shouldRepaint(covariant _LinePainter oldDelegate) =>
-      oldDelegate.color != color || oldDelegate.dashed != dashed;
+      oldDelegate.color != color;
 }
