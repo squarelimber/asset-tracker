@@ -7,8 +7,11 @@ import '../../core/enums.dart';
 import '../../core/formats.dart';
 import '../../data/database.dart';
 
-/// Dialog for recording a transaction against a specific holding
-/// (buy / sell / dividend).
+/// Dialog for recording a transaction against a specific holding.
+/// Available types follow the holding's nature:
+/// - share-based (stocks/funds/gold/wealth/crypto): buy / sell / dividend
+/// - amount-based (cash/deposit/liquid wealth): income / expense /
+///   transfer in / transfer out
 Future<void> showHoldingTransactionDialog(
   BuildContext context,
   WidgetRef ref,
@@ -16,34 +19,50 @@ Future<void> showHoldingTransactionDialog(
 ) async {
   final holdings = ref.read(holdingsProvider).value ?? const [];
   final type = AssetType.fromStorage(holding.assetType);
+  final isShare = type.isMarketLinked || type == AssetType.bankWealth;
 
-  // Cash holdings available as deduction/credit target.
-  final cashHoldings =
-      holdings.where((h) => AssetType.fromStorage(h.assetType).isAmountBased).toList();
+  // Money holdings usable as the counterparty for transfers.
+  final moneyHoldings = holdings
+      .where((h) {
+        final t = AssetType.fromStorage(h.assetType);
+        return (t.isAmountBased || t == AssetType.liability) && h.id != holding.id;
+      })
+      .toList();
 
   // Available transaction types for this holding.
-  final available = <TransactionType>[];
-  if (type == AssetType.stock ||
-      type == AssetType.etf ||
-      type == AssetType.mutualFund ||
-      type == AssetType.gold ||
-      type == AssetType.crypto ||
-      type == AssetType.bankWealth) {
-    available.addAll([TransactionType.buy, TransactionType.sell]);
-  }
-  available.add(TransactionType.dividend);
+  final available = isShare
+      ? <TransactionType>[TransactionType.buy, TransactionType.sell, TransactionType.dividend]
+      : <TransactionType>[
+          TransactionType.income,
+          TransactionType.expense,
+          TransactionType.transferIn,
+          TransactionType.transferOut,
+        ];
 
   final txnType = ValueNotifier<TransactionType>(available.first);
   final qtyCtrl = TextEditingController();
   final priceCtrl = TextEditingController();
   final amountCtrl = TextEditingController();
-  final cashId = ValueNotifier<int?>(cashHoldings.isEmpty ? null : cashHoldings.first.id);
+  final cashId = ValueNotifier<int?>(moneyHoldings.isEmpty ? null : moneyHoldings.first.id);
   final noteCtrl = TextEditingController();
 
   String? validate() {
-    if (txnType.value == TransactionType.dividend) {
+    final t = txnType.value;
+    if (isShare && t == TransactionType.dividend) {
       if (amountCtrl.text.trim().isEmpty) return '请填写分红金额';
       if (cashId.value == null) return '请选择入账现金持仓';
+      return null;
+    }
+    if (t == TransactionType.income ||
+        t == TransactionType.expense ||
+        t == TransactionType.transferIn ||
+        t == TransactionType.transferOut) {
+      if (amountCtrl.text.trim().isEmpty) return '请填写金额';
+      if ((t == TransactionType.transferIn ||
+              t == TransactionType.transferOut) &&
+          cashId.value == null) {
+        return '请选择对方持仓';
+      }
       return null;
     }
     if (qtyCtrl.text.trim().isEmpty || priceCtrl.text.trim().isEmpty) {
@@ -54,7 +73,8 @@ Future<void> showHoldingTransactionDialog(
 
   await showDialog<void>(
     context: context,
-    builder: (context) => AlertDialog(
+    builder: (context) => StatefulBuilder(
+      builder: (context, setState) => AlertDialog(
       title: Text('记一笔 · ${holding.name}'),
       content: SingleChildScrollView(
         child: Column(
@@ -68,11 +88,11 @@ Future<void> showHoldingTransactionDialog(
                     ButtonSegment(value: t, label: Text(t.label)),
                 ],
                 selected: {value},
-                onSelectionChanged: (s) => txnType.value = s.first,
+                onSelectionChanged: (s) => setState(() => txnType.value = s.first),
               ),
             ),
             const SizedBox(height: 16),
-            if (txnType.value != TransactionType.dividend) ...[
+            if (isShare && txnType.value != TransactionType.dividend) ...[
               TextField(
                 controller: qtyCtrl,
                 keyboardType: const TextInputType.numberWithOptions(decimal: true),
@@ -109,30 +129,39 @@ Future<void> showHoldingTransactionDialog(
               TextField(
                 controller: amountCtrl,
                 keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                decoration: const InputDecoration(labelText: '分红金额'),
+                decoration: InputDecoration(
+                  labelText: switch (txnType.value) {
+                    TransactionType.dividend => '分红金额',
+                    TransactionType.income => '收入金额',
+                    TransactionType.expense => '支出金额',
+                    TransactionType.transferIn => '转入金额',
+                    TransactionType.transferOut => '转出金额',
+                    _ => '金额',
+                  },
+                ),
               ),
             ],
             const SizedBox(height: 12),
-            if (cashHoldings.isNotEmpty) ...[
+            if (moneyHoldings.isNotEmpty) ...[
               ValueListenableBuilder<int?>(
                 valueListenable: cashId,
                 builder: (context, value, _) => DropdownButtonFormField<int>(
                   initialValue: value,
-                  decoration: InputDecoration(
-                    labelText: txnType.value == TransactionType.buy
-                        ? '扣款来源（可选）'
-                        : txnType.value == TransactionType.sell
-                            ? '入账目标（可选）'
-                            : '入账现金持仓',
-                  ),
+                  decoration: InputDecoration(labelText: counterpartyLabel(txnType.value, isShare)),
                   items: [
-                    for (final c in cashHoldings)
-                      DropdownMenuItem(value: c.id, child: Text(c.name)),
+                    for (final c in moneyHoldings)
+                      DropdownMenuItem(
+                        value: c.id,
+                        child: Text(
+                          '${c.name} (${AssetType.fromStorage(c.assetType).label})',
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
                   ],
                   onChanged: (v) => cashId.value = v,
                 ),
               ),
-              if (txnType.value != TransactionType.dividend)
+              if (isShare && txnType.value != TransactionType.dividend)
                 Padding(
                   padding: const EdgeInsets.only(top: 8),
                   child: Align(
@@ -166,16 +195,26 @@ Future<void> showHoldingTransactionDialog(
             final amount = double.tryParse(amountCtrl.text.trim()) ?? 0;
             final qty = double.tryParse(qtyCtrl.text.trim());
             final price = double.tryParse(priceCtrl.text.trim());
+            final t = txnType.value;
             final result = await ref.read(transactionServiceProvider).record(
               accountId: holding.accountId,
-              holdingId: holding.id,
-              type: txnType.value,
-              quantity: txnType.value == TransactionType.dividend ? null : qty,
-              price: txnType.value == TransactionType.dividend ? null : price,
+              holdingId: isShare ? holding.id : null,
+              type: t,
+              quantity: isShare && t != TransactionType.dividend ? qty : null,
+              price: isShare && t != TransactionType.dividend ? price : null,
               amount: amount,
-              cashSourceId: txnType.value == TransactionType.buy ? cashId.value : null,
-              cashTargetId: switch (txnType.value) {
+              cashSourceId: switch (t) {
+                TransactionType.buy => cashId.value,
+                TransactionType.expense => holding.id,
+                TransactionType.transferIn => cashId.value,
+                TransactionType.transferOut => holding.id,
+                _ => null,
+              },
+              cashTargetId: switch (t) {
                 TransactionType.sell || TransactionType.dividend => cashId.value,
+                TransactionType.income => holding.id,
+                TransactionType.transferIn => holding.id,
+                TransactionType.transferOut => cashId.value,
                 _ => null,
               },
               note: noteCtrl.text.trim(),
@@ -192,6 +231,7 @@ Future<void> showHoldingTransactionDialog(
           child: const Text('保存'),
         ),
       ],
+    ),
     ),
   );
   qtyCtrl.dispose();
@@ -210,6 +250,23 @@ String sellProfitText(
   if (qty == null || price == null) return '--';
   final profit = (price - holding.costPrice) * qty;
   return '${profit >= 0 ? '+' : ''}¥${Formats.amount(profit)}';
+}
+
+/// Label of the counterparty dropdown for the current transaction type.
+String counterpartyLabel(TransactionType t, bool isShare) {
+  if (isShare) {
+    return switch (t) {
+      TransactionType.buy => '扣款来源（可选）',
+      TransactionType.sell => '入账目标（可选）',
+      _ => '入账现金持仓',
+    };
+  }
+  return switch (t) {
+    TransactionType.income || TransactionType.expense => '关联对方持仓（可选）',
+    TransactionType.transferIn => '资金来源持仓',
+    TransactionType.transferOut => '资金去向持仓',
+    _ => '对方持仓',
+  };
 }
 
 void syncAmount(
@@ -253,7 +310,8 @@ Future<void> showAccountTransactionDialog(
 
   await showDialog<void>(
     context: context,
-    builder: (context) => AlertDialog(
+    builder: (context) => StatefulBuilder(
+      builder: (context, setState) => AlertDialog(
       title: const Text('记流水'),
       content: SingleChildScrollView(
         child: Column(
@@ -268,7 +326,7 @@ Future<void> showAccountTransactionDialog(
                   ButtonSegment(value: TransactionType.expense, label: Text('支出')),
                 ],
                 selected: {value},
-                onSelectionChanged: (s) => txnType.value = s.first,
+                onSelectionChanged: (s) => setState(() => txnType.value = s.first),
               ),
             ),
             const SizedBox(height: 16),
@@ -362,6 +420,7 @@ Future<void> showAccountTransactionDialog(
           child: const Text('保存'),
         ),
       ],
+    ),
     ),
   );
   amountCtrl.dispose();

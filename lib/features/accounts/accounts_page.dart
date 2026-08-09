@@ -5,6 +5,8 @@ import 'package:go_router/go_router.dart';
 
 import '../../app/providers.dart';
 import '../../app/theme.dart';
+import '../../core/enums.dart';
+import '../../core/formats.dart';
 import '../../core/responsive.dart';
 import '../../data/database.dart';
 
@@ -132,46 +134,61 @@ class _AccountCard extends ConsumerWidget {
         onTap: () => context.push('/accounts/${account.id}'),
         child: Padding(
           padding: const EdgeInsets.all(16),
-          child: Row(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              CircleAvatar(
-                backgroundColor: Theme.of(context).colorScheme.primary.withValues(alpha: 0.12),
-                child: Icon(Icons.account_balance_wallet_outlined,
-                    color: Theme.of(context).colorScheme.primary),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(account.name,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.titleMedium),
-                    const SizedBox(height: 2),
-                    Text(
-                      account.note == null || account.note!.isEmpty
-                          ? account.currency
-                          : '${account.currency} · ${account.note}',
-                      style: Theme.of(context).textTheme.bodySmall,
+              Row(
+                children: [
+                  CircleAvatar(
+                    backgroundColor:
+                        Theme.of(context).colorScheme.primary.withValues(alpha: 0.12),
+                    child: Icon(Icons.account_balance_wallet_outlined,
+                        color: Theme.of(context).colorScheme.primary),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(account.name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(context).textTheme.titleMedium),
+                        const SizedBox(height: 2),
+                        Text(
+                          account.note == null || account.note!.isEmpty
+                              ? account.currency
+                              : '${account.currency} · ${account.note}',
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                      ],
                     ),
-                  ],
-                ),
-              ),
-              holdings.when(
-                data: (h) => Text('${h.length} 项持仓', style: Theme.of(context).textTheme.bodyMedium),
-                loading: () => const SizedBox.shrink(),
-                error: (_, _) => const SizedBox.shrink(),
-              ),
-              const SizedBox(width: 4),
-              PopupMenuButton<String>(
-                onSelected: (v) {
-                  if (v == 'delete') _confirmDelete(context, ref);
-                },
-                itemBuilder: (_) => const [
-                  PopupMenuItem(value: 'delete', child: Text('删除账户')),
+                  ),
+                  holdings.when(
+                    data: (h) => Text('${h.length} 项持仓',
+                        style: Theme.of(context).textTheme.bodyMedium),
+                    loading: () => const SizedBox.shrink(),
+                    error: (_, _) => const SizedBox.shrink(),
+                  ),
+                  const SizedBox(width: 4),
+                  PopupMenuButton<String>(
+                    onSelected: (v) {
+                      if (v == 'delete') _confirmDelete(context, ref);
+                    },
+                    itemBuilder: (_) => const [
+                      PopupMenuItem(value: 'delete', child: Text('删除账户')),
+                    ],
+                  ),
                 ],
               ),
+              // Expanded holding list right inside the account card,
+              // so no extra tap into the detail page is needed.
+              if (holdings.value != null && holdings.value!.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                const Divider(height: 1),
+                const SizedBox(height: 4),
+                for (final h in holdings.value!) _HoldingMiniTile(holding: h),
+              ],
             ],
           ),
         ),
@@ -203,5 +220,62 @@ class _AccountCard extends ConsumerWidget {
     if (ok == true) {
       await ref.read(daoProvider).deleteAccount(account.id);
     }
+  }
+}
+
+/// Compact holding row shown inside an account card.
+class _HoldingMiniTile extends StatelessWidget {
+  const _HoldingMiniTile({required this.holding});
+
+  final HoldingRow holding;
+
+  @override
+  Widget build(BuildContext context) {
+    final type = AssetType.fromStorage(holding.assetType);
+    final marketValue = type.isAmountBased
+        ? holding.quantity
+        : holding.quantity * holding.latestPrice;
+    final cost = type.isAmountBased
+        ? (holding.costPrice > 0 ? holding.costPrice : holding.quantity)
+        : holding.quantity * holding.costPrice;
+    final profit = marketValue - cost;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 5),
+      child: Row(
+        children: [
+          Icon(type.icon, size: 16, color: type.color),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              holding.name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.bodyMedium,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            Formats.money(marketValue, holding.currency),
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  fontWeight: FontWeight.w600,
+                  fontFeatures: const [FontFeature.tabularFigures()],
+                ),
+          ),
+          const SizedBox(width: 8),
+          SizedBox(
+            width: 90,
+            child: Text(
+              '${profit >= 0 ? '+' : ''}${Formats.money(profit, holding.currency)}',
+              textAlign: TextAlign.end,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: context.changeColor(profit),
+                    fontWeight: FontWeight.w600,
+                  ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
