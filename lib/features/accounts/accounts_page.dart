@@ -220,6 +220,7 @@ class _AccountCard extends ConsumerWidget {
     );
     if (ok == true) {
       await ref.read(daoProvider).deleteAccount(account.id);
+      ref.read(historyBackfillServiceProvider).backfill(forceRebuild: true);
     }
   }
 }

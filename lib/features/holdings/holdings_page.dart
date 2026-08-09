@@ -346,6 +346,9 @@ class _HoldingsPageState extends ConsumerState<HoldingsPage> {
                   );
                 }
               }
+              // Rebuild historical snapshots so the new holding appears
+              // in the net worth history from its purchase date.
+              ref.read(historyBackfillServiceProvider).backfill(forceRebuild: true);
             },
             child: const Text('保存'),
           ),
@@ -739,6 +742,8 @@ class _HoldingCard extends ConsumerWidget {
         note: noteCtrl.text.trim().isEmpty ? const Value.absent() : Value(noteCtrl.text.trim()),
       );
       await ref.read(daoProvider).updateHolding(updated);
+      // Rebuild history after edits (quantity/cost/type affect snapshots).
+      ref.read(historyBackfillServiceProvider).backfill(forceRebuild: true);
     }
     nameCtrl.dispose();
     symbolCtrl.dispose();
@@ -767,6 +772,7 @@ class _HoldingCard extends ConsumerWidget {
     );
     if (ok == true) {
       await ref.read(daoProvider).deleteHolding(holding.id);
+      ref.read(historyBackfillServiceProvider).backfill(forceRebuild: true);
     }
   }
 }

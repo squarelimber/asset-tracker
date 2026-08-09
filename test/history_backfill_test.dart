@@ -176,6 +176,63 @@ void main() {
     expect(holdingId, isPositive);
   });
 
+  test('forceRebuild merges a newly added holding into existing snapshots', () async {
+    final accountId = await dao.createAccount(AccountsCompanion.insert(
+      name: '测试账户',
+      type: 'general',
+    ));
+    // Existing holding, snapshots already generated for 07-01..07-03.
+    await dao.createHolding(HoldingsCompanion.insert(
+      accountId: accountId,
+      name: '旧基金',
+      assetType: AssetType.mutualFund.storageName,
+      marketSource: Value(MarketSource.eastmoney.storageName),
+      symbol: const Value('110022'),
+      quantity: const Value(100),
+      costPrice: const Value(2.5),
+      latestPrice: const Value(2.6),
+      purchaseDate: Value(DateTime(2026, 7, 1)),
+    ));
+    final fake = _FakeHistorySource();
+    fake.data['110022'] = {
+      for (var d = DateTime(2026, 7, 1); !d.isAfter(DateTime(2026, 7, 3)); d = d.add(const Duration(days: 1)))
+        _FakeHistorySource.key(d): 2.6,
+    };
+    final service = HistoryBackfillService(dao, sources: {MarketSource.eastmoney: fake});
+    await service.backfill(now: DateTime(2026, 7, 4));
+    expect(await dao.getSnapshots(), hasLength(3));
+
+    // User adds a second holding bought on 07-01 (backdated).
+    await dao.createHolding(HoldingsCompanion.insert(
+      accountId: accountId,
+      name: '新基金',
+      assetType: AssetType.mutualFund.storageName,
+      marketSource: Value(MarketSource.eastmoney.storageName),
+      symbol: const Value('005827'),
+      quantity: const Value(100),
+      costPrice: const Value(3.0),
+      latestPrice: const Value(3.0),
+      purchaseDate: Value(DateTime(2026, 7, 1)),
+    ));
+    fake.data['005827'] = {
+      for (var d = DateTime(2026, 7, 1); !d.isAfter(DateTime(2026, 7, 3)); d = d.add(const Duration(days: 1)))
+        _FakeHistorySource.key(d): 3.0,
+    };
+
+    // Plain backfill does NOT touch existing days...
+    await service.backfill(now: DateTime(2026, 7, 4));
+    var snap = await dao.getSnapshots();
+    expect(snap.first.totalValue, closeTo(260, 1e-6)); // old value only
+
+    // ...but forceRebuild rewrites them including the new holding.
+    await service.backfill(now: DateTime(2026, 7, 4), forceRebuild: true);
+    snap = await dao.getSnapshots();
+    expect(snap, hasLength(3));
+    for (final s in snap) {
+      expect(s.totalValue, closeTo(560, 1e-6)); // 260 + 300
+    }
+  });
+
   test('amount-based assets count costPrice as invested, not qty x cost', () async {
     final accountId = await dao.createAccount(AccountsCompanion.insert(
       name: '测试账户',

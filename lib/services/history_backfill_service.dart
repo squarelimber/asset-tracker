@@ -81,7 +81,12 @@ class HistoryBackfillService {
   /// triggers one atomic recompute of historical snapshots.
   static const _backfillV3Marker = 'backfill_v4_cost_fix';
 
-  Future<BackfillResult> backfill({DateTime? now}) async {
+  /// Backfills snapshots for dates before today.
+  ///
+  /// By default only missing days are filled. With [forceRebuild], the whole
+  /// window (including already-snapshot days) is recomputed and overwritten,
+  /// which merges newly added / edited / removed holdings into the history.
+  Future<BackfillResult> backfill({DateTime? now, bool forceRebuild = false}) async {
     final current = (now ?? DateTime.now());
     final todayDate = DateTime(current.year, current.month, current.day);
 
@@ -123,7 +128,8 @@ class HistoryBackfillService {
     await Future.wait(futures);
     final coveredHoldings = fillers.length;
 
-    final needFullRebuild = await _dao.getSetting(_backfillV3Marker) == null;
+    final firstTimeRebuild = await _dao.getSetting(_backfillV3Marker) == null;
+    final needFullRebuild = forceRebuild || firstTimeRebuild;
     final existingDates = needFullRebuild
         ? <String>{}
         : (await _dao.getSnapshots()).map((s) => s.date).toSet();
@@ -183,8 +189,8 @@ class HistoryBackfillService {
         await _dao.batchInsertSnapshots(rows);
       });
     }
-    // Mark the rebuild done only after a successful swap.
-    if (needFullRebuild) {
+    // Mark the one-time rebuild done only after a successful swap.
+    if (firstTimeRebuild) {
       await _dao.setSetting(_backfillV3Marker, '${current.millisecondsSinceEpoch}');
     }
 
