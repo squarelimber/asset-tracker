@@ -99,6 +99,9 @@ class BackupService {
             purchaseDate: h['purchaseDate'] == null
                 ? const Value.absent()
                 : Value(_parseDate(h['purchaseDate']) ?? DateTime.now()),
+            riskLevel: h['riskLevel'] == null
+                ? const Value.absent()
+                : Value(h['riskLevel'].toString()),
             currency: Value(h['currency']?.toString() ?? 'CNY'),
             note: h['note'] == null
                 ? const Value.absent()
@@ -185,6 +188,7 @@ class BackupService {
         'costPrice': h.costPrice,
         'latestPrice': h.latestPrice,
         'purchaseDate': h.purchaseDate?.toIso8601String(),
+        'riskLevel': h.riskLevel,
         'currency': h.currency,
         'note': h.note,
       };

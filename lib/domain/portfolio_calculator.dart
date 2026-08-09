@@ -13,6 +13,15 @@ class TypeBreakdown {
   double get profitPct => cost == 0 ? 0 : profit / cost;
 }
 
+/// Per-risk-tier breakdown entry.
+class RiskBreakdown {
+  const RiskBreakdown({required this.risk, required this.marketValue, required this.cost});
+
+  final RiskLevel risk;
+  final double marketValue;
+  final double cost;
+}
+
 /// Aggregated portfolio figures computed from holdings.
 /// All amounts are in CNY (per-holding currency converted via [cnyRates]).
 class PortfolioSummary {
@@ -23,6 +32,7 @@ class PortfolioSummary {
     required this.todayChange,
     required this.todayChangePct,
     required this.breakdown,
+    this.riskBreakdown = const [],
     this.realizedProfit = 0,
   });
 
@@ -32,6 +42,9 @@ class PortfolioSummary {
   final double todayChange;
   final double? todayChangePct;
   final List<TypeBreakdown> breakdown;
+
+  /// Market value per risk tier.
+  final List<RiskBreakdown> riskBreakdown;
 
   /// Sum of realized gains from sell transactions (approximate: computed
   /// with the current unit cost when the average cost may have changed).
@@ -75,9 +88,13 @@ class PortfolioCalculator {
 
     final byType = <AssetType, double>{};
     final costByType = <AssetType, double>{};
+    final byRisk = <RiskLevel, double>{};
+    final costByRisk = <RiskLevel, double>{};
 
     for (final h in holdings) {
       final type = AssetType.fromStorage(h.assetType);
+      final risk = RiskLevel.fromStorage(h.riskLevel) ??
+          RiskLevel.autoOf(type);
       final rate = rateOf(h.currency);
       // Amount-based assets: quantity = current amount, price fixed at 1 and
       // costPrice stores the cumulative invested amount (in the currency).
@@ -95,6 +112,8 @@ class PortfolioCalculator {
       cost += holdingCost;
       byType[type] = (byType[type] ?? 0) + marketValue;
       costByType[type] = (costByType[type] ?? 0) + holdingCost;
+      byRisk[risk] = (byRisk[risk] ?? 0) + marketValue;
+      costByRisk[risk] = (costByRisk[risk] ?? 0) + holdingCost;
 
       final symbol = h.symbol;
       final prev = (symbol != null && prevPriceBySymbol.containsKey(symbol))
@@ -115,6 +134,15 @@ class PortfolioCalculator {
         ),
     ]..sort((a, b) => b.marketValue.compareTo(a.marketValue));
 
+    final riskBreakdown = [
+      for (final entry in byRisk.entries)
+        RiskBreakdown(
+          risk: entry.key,
+          marketValue: entry.value,
+          cost: costByRisk[entry.key] ?? 0,
+        ),
+    ]..sort((a, b) => b.marketValue.compareTo(a.marketValue));
+
     final realized = _realizedProfit(holdings, sellTransactions);
 
     return PortfolioSummary(
@@ -124,6 +152,7 @@ class PortfolioCalculator {
       todayChange: todayChange,
       todayChangePct: prevTotal == 0 ? null : todayChange / prevTotal,
       breakdown: breakdown,
+      riskBreakdown: riskBreakdown,
       realizedProfit: realized,
     );
   }

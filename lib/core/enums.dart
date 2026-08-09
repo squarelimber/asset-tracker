@@ -1,5 +1,42 @@
 import 'package:flutter/material.dart';
 
+/// Risk levels for allocation analysis (4 tiers).
+/// A holding's effective risk = its manual riskLevel override, or the
+/// automatic mapping from its asset type.
+enum RiskLevel {
+  low('低风险', 'low', Color(0xFF26A69A)),
+  mediumLow('中低风险', 'medium_low', Color(0xFF4DB6AC)),
+  medium('中风险', 'medium', Color(0xFFFF9800)),
+  high('高风险', 'high', Color(0xFFE53935));
+
+  const RiskLevel(this.label, this.storageName, this.color);
+
+  final String label;
+  final String storageName;
+  final Color color;
+
+  static RiskLevel? fromStorage(String? name) {
+    if (name == null) return null;
+    for (final r in RiskLevel.values) {
+      if (r.storageName == name) return r;
+    }
+    return null;
+  }
+
+  /// Automatic risk mapping by asset type.
+  static RiskLevel autoOf(AssetType type) => switch (type) {
+        AssetType.cash ||
+        AssetType.bankDeposit ||
+        AssetType.liquidWealth ||
+        AssetType.bankWealth =>
+          RiskLevel.low,
+        AssetType.gold => RiskLevel.mediumLow,
+        AssetType.mutualFund => RiskLevel.medium,
+        AssetType.stock || AssetType.etf || AssetType.crypto => RiskLevel.high,
+        AssetType.property || AssetType.liability => RiskLevel.mediumLow,
+      };
+}
+
 /// Asset categories supported by the app.
 enum AssetType {
   cash('现金', 'savings', Icons.payments_outlined, Color(0xFF42A5F5)),

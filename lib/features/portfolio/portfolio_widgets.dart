@@ -14,15 +14,29 @@ import '../../domain/rate_series.dart';
 import '../../services/market/history_lookup.dart';
 import '../../services/market/history_source.dart';
 
-/// Asset allocation donut chart with legend.
-class AllocationCard extends ConsumerWidget {
+enum _AllocationView { byType, byRisk }
+
+/// Asset allocation donut with dimension switch (type/risk), interactive
+/// center (total or selected slice), tap highlight and ratio-bar legend.
+class AllocationCard extends ConsumerStatefulWidget {
   const AllocationCard({super.key, required this.summary});
 
   final PortfolioSummary summary;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<AllocationCard> createState() => _AllocationCardState();
+}
+
+class _AllocationCardState extends ConsumerState<AllocationCard> {
+  _AllocationView _view = _AllocationView.byType;
+  int? _selected;
+
+  @override
+  Widget build(BuildContext context) {
+    final summary = widget.summary;
     final breakdown = summary.breakdown.where((b) => b.marketValue > 0).toList();
+    final riskBreakdown =
+        summary.riskBreakdown.where((b) => b.marketValue > 0).toList();
     if (breakdown.isEmpty) {
       return const Card(
         child: Padding(
@@ -33,69 +47,193 @@ class AllocationCard extends ConsumerWidget {
     }
     final total = summary.totalAssets;
 
+    // Unified entry view: label + color + value + ratio.
+    final entries = _view == _AllocationView.byType
+        ? [
+            for (final b in breakdown)
+              (
+                label: b.type.label,
+                color: b.type.color,
+                value: b.marketValue,
+                amount: Formats.amountCompact(b.marketValue),
+              ),
+          ]
+        : [
+            for (final b in riskBreakdown)
+              (
+                label: b.risk.label,
+                color: b.risk.color,
+                value: b.marketValue,
+                amount: Formats.amountCompact(b.marketValue),
+              ),
+          ];
+
+    final selected = _selected != null && _selected! < entries.length
+        ? entries[_selected!]
+        : null;
+
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('资产配置', style: Theme.of(context).textTheme.titleMedium),
-            const SizedBox(height: 16),
+            Row(
+              children: [
+                Expanded(
+                  child: Text('资产配置', style: Theme.of(context).textTheme.titleMedium),
+                ),
+                SegmentedButton<_AllocationView>(
+                  segments: const [
+                    ButtonSegment(value: _AllocationView.byType, label: Text('类型')),
+                    ButtonSegment(value: _AllocationView.byRisk, label: Text('风险')),
+                  ],
+                  selected: {_view},
+                  showSelectedIcon: false,
+                  style: const ButtonStyle(
+                    visualDensity: VisualDensity.compact,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  onSelectionChanged: (s) => setState(() {
+                    _view = s.first;
+                    _selected = null;
+                  }),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
             SizedBox(
               height: 180,
-              child: PieChart(
-                PieChartData(
-                  sectionsSpace: 2,
-                  centerSpaceRadius: 48,
-                  startDegreeOffset: -90,
-                  sections: [
-                    for (final b in breakdown)
-                      PieChartSectionData(
-                        value: b.marketValue,
-                        title: Formats.pct(b.marketValue / total),
-                        titleStyle: const TextStyle(
-                          fontSize: 10,
-                          fontWeight: FontWeight.w600,
-                          color: Colors.white,
-                        ),
-                        radius: 54,
-                        color: b.type.color,
-                        showTitle: b.marketValue / total >= 0.04,
-                      ),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(height: 16),
-            for (final b in breakdown)
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 4),
-                child: Row(
-                  children: [
-                    Container(
-                      width: 10,
-                      height: 10,
-                      decoration: BoxDecoration(
-                        color: b.type.color,
-                        borderRadius: BorderRadius.circular(3),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        '${b.type.label} (${b.marketValue / total * 100 <= 0.05 ? '<0.1' : (b.marketValue / total * 100).toStringAsFixed(1)}%)',
-                        style: Theme.of(context).textTheme.bodyMedium,
-                      ),
-                    ),
-                    Text(
-                      Formats.amountCompact(b.marketValue),
-                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                            fontWeight: FontWeight.w600,
+              child: Stack(
+                alignment: Alignment.center,
+                children: [
+                  PieChart(
+                    PieChartData(
+                      sectionsSpace: 2,
+                      centerSpaceRadius: 52,
+                      startDegreeOffset: -90,
+                      sections: [
+                        for (var i = 0; i < entries.length; i++)
+                          PieChartSectionData(
+                            value: entries[i].value,
+                            title: entries[i].value / total >= 0.04
+                                ? '${(entries[i].value / total * 100).toStringAsFixed(1)}%'
+                                : '',
+                            titleStyle: const TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.white,
+                            ),
+                            radius: _selected == i ? 60 : 54,
+                            color: _selected == null || _selected == i
+                                ? entries[i].color
+                                : entries[i].color.withValues(alpha: 0.35),
+                            showTitle: entries[i].value / total >= 0.04,
                           ),
+                      ],
+                    ),
+                  ),
+                    // Interactive center.
+                    Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          selected == null ? '总资产' : selected.label,
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          selected == null
+                              ? Formats.amountCompact(total)
+                              : selected.amount,
+                          style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                                fontWeight: FontWeight.w700,
+                                fontFeatures: const [FontFeature.tabularFigures()],
+                              ),
+                        ),
+                        if (selected != null) ...[
+                          const SizedBox(height: 2),
+                          Text(
+                            '${(selected.value / total * 100).toStringAsFixed(1)}%',
+                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                  color: selected.color,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                          ),
+                        ],
+                      ],
                     ),
                   ],
                 ),
               ),
+            const SizedBox(height: 16),
+            for (var i = 0; i < entries.length; i++) ...[
+              InkWell(
+                borderRadius: BorderRadius.circular(6),
+                onTap: () => setState(
+                  () => _selected = _selected == i ? null : i,
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 5, horizontal: 4),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 10,
+                        height: 10,
+                        decoration: BoxDecoration(
+                          color: entries[i].color,
+                          borderRadius: BorderRadius.circular(3),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    entries[i].label,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: Theme.of(context).textTheme.bodyMedium,
+                                  ),
+                                ),
+                                Text(
+                                  '${(entries[i].value / total * 100).toStringAsFixed(1)}%',
+                                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                        color: Theme.of(context).colorScheme.outline,
+                                      ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 3),
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(2),
+                              child: LinearProgressIndicator(
+                                value: total == 0 ? 0 : entries[i].value / total,
+                                minHeight: 4,
+                                backgroundColor:
+                                    entries[i].color.withValues(alpha: 0.15),
+                                color: entries[i].color,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Text(
+                        entries[i].amount,
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                              fontWeight: FontWeight.w600,
+                            ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
           ],
         ),
       ),

@@ -196,6 +196,7 @@ class _HoldingsPageState extends ConsumerState<HoldingsPage> {
 
     final accountId = ValueNotifier<int?>(accounts.first.id);
     final assetType = ValueNotifier<AssetType>(AssetType.stock);
+    final riskLevel = ValueNotifier<String?>(null);
     final nameCtrl = TextEditingController();
     final symbolCtrl = TextEditingController();
     final quantityCtrl = TextEditingController();
@@ -237,6 +238,26 @@ class _HoldingsPageState extends ConsumerState<HoldingsPage> {
                       DropdownMenuItem(value: t, child: Text(t.label)),
                   ],
                   onChanged: (v) => assetType.value = v ?? AssetType.stock,
+                ),
+              ),
+              const SizedBox(height: 12),
+              ValueListenableBuilder<AssetType>(
+                valueListenable: assetType,
+                builder: (context, value, _) => DropdownButtonFormField<String>(
+                  initialValue: 'auto',
+                  decoration: const InputDecoration(labelText: '风险等级'),
+                  items: [
+                    const DropdownMenuItem(
+                      value: 'auto',
+                      child: Text('自动（按资产类型）'),
+                    ),
+                    for (final r in RiskLevel.values)
+                      DropdownMenuItem(
+                        value: r.storageName,
+                        child: Text(r.label),
+                      ),
+                  ],
+                  onChanged: (v) => riskLevel.value = v == 'auto' ? null : v,
                 ),
               ),
               const SizedBox(height: 12),
@@ -402,6 +423,9 @@ class _HoldingsPageState extends ConsumerState<HoldingsPage> {
                       : (invested ?? 0)),
                   latestPrice: Value(type.isAmountBased ? 1 : (userPrice ?? 0)),
                   purchaseDate: Value(purchaseDate.value),
+                  riskLevel: riskLevel.value == null
+                      ? const Value.absent()
+                      : Value(riskLevel.value),
                   currency: Value(autoCny
                       ? 'CNY'
                       : (currencyCtrl.text.trim().toUpperCase().isEmpty
@@ -660,6 +684,7 @@ class _HoldingCard extends ConsumerWidget {
     final initialType = AssetType.fromStorage(holding.assetType);
     final typeNotifier = ValueNotifier<AssetType>(initialType);
     final accountIdNotifier = ValueNotifier<int>(holding.accountId);
+    final riskLevelNotifier = ValueNotifier<String?>(holding.riskLevel);
     final nameCtrl = TextEditingController(text: holding.name);
     final symbolCtrl = TextEditingController(text: holding.symbol ?? '');
     final quantityCtrl =
@@ -721,6 +746,25 @@ class _HoldingCard extends ConsumerWidget {
                     onChanged: (v) {
                       if (v != null) setState(() => typeNotifier.value = v);
                     },
+                  ),
+                  const SizedBox(height: 12),
+                  DropdownButtonFormField<String>(
+                    initialValue: holding.riskLevel ?? 'auto',
+                    decoration: const InputDecoration(labelText: '风险等级'),
+                    items: [
+                      const DropdownMenuItem(
+                        value: 'auto',
+                        child: Text('自动（按资产类型）'),
+                      ),
+                      for (final r in RiskLevel.values)
+                        DropdownMenuItem(
+                          value: r.storageName,
+                          child: Text(r.label),
+                        ),
+                    ],
+                    onChanged: (v) => setState(() {
+                      riskLevelNotifier.value = v == 'auto' ? null : v;
+                    }),
                   ),
                   if (!isAmountBased) ...[
                     const SizedBox(height: 12),
@@ -852,6 +896,9 @@ class _HoldingCard extends ConsumerWidget {
         costPrice: isAmountBased ? (investedResult ?? qty) : (cost ?? holding.costPrice),
         latestPrice: isAmountBased ? 1 : (price ?? holding.latestPrice),
         purchaseDate: Value(purchaseDate.value),
+        riskLevel: riskLevelNotifier.value == null
+            ? const Value.absent()
+            : Value(riskLevelNotifier.value),
         symbol: !isAmountBased ? (symbol.isEmpty ? const Value.absent() : Value(symbol)) : const Value.absent(),
         currency: autoCny
             ? 'CNY'

@@ -21,7 +21,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase([QueryExecutor? executor]) : super(executor ?? _openConnection());
 
   @override
-  int get schemaVersion => 4;
+  int get schemaVersion => 6;
 
   static QueryExecutor _openConnection() {
     return driftDatabase(name: 'asset_tracker');
@@ -51,6 +51,12 @@ class AppDatabase extends _$AppDatabase {
             final db = m.database as AppDatabase;
             await m.addColumn(db.transactions, db.transactions.cashSourceId);
             await m.addColumn(db.transactions, db.transactions.cashTargetId);
+          }
+          // v4 -> v5: (data-only migrations handled by DataMigrationService).
+          // v5 -> v6: add risk_level to holdings.
+          if (from < 6) {
+            final db = m.database as AppDatabase;
+            await m.addColumn(db.holdings, db.holdings.riskLevel);
           }
         },
       );

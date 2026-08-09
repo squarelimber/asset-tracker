@@ -1,7 +1,9 @@
 ﻿import 'package:flutter_test/flutter_test.dart';
 
+import 'package:asset_tracker/core/enums.dart';
 import 'package:asset_tracker/data/database.dart';
 import 'package:asset_tracker/domain/portfolio_calculator.dart';
+import 'package:drift/drift.dart' hide isNull, isNotNull;
 
 HoldingRow _holding({
   required int id,
@@ -144,5 +146,28 @@ void main() {
     // (15 - 10) * 50 = 250 realized; total profit = (20-10)*100 = 1000.
     expect(s.realizedProfit, closeTo(250, 1e-6));
     expect(s.unrealizedProfit, closeTo(750, 1e-6));
+  });
+
+  test('risk breakdown groups holdings by effective risk tier', () {
+    final s = calc.compute([
+      _holding(id: 1, type: 'cash', quantity: 1000, price: 1, cost: 1000),
+      _holding(id: 2, type: 'mutual_fund', price: 300, cost: 250),
+      _holding(id: 3, type: 'stock', price: 600, cost: 500),
+    ]);
+    expect(s.riskBreakdown, hasLength(3));
+    final low = s.riskBreakdown.firstWhere((b) => b.risk == RiskLevel.low);
+    expect(low.marketValue, 1000);
+    final medium = s.riskBreakdown.firstWhere((b) => b.risk == RiskLevel.medium);
+    expect(medium.marketValue, 300);
+    final high = s.riskBreakdown.firstWhere((b) => b.risk == RiskLevel.high);
+    expect(high.marketValue, 600);
+  });
+
+  test('manual risk override wins over auto mapping', () {
+    final manual = _holding(id: 1, type: 'mutual_fund', price: 300, cost: 250)
+        .copyWith(riskLevel: const Value('low'));
+    final s = calc.compute([manual]);
+    final low = s.riskBreakdown.firstWhere((b) => b.risk == RiskLevel.low);
+    expect(low.marketValue, 300);
   });
 }

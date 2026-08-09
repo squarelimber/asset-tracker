@@ -26,6 +26,7 @@ class Holdings extends Table {
   RealColumn get latestPrice => real().withDefault(const Constant(0))();
   TextColumn get currency => text().withDefault(const Constant('CNY'))();
   DateTimeColumn get purchaseDate => dateTime().nullable()();
+  TextColumn get riskLevel => text().nullable()();
   TextColumn get note => text().nullable()();
   DateTimeColumn get createdAt => dateTime().withDefault(currentDateAndTime)();
   DateTimeColumn get updatedAt => dateTime().withDefault(currentDateAndTime)();

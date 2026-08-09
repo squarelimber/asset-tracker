@@ -532,6 +532,17 @@ class $HoldingsTable extends Holdings
     type: DriftSqlType.dateTime,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _riskLevelMeta = const VerificationMeta(
+    'riskLevel',
+  );
+  @override
+  late final GeneratedColumn<String> riskLevel = GeneratedColumn<String>(
+    'risk_level',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
   static const VerificationMeta _noteMeta = const VerificationMeta('note');
   @override
   late final GeneratedColumn<String> note = GeneratedColumn<String>(
@@ -578,6 +589,7 @@ class $HoldingsTable extends Holdings
     latestPrice,
     currency,
     purchaseDate,
+    riskLevel,
     note,
     createdAt,
     updatedAt,
@@ -672,6 +684,12 @@ class $HoldingsTable extends Holdings
         ),
       );
     }
+    if (data.containsKey('risk_level')) {
+      context.handle(
+        _riskLevelMeta,
+        riskLevel.isAcceptableOrUnknown(data['risk_level']!, _riskLevelMeta),
+      );
+    }
     if (data.containsKey('note')) {
       context.handle(
         _noteMeta,
@@ -743,6 +761,10 @@ class $HoldingsTable extends Holdings
         DriftSqlType.dateTime,
         data['${effectivePrefix}purchase_date'],
       ),
+      riskLevel: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}risk_level'],
+      ),
       note: attachedDatabase.typeMapping.read(
         DriftSqlType.string,
         data['${effectivePrefix}note'],
@@ -776,6 +798,7 @@ class HoldingRow extends DataClass implements Insertable<HoldingRow> {
   final double latestPrice;
   final String currency;
   final DateTime? purchaseDate;
+  final String? riskLevel;
   final String? note;
   final DateTime createdAt;
   final DateTime updatedAt;
@@ -791,6 +814,7 @@ class HoldingRow extends DataClass implements Insertable<HoldingRow> {
     required this.latestPrice,
     required this.currency,
     this.purchaseDate,
+    this.riskLevel,
     this.note,
     required this.createdAt,
     required this.updatedAt,
@@ -812,6 +836,9 @@ class HoldingRow extends DataClass implements Insertable<HoldingRow> {
     map['currency'] = Variable<String>(currency);
     if (!nullToAbsent || purchaseDate != null) {
       map['purchase_date'] = Variable<DateTime>(purchaseDate);
+    }
+    if (!nullToAbsent || riskLevel != null) {
+      map['risk_level'] = Variable<String>(riskLevel);
     }
     if (!nullToAbsent || note != null) {
       map['note'] = Variable<String>(note);
@@ -838,6 +865,9 @@ class HoldingRow extends DataClass implements Insertable<HoldingRow> {
       purchaseDate: purchaseDate == null && nullToAbsent
           ? const Value.absent()
           : Value(purchaseDate),
+      riskLevel: riskLevel == null && nullToAbsent
+          ? const Value.absent()
+          : Value(riskLevel),
       note: note == null && nullToAbsent ? const Value.absent() : Value(note),
       createdAt: Value(createdAt),
       updatedAt: Value(updatedAt),
@@ -861,6 +891,7 @@ class HoldingRow extends DataClass implements Insertable<HoldingRow> {
       latestPrice: serializer.fromJson<double>(json['latestPrice']),
       currency: serializer.fromJson<String>(json['currency']),
       purchaseDate: serializer.fromJson<DateTime?>(json['purchaseDate']),
+      riskLevel: serializer.fromJson<String?>(json['riskLevel']),
       note: serializer.fromJson<String?>(json['note']),
       createdAt: serializer.fromJson<DateTime>(json['createdAt']),
       updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
@@ -881,6 +912,7 @@ class HoldingRow extends DataClass implements Insertable<HoldingRow> {
       'latestPrice': serializer.toJson<double>(latestPrice),
       'currency': serializer.toJson<String>(currency),
       'purchaseDate': serializer.toJson<DateTime?>(purchaseDate),
+      'riskLevel': serializer.toJson<String?>(riskLevel),
       'note': serializer.toJson<String?>(note),
       'createdAt': serializer.toJson<DateTime>(createdAt),
       'updatedAt': serializer.toJson<DateTime>(updatedAt),
@@ -899,6 +931,7 @@ class HoldingRow extends DataClass implements Insertable<HoldingRow> {
     double? latestPrice,
     String? currency,
     Value<DateTime?> purchaseDate = const Value.absent(),
+    Value<String?> riskLevel = const Value.absent(),
     Value<String?> note = const Value.absent(),
     DateTime? createdAt,
     DateTime? updatedAt,
@@ -914,6 +947,7 @@ class HoldingRow extends DataClass implements Insertable<HoldingRow> {
     latestPrice: latestPrice ?? this.latestPrice,
     currency: currency ?? this.currency,
     purchaseDate: purchaseDate.present ? purchaseDate.value : this.purchaseDate,
+    riskLevel: riskLevel.present ? riskLevel.value : this.riskLevel,
     note: note.present ? note.value : this.note,
     createdAt: createdAt ?? this.createdAt,
     updatedAt: updatedAt ?? this.updatedAt,
@@ -937,6 +971,7 @@ class HoldingRow extends DataClass implements Insertable<HoldingRow> {
       purchaseDate: data.purchaseDate.present
           ? data.purchaseDate.value
           : this.purchaseDate,
+      riskLevel: data.riskLevel.present ? data.riskLevel.value : this.riskLevel,
       note: data.note.present ? data.note.value : this.note,
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
       updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
@@ -957,6 +992,7 @@ class HoldingRow extends DataClass implements Insertable<HoldingRow> {
           ..write('latestPrice: $latestPrice, ')
           ..write('currency: $currency, ')
           ..write('purchaseDate: $purchaseDate, ')
+          ..write('riskLevel: $riskLevel, ')
           ..write('note: $note, ')
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt')
@@ -977,6 +1013,7 @@ class HoldingRow extends DataClass implements Insertable<HoldingRow> {
     latestPrice,
     currency,
     purchaseDate,
+    riskLevel,
     note,
     createdAt,
     updatedAt,
@@ -996,6 +1033,7 @@ class HoldingRow extends DataClass implements Insertable<HoldingRow> {
           other.latestPrice == this.latestPrice &&
           other.currency == this.currency &&
           other.purchaseDate == this.purchaseDate &&
+          other.riskLevel == this.riskLevel &&
           other.note == this.note &&
           other.createdAt == this.createdAt &&
           other.updatedAt == this.updatedAt);
@@ -1013,6 +1051,7 @@ class HoldingsCompanion extends UpdateCompanion<HoldingRow> {
   final Value<double> latestPrice;
   final Value<String> currency;
   final Value<DateTime?> purchaseDate;
+  final Value<String?> riskLevel;
   final Value<String?> note;
   final Value<DateTime> createdAt;
   final Value<DateTime> updatedAt;
@@ -1028,6 +1067,7 @@ class HoldingsCompanion extends UpdateCompanion<HoldingRow> {
     this.latestPrice = const Value.absent(),
     this.currency = const Value.absent(),
     this.purchaseDate = const Value.absent(),
+    this.riskLevel = const Value.absent(),
     this.note = const Value.absent(),
     this.createdAt = const Value.absent(),
     this.updatedAt = const Value.absent(),
@@ -1044,6 +1084,7 @@ class HoldingsCompanion extends UpdateCompanion<HoldingRow> {
     this.latestPrice = const Value.absent(),
     this.currency = const Value.absent(),
     this.purchaseDate = const Value.absent(),
+    this.riskLevel = const Value.absent(),
     this.note = const Value.absent(),
     this.createdAt = const Value.absent(),
     this.updatedAt = const Value.absent(),
@@ -1062,6 +1103,7 @@ class HoldingsCompanion extends UpdateCompanion<HoldingRow> {
     Expression<double>? latestPrice,
     Expression<String>? currency,
     Expression<DateTime>? purchaseDate,
+    Expression<String>? riskLevel,
     Expression<String>? note,
     Expression<DateTime>? createdAt,
     Expression<DateTime>? updatedAt,
@@ -1078,6 +1120,7 @@ class HoldingsCompanion extends UpdateCompanion<HoldingRow> {
       if (latestPrice != null) 'latest_price': latestPrice,
       if (currency != null) 'currency': currency,
       if (purchaseDate != null) 'purchase_date': purchaseDate,
+      if (riskLevel != null) 'risk_level': riskLevel,
       if (note != null) 'note': note,
       if (createdAt != null) 'created_at': createdAt,
       if (updatedAt != null) 'updated_at': updatedAt,
@@ -1096,6 +1139,7 @@ class HoldingsCompanion extends UpdateCompanion<HoldingRow> {
     Value<double>? latestPrice,
     Value<String>? currency,
     Value<DateTime?>? purchaseDate,
+    Value<String?>? riskLevel,
     Value<String?>? note,
     Value<DateTime>? createdAt,
     Value<DateTime>? updatedAt,
@@ -1112,6 +1156,7 @@ class HoldingsCompanion extends UpdateCompanion<HoldingRow> {
       latestPrice: latestPrice ?? this.latestPrice,
       currency: currency ?? this.currency,
       purchaseDate: purchaseDate ?? this.purchaseDate,
+      riskLevel: riskLevel ?? this.riskLevel,
       note: note ?? this.note,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
@@ -1154,6 +1199,9 @@ class HoldingsCompanion extends UpdateCompanion<HoldingRow> {
     if (purchaseDate.present) {
       map['purchase_date'] = Variable<DateTime>(purchaseDate.value);
     }
+    if (riskLevel.present) {
+      map['risk_level'] = Variable<String>(riskLevel.value);
+    }
     if (note.present) {
       map['note'] = Variable<String>(note.value);
     }
@@ -1180,6 +1228,7 @@ class HoldingsCompanion extends UpdateCompanion<HoldingRow> {
           ..write('latestPrice: $latestPrice, ')
           ..write('currency: $currency, ')
           ..write('purchaseDate: $purchaseDate, ')
+          ..write('riskLevel: $riskLevel, ')
           ..write('note: $note, ')
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt')
@@ -4219,6 +4268,7 @@ typedef $$HoldingsTableCreateCompanionBuilder =
       Value<double> latestPrice,
       Value<String> currency,
       Value<DateTime?> purchaseDate,
+      Value<String?> riskLevel,
       Value<String?> note,
       Value<DateTime> createdAt,
       Value<DateTime> updatedAt,
@@ -4236,6 +4286,7 @@ typedef $$HoldingsTableUpdateCompanionBuilder =
       Value<double> latestPrice,
       Value<String> currency,
       Value<DateTime?> purchaseDate,
+      Value<String?> riskLevel,
       Value<String?> note,
       Value<DateTime> createdAt,
       Value<DateTime> updatedAt,
@@ -4319,6 +4370,11 @@ class $$HoldingsTableFilterComposer
 
   ColumnFilters<DateTime> get purchaseDate => $composableBuilder(
     column: $table.purchaseDate,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get riskLevel => $composableBuilder(
+    column: $table.riskLevel,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -4420,6 +4476,11 @@ class $$HoldingsTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<String> get riskLevel => $composableBuilder(
+    column: $table.riskLevel,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<String> get note => $composableBuilder(
     column: $table.note,
     builder: (column) => ColumnOrderings(column),
@@ -4504,6 +4565,9 @@ class $$HoldingsTableAnnotationComposer
     builder: (column) => column,
   );
 
+  GeneratedColumn<String> get riskLevel =>
+      $composableBuilder(column: $table.riskLevel, builder: (column) => column);
+
   GeneratedColumn<String> get note =>
       $composableBuilder(column: $table.note, builder: (column) => column);
 
@@ -4576,6 +4640,7 @@ class $$HoldingsTableTableManager
                 Value<double> latestPrice = const Value.absent(),
                 Value<String> currency = const Value.absent(),
                 Value<DateTime?> purchaseDate = const Value.absent(),
+                Value<String?> riskLevel = const Value.absent(),
                 Value<String?> note = const Value.absent(),
                 Value<DateTime> createdAt = const Value.absent(),
                 Value<DateTime> updatedAt = const Value.absent(),
@@ -4591,6 +4656,7 @@ class $$HoldingsTableTableManager
                 latestPrice: latestPrice,
                 currency: currency,
                 purchaseDate: purchaseDate,
+                riskLevel: riskLevel,
                 note: note,
                 createdAt: createdAt,
                 updatedAt: updatedAt,
@@ -4608,6 +4674,7 @@ class $$HoldingsTableTableManager
                 Value<double> latestPrice = const Value.absent(),
                 Value<String> currency = const Value.absent(),
                 Value<DateTime?> purchaseDate = const Value.absent(),
+                Value<String?> riskLevel = const Value.absent(),
                 Value<String?> note = const Value.absent(),
                 Value<DateTime> createdAt = const Value.absent(),
                 Value<DateTime> updatedAt = const Value.absent(),
@@ -4623,6 +4690,7 @@ class $$HoldingsTableTableManager
                 latestPrice: latestPrice,
                 currency: currency,
                 purchaseDate: purchaseDate,
+                riskLevel: riskLevel,
                 note: note,
                 createdAt: createdAt,
                 updatedAt: updatedAt,
