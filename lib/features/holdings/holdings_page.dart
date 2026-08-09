@@ -167,6 +167,8 @@ class _HoldingsPageState extends ConsumerState<HoldingsPage> {
   Future<void> _refresh({bool showSnack = true}) async {
     ref.read(_refreshingProvider.notifier).state = true;
     final result = await ref.read(marketServiceProvider).refreshAll();
+    // FX rates may have changed with the refresh.
+    ref.invalidate(cnyRatesProvider);
     ref.read(_refreshingProvider.notifier).state = false;
     if (!mounted) return;
     if (showSnack) {

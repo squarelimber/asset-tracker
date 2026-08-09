@@ -10,7 +10,8 @@ import '../../domain/trade_stats.dart';
 final _statsProvider = FutureProvider<TradeStats>((ref) async {
   final txns = await ref.watch(transactionsProvider.future);
   final holdings = await ref.watch(holdingsProvider.future);
-  return const TradeStatsCalculator().compute(txns, holdings);
+  final rates = await ref.watch(cnyRatesProvider.future);
+  return const TradeStatsCalculator().compute(txns, holdings, cnyRates: rates);
 });
 
 class StatsPage extends ConsumerWidget {

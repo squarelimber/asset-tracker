@@ -166,16 +166,23 @@ class _AccountCard extends ConsumerWidget {
                       ],
                     ),
                   ),
-                  // Per-account asset total + count.
+                  // Per-account asset total + count (converted to CNY).
                   holdings.when(
                     data: (list) => Column(
                       crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
-                        Text(
-                          '¥${Formats.amount(_accountTotal(list))}',
-                          style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                                fontWeight: FontWeight.w700,
-                              ),
+                        FutureBuilder<Map<String, double>>(
+                          future: ref.watch(cnyRatesProvider.future),
+                          builder: (context, snapshot) {
+                            final rates = snapshot.data ?? const <String, double>{};
+                            return Text(
+                              '¥${Formats.amount(_accountTotal(list, rates))}',
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .titleMedium
+                                  ?.copyWith(fontWeight: FontWeight.w700),
+                            );
+                          },
                         ),
                         Text(
                           '${list.length} 项持仓 · '
@@ -215,11 +222,12 @@ class _AccountCard extends ConsumerWidget {
     );
   }
 
-  /// Total market value of the account's holdings (per-currency sums).
-  static double _accountTotal(List<HoldingRow> list) {
+  /// Total market value of the account's holdings, converted to CNY.
+  static double _accountTotal(List<HoldingRow> list, Map<String, double> rates) {
     return list.fold(0.0, (sum, h) {
       final type = AssetType.fromStorage(h.assetType);
-      return sum + (type.isAmountBased ? h.quantity : h.quantity * h.latestPrice);
+      final rate = (rates[h.currency.toUpperCase()] ?? 1);
+      return sum + (type.isAmountBased ? h.quantity : h.quantity * h.latestPrice) * rate;
     });
   }
 

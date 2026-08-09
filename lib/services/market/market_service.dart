@@ -110,6 +110,15 @@ class MarketService {
       }
     });
 
+    // Refresh FX rates for any non-CNY currency in use, so conversions
+    // stay current on every market refresh (rates cached in price_cache).
+    final currencies = holdings
+        .map((h) => h.currency)
+        .where((c) => c != 'CNY')
+        .toSet()
+        .toList();
+    await loadCnyRates(currencies);
+
     return MarketRefreshResult(updated: updated, failed: failed, fetchedAt: DateTime.now());
   }
 
@@ -146,7 +155,20 @@ class MarketService {
       try {
         final quotes = await fetchQuotes(MarketSource.forex, missing);
         for (final q in quotes) {
-          if (q.isSuccess && q.price > 0) rates[q.symbol] = q.price;
+          if (q.isSuccess && q.price > 0) {
+            rates[q.symbol] = q.price;
+            await _dao.upsertPriceCache(PriceCacheRow(
+              symbol: q.symbol,
+              source: q.source.storageName,
+              name: q.name,
+              price: q.price,
+              currency: q.currency,
+              prevClose: q.prevClose,
+              change: q.change,
+              changePct: q.changePct,
+              fetchedAt: q.fetchedAt,
+            ));
+          }
         }
       } catch (_) {
         // Keep whatever we got from the cache.

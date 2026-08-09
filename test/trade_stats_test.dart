@@ -10,6 +10,7 @@ TransactionRow _txn({
   double amount = 0,
   double? quantity,
   double? price,
+  String currency = 'CNY',
   DateTime? at,
 }) {
   return TransactionRow(
@@ -22,7 +23,7 @@ TransactionRow _txn({
     quantity: quantity,
     price: price,
     amount: amount,
-    currency: 'CNY',
+    currency: currency,
     occurredAt: at ?? DateTime(2026, 8, 1),
     note: null,
   );
@@ -87,5 +88,15 @@ void main() {
       ),
     ]);
     expect(stats.realizedProfit, closeTo(250, 1e-6));
+  });
+
+  test('foreign currency amounts are converted into CNY', () {
+    final stats = calc.compute([
+      _txn(id: 1, type: 'income', amount: 1000, currency: 'USD', at: DateTime(2026, 8, 1)),
+      _txn(id: 2, type: 'expense', amount: 2000, currency: 'CNY', at: DateTime(2026, 8, 2)),
+    ], const [], cnyRates: {'USD': 7.2});
+    // 1000*7.2 - 2000 = 5200
+    expect(stats.cashflow, closeTo(5200, 1e-6));
+    expect(stats.incomeTotal, closeTo(7200, 1e-6));
   });
 }

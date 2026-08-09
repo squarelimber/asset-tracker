@@ -23,6 +23,17 @@ final holdingDetailServiceProvider = Provider<HoldingDetailService>(
   (ref) => HoldingDetailService(ref.watch(daoProvider)),
 );
 
+/// CNY per unit for every non-CNY currency used by any holding.
+/// Refreshed on each market refresh (see portfolio/holdings pages).
+final cnyRatesProvider = FutureProvider<Map<String, double>>((ref) async {
+  final holdings = await ref.watch(holdingsProvider.future);
+  final currencies = holdings
+      .map((h) => h.currency)
+      .where((c) => c != 'CNY')
+      .toList();
+  return ref.read(marketServiceProvider).loadCnyRates(currencies);
+});
+
 /// Market data orchestration engine.
 final marketServiceProvider = Provider<MarketService>(
   (ref) => MarketService(ref.watch(daoProvider)),

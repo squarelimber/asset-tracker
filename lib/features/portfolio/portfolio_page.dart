@@ -12,7 +12,10 @@ import '../../services/snapshot_service.dart';
 import 'portfolio_widgets.dart';
 
 final snapshotServiceProvider = Provider<SnapshotService>(
-  (ref) => SnapshotService(ref.watch(daoProvider)),
+  (ref) => SnapshotService(
+    ref.watch(daoProvider),
+    market: ref.watch(marketServiceProvider),
+  ),
 );
 
 final _summaryProvider = FutureProvider<PortfolioSummary>((ref) async {
@@ -28,10 +31,8 @@ final _summaryProvider = FutureProvider<PortfolioSummary>((ref) async {
     for (final entry in cache.entries)
       if (entry.value.prevClose != null) entry.key: entry.value.prevClose!,
   };
-  // Convert non-CNY holdings into CNY using current FX rates.
-  final currencies =
-      holdings.map((h) => h.currency).where((c) => c != 'CNY').toList();
-  final cnyRates = await ref.read(marketServiceProvider).loadCnyRates(currencies);
+  // Convert non-CNY holdings into CNY using the shared FX rates.
+  final cnyRates = await ref.watch(cnyRatesProvider.future);
   // Realized gains from sell transactions.
   final sells = (await dao.getTransactions())
       .where((t) => t.type == TransactionType.sell.storageName)
@@ -106,6 +107,8 @@ class _PortfolioPageState extends ConsumerState<PortfolioPage> {
     _refreshing.value = true;
     final result = await ref.read(marketServiceProvider).refreshAll();
     await ref.read(snapshotServiceProvider).ensureTodaySnapshot(force: true);
+    // FX rates may have changed with the refresh.
+    ref.invalidate(cnyRatesProvider);
     _refreshing.value = false;
     if (!mounted) return;
     if (showSnack) {

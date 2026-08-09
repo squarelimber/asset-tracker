@@ -38,7 +38,17 @@ class TradeStats {
 class TradeStatsCalculator {
   const TradeStatsCalculator();
 
-  TradeStats compute(List<TransactionRow> txns, List<HoldingRow> holdings) {
+  /// [cnyRates] converts each transaction's amount into CNY (default 1).
+  TradeStats compute(
+    List<TransactionRow> txns,
+    List<HoldingRow> holdings, {
+    Map<String, double> cnyRates = const {},
+  }) {
+    double rateOf(String currency) {
+      final rate = cnyRates[currency.toUpperCase()];
+      return (rate == null || rate <= 0) ? 1 : rate;
+    }
+
     var bought = 0.0;
     var sold = 0.0;
     var income = 0.0;
@@ -55,27 +65,28 @@ class TradeStatsCalculator {
       final type = TransactionType.fromStorage(t.type);
       final month = '${t.occurredAt.year}-${t.occurredAt.month.toString().padLeft(2, '0')}';
       final flow = monthly[month] ?? 0.0;
+      final amount = t.amount * rateOf(t.currency);
 
       switch (type) {
         case TransactionType.buy:
-          bought += t.amount;
-          monthly[month] = flow - t.amount;
+          bought += amount;
+          monthly[month] = flow - amount;
         case TransactionType.sell:
-          sold += t.amount;
-          monthly[month] = flow + t.amount;
+          sold += amount;
+          monthly[month] = flow + amount;
           final unitCost = costByHolding[t.holdingId] ?? 0;
           final qty = t.quantity ?? 0;
           final price = t.price ?? 0;
-          realized += (price - unitCost) * qty;
+          realized += (price - unitCost) * qty * rateOf(t.currency);
         case TransactionType.income:
-          income += t.amount;
-          monthly[month] = flow + t.amount;
+          income += amount;
+          monthly[month] = flow + amount;
         case TransactionType.expense:
-          expense += t.amount;
-          monthly[month] = flow - t.amount;
+          expense += amount;
+          monthly[month] = flow - amount;
         case TransactionType.dividend:
-          dividend += t.amount;
-          monthly[month] = flow + t.amount;
+          dividend += amount;
+          monthly[month] = flow + amount;
         case TransactionType.transferIn || TransactionType.transferOut:
           break; // internal movement, no net-worth effect
       }
