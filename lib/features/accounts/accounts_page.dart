@@ -166,9 +166,26 @@ class _AccountCard extends ConsumerWidget {
                       ],
                     ),
                   ),
+                  // Per-account asset total + count.
                   holdings.when(
-                    data: (h) => Text('${h.length} 项持仓',
-                        style: Theme.of(context).textTheme.bodyMedium),
+                    data: (list) => Column(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        Text(
+                          '¥${Formats.amount(_accountTotal(list))}',
+                          style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                                fontWeight: FontWeight.w700,
+                              ),
+                        ),
+                        Text(
+                          '${list.length} 项持仓 · '
+                          '${_accountProfit(list) >= 0 ? '+' : ''}¥${Formats.amount(_accountProfit(list))}',
+                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                color: context.changeColor(_accountProfit(list)),
+                              ),
+                        ),
+                      ],
+                    ),
                     loading: () => const SizedBox.shrink(),
                     error: (_, _) => const SizedBox.shrink(),
                   ),
@@ -196,6 +213,27 @@ class _AccountCard extends ConsumerWidget {
         ),
       ),
     );
+  }
+
+  /// Total market value of the account's holdings (per-currency sums).
+  static double _accountTotal(List<HoldingRow> list) {
+    return list.fold(0.0, (sum, h) {
+      final type = AssetType.fromStorage(h.assetType);
+      return sum + (type.isAmountBased ? h.quantity : h.quantity * h.latestPrice);
+    });
+  }
+
+  /// Total profit of the account's holdings.
+  static double _accountProfit(List<HoldingRow> list) {
+    return list.fold(0.0, (sum, h) {
+      final type = AssetType.fromStorage(h.assetType);
+      final value =
+          type.isAmountBased ? h.quantity : h.quantity * h.latestPrice;
+      final cost = type.isAmountBased
+          ? (h.costPrice > 0 ? h.costPrice : h.quantity)
+          : h.quantity * h.costPrice;
+      return sum + (value - cost);
+    });
   }
 
   Future<void> _confirmDelete(BuildContext context, WidgetRef ref) async {
