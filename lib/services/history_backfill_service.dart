@@ -1,8 +1,9 @@
-import '../core/enums.dart';
+﻿import '../core/enums.dart';
 import '../core/formats.dart';
 import '../core/symbols.dart';
 import '../data/asset_dao.dart';
 import '../data/database.dart';
+import 'market/history_lookup.dart';
 import 'market/history_source.dart';
 
 /// Result of a history backfill run.
@@ -18,37 +19,6 @@ class BackfillResult {
   final int days;
   final int holdings;
   final String? message;
-}
-
-/// Looks up a price for any date by falling back to the most recent
-/// previous trading day (forward fill). This keeps weekends/holidays on
-/// the same level as the last trading day instead of jumping to the
-/// current latest price.
-class _ForwardFiller {
-  _ForwardFiller(DailyPriceHistory history) {
-    _dates = history.keys.toList()..sort();
-    _prices = [for (final d in _dates) history[d]!];
-  }
-
-  late final List<String> _dates;
-  late final List<double> _prices;
-
-  /// Price on [key] (yyyy-MM-dd) or the most recent date <= [key], else null.
-  double? priceOnOrBefore(String key) {
-    var lo = 0;
-    var hi = _dates.length - 1;
-    var ans = -1;
-    while (lo <= hi) {
-      final mid = (lo + hi) ~/ 2;
-      if (_dates[mid].compareTo(key) <= 0) {
-        ans = mid;
-        lo = mid + 1;
-      } else {
-        hi = mid - 1;
-      }
-    }
-    return ans < 0 ? null : _prices[ans];
-  }
 }
 
 /// Backfills historical daily net-worth snapshots from each holding's
@@ -105,7 +75,7 @@ class HistoryBackfillService {
     final windowStart = earliest;
 
     // Fetch history per holding (in parallel).
-    final fillers = <int, _ForwardFiller>{};
+    final fillers = <int, HistoryPriceLookup>{};
     final futures = <Future<void>>[];
     for (final h in holdings) {
       final source = MarketSource.fromStorage(h.marketSource);
@@ -122,7 +92,7 @@ class HistoryBackfillService {
       final symbol = rawSymbol;
       futures.add(() async {
         final history = await adapter.fetch(symbol, windowStart, current);
-        if (history.isNotEmpty) fillers[h.id] = _ForwardFiller(history);
+        if (history.isNotEmpty) fillers[h.id] = HistoryPriceLookup(history);
       }());
     }
     await Future.wait(futures);

@@ -4,8 +4,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/providers.dart';
 import '../../app/theme.dart';
+import '../../core/enums.dart';
 import '../../core/formats.dart';
 import '../../data/database.dart';
+import '../../domain/holding_details.dart';
 import '../../domain/portfolio_calculator.dart';
 import '../../domain/range_stats.dart';
 
@@ -243,6 +245,7 @@ class _NetWorthChartState extends ConsumerState<NetWorthChart> {
                     ],
                     _TrendChart(
                       list: list,
+                      onDayTap: (date) => _showDayDetail(context, date),
                     ),
                   ],
                 );
@@ -258,12 +261,148 @@ class _NetWorthChartState extends ConsumerState<NetWorthChart> {
       ),
     );
   }
+
+  /// Bottom sheet with the per-holding breakdown of the tapped day.
+  Future<void> _showDayDetail(BuildContext context, String date) async {
+    final day = DateTime.tryParse(date);
+    if (day == null) return;
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (context) => _DayDetailSheet(date: day),
+    );
+  }
+}
+
+class _DayDetailSheet extends ConsumerWidget {
+  const _DayDetailSheet({required this.date});
+
+  final DateTime date;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final detail = ref.watch(_dayDetailProvider(date));
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
+        child: detail.when(
+          data: (d) {
+            if (d == null) {
+              return const SizedBox(height: 120, child: Center(child: Text('无数据')));
+            }
+            return Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '${Formats.date(date)} 持仓明细',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  '当日总资产 ${Formats.money(d.totalValue)}',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+                const SizedBox(height: 12),
+                Flexible(
+                  child: ListView(
+                    shrinkWrap: true,
+                    children: [
+                      for (final item in d.items)
+                        _DetailRow(item: item),
+                      const Divider(height: 16),
+                      Text(
+                        '点击走势图任意日期可查看当天明细',
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            );
+          },
+          loading: () => const SizedBox(
+            height: 160,
+            child: Center(child: CircularProgressIndicator()),
+          ),
+          error: (e, _) => SizedBox(
+            height: 120,
+            child: Center(child: Text('加载失败: $e')),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+final _dayDetailProvider = FutureProvider.autoDispose.family<DayDetail?, DateTime>(
+  (ref, day) => ref.watch(holdingDetailServiceProvider).compute(day),
+);class _DetailRow extends StatelessWidget {
+  const _DetailRow({required this.item});
+
+  final HoldingDayDetail item;
+
+  @override
+  Widget build(BuildContext context) {
+    final type = AssetType.fromStorage(item.holding.assetType);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
+        children: [
+          Icon(type.icon, size: 18, color: type.color),
+          const SizedBox(width: 10),
+          Expanded(
+            flex: 2,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  item.holding.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.bodyMedium,
+                ),
+                Text(
+                  type == AssetType.liability
+                      ? '负债'
+                      : '单价 ${Formats.smartNum(item.price)} · 成本 ${Formats.money(item.cost, item.holding.currency)}',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ],
+            ),
+          ),
+          Expanded(
+            flex: 1,
+            child: Text(
+              Formats.money(item.marketValue, item.holding.currency),
+              textAlign: TextAlign.end,
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
+            ),
+          ),
+          SizedBox(
+            width: 56,
+            child: Text(
+              '${(item.ratio * 100).toStringAsFixed(1)}%',
+              textAlign: TextAlign.end,
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 class _TrendChart extends StatelessWidget {
-  const _TrendChart({required this.list});
+  const _TrendChart({required this.list, this.onDayTap});
 
   final List<SnapshotRow> list;
+
+  /// Called with the tapped snapshot date (yyyy-MM-dd).
+  final ValueChanged<String>? onDayTap;
 
   @override
   Widget build(BuildContext context) {
@@ -343,6 +482,18 @@ class _TrendChart extends StatelessWidget {
                   ),
               ],
             ),
+            touchCallback: (event, response) {
+              // Single tap on a spot opens the day detail panel.
+              if (event is FlTapUpEvent && response != null) {
+                final spots = response.lineBarSpots;
+                if (spots != null && spots.isNotEmpty) {
+                  final idx = spots.first.x.toInt();
+                  if (idx >= 0 && idx < list.length) {
+                    onDayTap?.call(list[idx].date);
+                  }
+                }
+              }
+            },
           ),
           lineBarsData: [
             LineChartBarData(

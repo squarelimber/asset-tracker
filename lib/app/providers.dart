@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../data/asset_dao.dart';
 import '../data/database.dart';
+import '../domain/holding_details.dart';
 import '../domain/transaction_service.dart';
 import '../services/history_backfill_service.dart';
 import '../services/market/market_service.dart';
@@ -15,6 +16,11 @@ final daoProvider = Provider<AssetDao>((ref) => AssetDao(ref.watch(databaseProvi
 /// Transaction recording / linkage engine.
 final transactionServiceProvider = Provider<TransactionService>(
   (ref) => TransactionService(ref.watch(daoProvider)),
+);
+
+/// Per-day holding breakdown for the trend chart tap detail.
+final holdingDetailServiceProvider = Provider<HoldingDetailService>(
+  (ref) => HoldingDetailService(ref.watch(daoProvider)),
 );
 
 /// Market data orchestration engine.

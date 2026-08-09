@@ -1,0 +1,150 @@
+import '../core/enums.dart';
+import '../core/formats.dart';
+import '../core/symbols.dart';
+import '../data/asset_dao.dart';
+import '../data/database.dart';
+import '../services/market/history_lookup.dart';
+import '../services/market/history_source.dart';
+
+/// One holding's contribution on a given day.
+class HoldingDayDetail {
+  const HoldingDayDetail({
+    required this.holding,
+    required this.price,
+    required this.marketValue,
+    required this.cost,
+    required this.ratio,
+  });
+
+  final HoldingRow holding;
+
+  /// Unit price on that day (or latest for manual assets).
+  final double price;
+  final double marketValue;
+
+  /// Cost basis (current cost semantics: invested for amount-based assets,
+  /// qty x unit cost otherwise).
+  final double cost;
+
+  /// Share of total assets (0..1); liabilities are excluded from the base.
+  final double ratio;
+
+  double get profit => marketValue - cost;
+}
+
+/// Full detail of one day: total value plus per-holding breakdown.
+class DayDetail {
+  const DayDetail({
+    required this.date,
+    required this.totalValue,
+    required this.items,
+  });
+
+  final String date;
+  final double totalValue;
+  final List<HoldingDayDetail> items;
+}
+
+/// Computes per-holding breakdown for a given day by fetching historical
+/// prices on demand (reusing the same sources as the backfill service).
+/// Results are cached in memory so repeat taps are instant.
+class HoldingDetailService {
+  HoldingDetailService(this._dao, {Map<MarketSource, HistoryDataSource>? sources})
+      : _sources = sources ??
+            {
+              MarketSource.eastmoney: EastmoneyHistorySource(),
+              MarketSource.sina: SinaKLineSource(),
+              MarketSource.sge: AuGoldHistorySource(),
+            };
+
+  final AssetDao _dao;
+  final Map<MarketSource, HistoryDataSource> _sources;
+
+  final Map<String, DayDetail> _cache = {};
+
+  Future<DayDetail?> compute(DateTime day) async {
+    final key = todayKey(day);
+    final cached = _cache[key];
+    if (cached != null) return cached;
+
+    final holdings = await _dao.getHoldings();
+    if (holdings.isEmpty) return null;
+
+    // Fetch historical prices in parallel.
+    final lookups = <int, HistoryPriceLookup>{};
+    final futures = <Future<void>>[];
+    for (final h in holdings) {
+      final source = MarketSource.fromStorage(h.marketSource);
+      final adapter = _sources[source];
+      if (adapter == null) continue;
+      final type = AssetType.fromStorage(h.assetType);
+      var rawSymbol = (h.symbol != null && h.symbol!.isNotEmpty)
+          ? h.symbol!
+          : type.defaultSymbol;
+      if (rawSymbol == null) continue;
+      if (source == MarketSource.sina) {
+        rawSymbol = normalizeSinaSymbol(rawSymbol);
+      }
+      final symbol = rawSymbol;
+      futures.add(() async {
+        final history = await adapter.fetch(symbol, day, day);
+        if (history.isNotEmpty) lookups[h.id] = HistoryPriceLookup(history);
+      }());
+    }
+    await Future.wait(futures);
+
+    var assets = 0.0;
+    var liabilities = 0.0;
+    final rawItems = <HoldingDayDetail>[];
+    for (final h in holdings) {
+      final type = AssetType.fromStorage(h.assetType);
+      final buy = h.purchaseDate ?? h.createdAt;
+      final buyDay = DateTime(buy.year, buy.month, buy.day);
+      // Not owned yet on this day.
+      if (day.isBefore(buyDay)) continue;
+
+      final lookup = lookups[h.id];
+      final price = lookup?.priceOnOrBefore(key) ?? h.latestPrice;
+      final value = h.quantity * price;
+      final cost = type.isAmountBased
+          ? (h.costPrice > 0 ? h.costPrice : h.quantity)
+          : h.quantity * h.costPrice;
+
+      if (type == AssetType.liability) {
+        liabilities += value;
+      } else {
+        assets += value;
+      }
+      rawItems.add(HoldingDayDetail(
+        holding: h,
+        price: price,
+        marketValue: value,
+        cost: cost,
+        ratio: 0,
+      ));
+    }
+
+    final items = [
+      for (final it in rawItems)
+        if (AssetType.fromStorage(it.holding.assetType) != AssetType.liability)
+          HoldingDayDetail(
+            holding: it.holding,
+            price: it.price,
+            marketValue: it.marketValue,
+            cost: it.cost,
+            ratio: assets == 0 ? 0 : it.marketValue / assets,
+          )
+        else
+          it,
+    ];
+    if (items.isEmpty) return null;
+
+    final detail = DayDetail(
+      date: key,
+      totalValue: assets - liabilities,
+      items: items,
+    );
+    _cache[key] = detail;
+    return detail;
+  }
+}
