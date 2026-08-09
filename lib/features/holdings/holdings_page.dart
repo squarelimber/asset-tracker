@@ -550,9 +550,8 @@ class _HoldingCard extends ConsumerWidget {
   }
 
   Future<void> _showEditDialog(BuildContext context, WidgetRef ref) async {
-    final type = AssetType.fromStorage(holding.assetType);
-    final isAmountBased = type.isAmountBased;
-    final autoCny = type.isMarketLinked || type == AssetType.bankWealth;
+    final initialType = AssetType.fromStorage(holding.assetType);
+    final typeNotifier = ValueNotifier<AssetType>(initialType);
     final nameCtrl = TextEditingController(text: holding.name);
     final symbolCtrl = TextEditingController(text: holding.symbol ?? '');
     final quantityCtrl =
@@ -566,101 +565,162 @@ class _HoldingCard extends ConsumerWidget {
       holding.purchaseDate ?? holding.createdAt,
     );
     final amount = ValueNotifier<double>(holding.quantity);
-    double? investedResult = isAmountBased ? holding.costPrice : null;
+    double? investedResult = initialType.isAmountBased ? holding.costPrice : null;
 
     final ok = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('编辑持仓'),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: '名称')),
-              if (!isAmountBased) ...[
-                const SizedBox(height: 12),
-                TextField(
-                  controller: symbolCtrl,
-                  decoration: InputDecoration(
-                    labelText: '行情代码',
-                    hintText: '如 sh600519 / 110022 / AU99.99 / USD',
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) {
+          final type = typeNotifier.value;
+          final isAmountBased = type.isAmountBased;
+          final autoCny = type.isMarketLinked || type == AssetType.bankWealth;
+          return AlertDialog(
+            title: const Text('编辑持仓'),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: nameCtrl,
+                    decoration: const InputDecoration(labelText: '名称'),
                   ),
-                ),
-              ],
-              const SizedBox(height: 12),
-              TextField(
-                controller: quantityCtrl,
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                decoration: InputDecoration(
-                  labelText: isAmountBased ? '当前金额' : '数量 / 份额 / 克数',
-                ),
-                onChanged: (v) {
-                  if (isAmountBased) {
-                    amount.value = double.tryParse(v.trim()) ?? 0;
-                  }
-                },
+                  const SizedBox(height: 12),
+                  DropdownButtonFormField<AssetType>(
+                    initialValue: type,
+                    decoration: const InputDecoration(labelText: '资产类型'),
+                    items: [
+                      for (final t in AssetType.values)
+                        DropdownMenuItem(value: t, child: Text(t.label)),
+                    ],
+                    onChanged: (v) {
+                      if (v != null) setState(() => typeNotifier.value = v);
+                    },
+                  ),
+                  if (!isAmountBased) ...[
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: symbolCtrl,
+                      decoration: InputDecoration(
+                        labelText: '行情代码',
+                        hintText: '如 sh600519 / 110022 / AU99.99 / USD',
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: quantityCtrl,
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    decoration: InputDecoration(
+                      labelText: isAmountBased ? '当前金额' : '数量 / 份额 / 克数',
+                    ),
+                    onChanged: (v) {
+                      if (isAmountBased) {
+                        amount.value = double.tryParse(v.trim()) ?? 0;
+                      }
+                    },
+                  ),
+                  if (isAmountBased) ...[
+                    const SizedBox(height: 12),
+                    InvestedProfitField(
+                      amount: amount,
+                      initialInvested: holding.costPrice > 0 ? holding.costPrice : null,
+                      onChanged: (v) => investedResult = v,
+                    ),
+                  ] else ...[
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: costCtrl,
+                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      decoration: const InputDecoration(labelText: '成本单价'),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: priceCtrl,
+                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      decoration: const InputDecoration(labelText: '最新单价'),
+                    ),
+                  ],
+                  const SizedBox(height: 12),
+                  PurchaseDateField(value: purchaseDate),
+                  const SizedBox(height: 12),
+                  if (autoCny)
+                    const Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        '币种：人民币（行情自动折算）',
+                        style: TextStyle(fontSize: 13),
+                      ),
+                    )
+                  else
+                    TextField(
+                      controller: currencyCtrl,
+                      decoration: const InputDecoration(labelText: '币种 (ISO 代码)'),
+                    ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: noteCtrl,
+                    decoration: const InputDecoration(labelText: '备注'),
+                  ),
+                ],
               ),
-              if (isAmountBased) ...[
-                const SizedBox(height: 12),
-                InvestedProfitField(
-                  amount: amount,
-                  initialInvested: holding.costPrice > 0 ? holding.costPrice : null,
-                  onChanged: (v) => investedResult = v,
-                ),
-              ] else ...[
-                const SizedBox(height: 12),
-                TextField(
-                  controller: costCtrl,
-                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                  decoration: const InputDecoration(labelText: '成本单价'),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: priceCtrl,
-                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                  decoration: const InputDecoration(labelText: '最新单价'),
-                ),
-              ],
-              const SizedBox(height: 12),
-              PurchaseDateField(value: purchaseDate),
-              const SizedBox(height: 12),
-              if (autoCny)
-                const Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text(
-                    '币种：人民币（行情自动折算）',
-                    style: TextStyle(fontSize: 13),
-                  ),
-                )
-              else
-                TextField(
-                  controller: currencyCtrl,
-                  decoration: const InputDecoration(labelText: '币种 (ISO 代码)'),
-                ),
-              const SizedBox(height: 12),
-              TextField(controller: noteCtrl, decoration: const InputDecoration(labelText: '备注')),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('取消'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('保存'),
+              ),
             ],
-          ),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('取消')),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('保存'),
-          ),
-        ],
+          );
+        },
       ),
     );
 
     if (ok == true) {
+      final type = typeNotifier.value;
+      final isAmountBased = type.isAmountBased;
+      final autoCny = type.isMarketLinked || type == AssetType.bankWealth;
       final qty = double.tryParse(quantityCtrl.text.trim());
       if (qty == null) return;
       final cost = double.tryParse(costCtrl.text.trim());
       final price = double.tryParse(priceCtrl.text.trim());
       if (!isAmountBased && (cost == null || price == null)) return;
       final symbol = symbolCtrl.text.trim();
+      // Market source follows the new asset type; amount-based assets are
+      // manual by nature. A symbol change on a share holding with an empty
+      // source also re-derives the source.
+      final marketSource = isAmountBased
+          ? 'manual'
+          : MarketSource.fromStorage(holding.marketSource) == MarketSource.manual
+              ? switch (type) {
+                  AssetType.stock || AssetType.etf => 'sina',
+                  AssetType.mutualFund => 'eastmoney',
+                  AssetType.gold => 'sge',
+                  AssetType.crypto => 'coingecko',
+                  AssetType.bankWealth => 'forex',
+                  _ => holding.marketSource,
+                }
+              : switch (type) {
+                  AssetType.stock || AssetType.etf => 'sina',
+                  AssetType.mutualFund => 'eastmoney',
+                  AssetType.gold => 'sge',
+                  AssetType.crypto => 'coingecko',
+                  AssetType.bankWealth =>
+                    symbol.isNotEmpty ? 'forex' : 'manual',
+                  AssetType.cash ||
+                  AssetType.bankDeposit ||
+                  AssetType.liquidWealth ||
+                  AssetType.liability ||
+                  AssetType.property =>
+                    'manual',
+                };
       final updated = holding.copyWith(
         name: nameCtrl.text.trim().isEmpty ? holding.name : nameCtrl.text.trim(),
+        assetType: type.storageName,
+        marketSource: marketSource,
         quantity: qty,
         costPrice: isAmountBased ? (investedResult ?? qty) : (cost ?? holding.costPrice),
         latestPrice: isAmountBased ? 1 : (price ?? holding.latestPrice),
@@ -673,20 +733,6 @@ class _HoldingCard extends ConsumerWidget {
                 : currencyCtrl.text.trim().toUpperCase()),
         note: noteCtrl.text.trim().isEmpty ? const Value.absent() : Value(noteCtrl.text.trim()),
       );
-      // Keep the market source in sync when the user changes the symbol.
-      if (!isAmountBased && symbol.isNotEmpty &&
-          MarketSource.fromStorage(holding.marketSource) == MarketSource.manual) {
-        updated.copyWith(
-          marketSource: switch (type) {
-            AssetType.stock || AssetType.etf => 'sina',
-            AssetType.mutualFund => 'eastmoney',
-            AssetType.gold => 'sge',
-            AssetType.crypto => 'coingecko',
-            AssetType.bankWealth => 'forex',
-            _ => holding.marketSource,
-          },
-        );
-      }
       await ref.read(daoProvider).updateHolding(updated);
     }
     nameCtrl.dispose();
