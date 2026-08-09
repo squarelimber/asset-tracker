@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../app/providers.dart';
 import '../../app/theme.dart';
 import '../../core/formats.dart';
+import '../../core/history_sync.dart';
 import '../../core/responsive.dart';
 import '../../domain/portfolio_calculator.dart';
 import '../../services/snapshot_service.dart';
@@ -55,18 +56,36 @@ class _PortfolioPageState extends ConsumerState<PortfolioPage> {
     super.dispose();
   }
 
-  /// Backfills the net worth chart from the purchase dates, once per app run.
+  /// Backfills the net worth chart from the purchase dates.
+  /// A dirty marker (set when holdings/transactions change) triggers a full
+  /// force rebuild; the marker is cleared only after a successful run, so a
+  /// failed/interrupted sync retries on the next visit.
   Future<void> _backfillHistory() async {
     if (_backfillStarted) return;
     _backfillStarted = true;
-    final result = await ref.read(historyBackfillServiceProvider).backfill();
+    final dao = ref.read(daoProvider);
+    final dirty = await dao.getSetting(historySyncDirtyKey);
+    // One-time legacy fix: rebuild everything once after the sync-reliability
+    // update so pre-existing (unsynced) history gets corrected.
+    final firstRun = await dao.getSetting(_historySyncV5Marker) == null;
+    final result = await ref.read(historyBackfillServiceProvider).backfill(
+          forceRebuild: dirty == historyDirtySet || firstRun,
+        );
+    if (dirty == historyDirtySet) {
+      await dao.setSetting(historySyncDirtyKey, historyDirtyClear);
+    }
+    if (firstRun) {
+      await dao.setSetting(_historySyncV5Marker, '1');
+    }
     if (!mounted) return;
-    if (result.ok && result.days > 0) {
+    if (result.ok) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(result.message ?? '历史净值已回填')),
+        SnackBar(content: Text(result.message ?? '历史净值已是最新')),
       );
     }
   }
+
+  static const _historySyncV5Marker = 'history_sync_v5';
 
   Future<void> _refreshPrices({bool showSnack = true}) async {
     if (_refreshing.value) return;

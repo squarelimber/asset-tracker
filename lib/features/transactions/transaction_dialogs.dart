@@ -5,6 +5,7 @@ import '../../app/providers.dart';
 import '../../app/theme.dart';
 import '../../core/enums.dart';
 import '../../core/formats.dart';
+import '../../core/history_sync.dart';
 import '../../data/database.dart';
 
 /// Dialog for recording a transaction against a specific holding.
@@ -221,6 +222,9 @@ Future<void> showHoldingTransactionDialog(
             );
             if (!context.mounted) return;
             Navigator.pop(context);
+            if (result.ok) {
+              ref.read(daoProvider).setSetting(historySyncDirtyKey, historyDirtySet);
+            }
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
                 content: Text(result.ok ? '已记录' : (result.message ?? '记录失败')),
@@ -410,6 +414,9 @@ Future<void> showAccountTransactionDialog(
             );
             if (!context.mounted) return;
             Navigator.pop(context);
+            if (result.ok) {
+              ref.read(daoProvider).setSetting(historySyncDirtyKey, historyDirtySet);
+            }
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
                 content: Text(result.ok ? '已记录' : (result.message ?? '记录失败')),

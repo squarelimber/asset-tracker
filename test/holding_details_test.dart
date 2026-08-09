@@ -141,4 +141,22 @@ void main() {
     final d2 = await service.compute(DateTime(2026, 7, 2));
     expect(identical(d1, d2), isTrue);
   });
+
+  test('weekend detail uses the last trading day price (forward fill)', () async {
+    await addHolding(
+      name: '基金', type: AssetType.mutualFund,
+      quantity: 100, costPrice: 2.0, latestPrice: 2.6, symbol: '110022',
+    );
+    final fake = _FakeHistorySource();
+    // Only Friday 2026-07-03 has history; the latest price is 2.6.
+    fake.data['110022'] = {_FakeHistorySource.key(DateTime(2026, 7, 3)): 2.1};
+
+    final service = HoldingDetailService(dao, sources: {MarketSource.eastmoney: fake});
+    // 2026-07-04 is a Saturday: must resolve to Friday's 2.1, NOT 2.6.
+    final detail = await service.compute(DateTime(2026, 7, 4));
+    expect(detail, isNotNull);
+    final item = detail!.items.single;
+    expect(item.price, 2.1);
+    expect(item.marketValue, closeTo(210, 1e-6));
+  });
 }

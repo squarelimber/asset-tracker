@@ -91,8 +91,12 @@ class HistoryBackfillService {
       }
       final symbol = rawSymbol;
       futures.add(() async {
-        final history = await adapter.fetch(symbol, windowStart, current);
-        if (history.isNotEmpty) fillers[h.id] = HistoryPriceLookup(history);
+        try {
+          final history = await adapter.fetch(symbol, windowStart, current);
+          if (history.isNotEmpty) fillers[h.id] = HistoryPriceLookup(history);
+        } catch (_) {
+          // A single source failure must not abort the whole rebuild.
+        }
       }());
     }
     await Future.wait(futures);

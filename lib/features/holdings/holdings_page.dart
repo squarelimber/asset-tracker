@@ -6,6 +6,7 @@ import '../../app/providers.dart';
 import '../../app/theme.dart';
 import '../../core/enums.dart';
 import '../../core/formats.dart';
+import '../../core/history_sync.dart';
 import '../../core/responsive.dart';
 import '../../core/symbols.dart';
 import '../../data/database.dart';
@@ -346,9 +347,9 @@ class _HoldingsPageState extends ConsumerState<HoldingsPage> {
                   );
                 }
               }
-              // Rebuild historical snapshots so the new holding appears
-              // in the net worth history from its purchase date.
-              ref.read(historyBackfillServiceProvider).backfill(forceRebuild: true);
+              // Mark history sync dirty; the portfolio page rebuilds the
+              // snapshots when opened next.
+              ref.read(daoProvider).setSetting(historySyncDirtyKey, historyDirtySet);
             },
             child: const Text('保存'),
           ),
@@ -742,8 +743,7 @@ class _HoldingCard extends ConsumerWidget {
         note: noteCtrl.text.trim().isEmpty ? const Value.absent() : Value(noteCtrl.text.trim()),
       );
       await ref.read(daoProvider).updateHolding(updated);
-      // Rebuild history after edits (quantity/cost/type affect snapshots).
-      ref.read(historyBackfillServiceProvider).backfill(forceRebuild: true);
+      ref.read(daoProvider).setSetting(historySyncDirtyKey, historyDirtySet);
     }
     nameCtrl.dispose();
     symbolCtrl.dispose();
@@ -772,7 +772,7 @@ class _HoldingCard extends ConsumerWidget {
     );
     if (ok == true) {
       await ref.read(daoProvider).deleteHolding(holding.id);
-      ref.read(historyBackfillServiceProvider).backfill(forceRebuild: true);
+      ref.read(daoProvider).setSetting(historySyncDirtyKey, historyDirtySet);
     }
   }
 }
@@ -977,6 +977,9 @@ class _TransactionTile extends ConsumerWidget {
                 final result =
                     await ref.read(transactionServiceProvider).remove(txn.id);
                 if (!context.mounted) return;
+                if (result.ok) {
+                  ref.read(daoProvider).setSetting(historySyncDirtyKey, historyDirtySet);
+                }
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
                     content: Text(result.ok ? '已删除并回滚' : (result.message ?? '删除失败')),

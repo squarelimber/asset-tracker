@@ -70,6 +70,14 @@ class HoldingDetailService {
     final holdings = await _dao.getHoldings();
     if (holdings.isEmpty) return null;
 
+    // Fetch history from the earliest purchase date to the target day so
+    // weekends/holidays resolve via forward fill (same as the backfill).
+    DateTime? earliest;
+    for (final h in holdings) {
+      final d = h.purchaseDate ?? h.createdAt;
+      if (earliest == null || d.isBefore(earliest)) earliest = d;
+    }
+
     // Fetch historical prices in parallel.
     final lookups = <int, HistoryPriceLookup>{};
     final futures = <Future<void>>[];
@@ -87,8 +95,12 @@ class HoldingDetailService {
       }
       final symbol = rawSymbol;
       futures.add(() async {
-        final history = await adapter.fetch(symbol, day, day);
-        if (history.isNotEmpty) lookups[h.id] = HistoryPriceLookup(history);
+        try {
+          final history = await adapter.fetch(symbol, earliest ?? day, day);
+          if (history.isNotEmpty) lookups[h.id] = HistoryPriceLookup(history);
+        } catch (_) {
+          // Ignore a single source failure; fall back to latest price.
+        }
       }());
     }
     await Future.wait(futures);

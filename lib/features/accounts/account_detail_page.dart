@@ -5,6 +5,7 @@ import '../../app/providers.dart';
 import '../../app/theme.dart';
 import '../../core/enums.dart';
 import '../../core/formats.dart';
+import '../../core/history_sync.dart';
 import '../../data/database.dart';
 import '../transactions/transaction_dialogs.dart';
 
@@ -221,6 +222,9 @@ class _TransactionTile extends ConsumerWidget {
                 final result =
                     await ref.read(transactionServiceProvider).remove(txn.id);
                 if (!context.mounted) return;
+                if (result.ok) {
+                  ref.read(daoProvider).setSetting(historySyncDirtyKey, historyDirtySet);
+                }
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
                     content: Text(result.ok ? '已删除并回滚' : (result.message ?? '删除失败')),

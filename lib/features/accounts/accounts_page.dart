@@ -7,6 +7,7 @@ import '../../app/providers.dart';
 import '../../app/theme.dart';
 import '../../core/enums.dart';
 import '../../core/formats.dart';
+import '../../core/history_sync.dart';
 import '../../core/responsive.dart';
 import '../../data/database.dart';
 import '../transactions/transaction_dialogs.dart';
@@ -220,7 +221,7 @@ class _AccountCard extends ConsumerWidget {
     );
     if (ok == true) {
       await ref.read(daoProvider).deleteAccount(account.id);
-      ref.read(historyBackfillServiceProvider).backfill(forceRebuild: true);
+      ref.read(daoProvider).setSetting(historySyncDirtyKey, historyDirtySet);
     }
   }
 }
