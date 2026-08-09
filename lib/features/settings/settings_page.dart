@@ -140,7 +140,11 @@ class SettingsPage extends ConsumerWidget {
     );
     if (confirm != true) return;
 
-    final json = await file.readAsString();
+    // Read as raw bytes and decode UTF-8 explicitly: cross_file's
+    // XFile.readAsString() maps bytes 1:1 (Latin-1) on the Android bytes
+    // path, which garbles Chinese characters.
+    final bytes = await file.readAsBytes();
+    final json = utf8.decode(bytes);
     final result = await ref.read(backupServiceProvider).importJson(json);
     if (!context.mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
