@@ -112,12 +112,21 @@ class NetWorthChart extends ConsumerStatefulWidget {
 }
 
 class _NetWorthChartState extends ConsumerState<NetWorthChart> {
-  RangeOption _range = RangeOption.year1;
+  RangeOption _range = RangeOption.ytd;
   DateTime? _customFrom;
   DateTime? _customTo;
-  bool _showBenchmark = false;
-  HistoryPriceLookup? _benchmark;
   _TrendView _view = _TrendView.returnRate;
+
+  /// Benchmark indexes: symbol, label, line color.
+  static const _benchIndexes = [
+    (code: 'sh000300', label: '沪深300', color: Color(0xFF64B5F6)),
+    (code: 'sh000001', label: '上证指数', color: Color(0xFF81C784)),
+    (code: 'sh000016', label: '上证50', color: Color(0xFFBA68C8)),
+    (code: 'sz399006', label: '创业板指', color: Color(0xFFFFB74D)),
+  ];
+
+  Set<String> _benchSelected = {};
+  Map<String, HistoryPriceLookup> _benchData = {};
 
   /// Segmented range presets (all/custom live behind the calendar button).
   static const _rangeOptions = [
@@ -128,26 +137,79 @@ class _NetWorthChartState extends ConsumerState<NetWorthChart> {
     RangeOption.year3,
   ];
 
-  Future<void> _toggleBenchmark(bool on) async {
-    setState(() => _showBenchmark = on);
-    if (on && _benchmark == null) {
+  Color _benchColor(String code) =>
+      _benchIndexes.firstWhere((b) => b.code == code).color;
+
+  Future<void> _showBenchmarkPanel() async {
+    final result = await showModalBottomSheet<Set<String>>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setSheetState) => SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('对比指数（收益率视图下叠加显示）',
+                    style: Theme.of(context).textTheme.titleMedium),
+                const SizedBox(height: 12),
+                for (final b in _benchIndexes) ...[
+                  FilterChip(
+                    label: Text(b.label),
+                    selected: _benchSelected.contains(b.code),
+                    visualDensity: VisualDensity.compact,
+                    onSelected: (sel) => setSheetState(() {
+                      if (sel) {
+                        _benchSelected.add(b.code);
+                      } else {
+                        _benchSelected.remove(b.code);
+                      }
+                    }),
+                  ),
+                  const SizedBox(height: 6),
+                ],
+                const SizedBox(height: 12),
+                FilledButton(
+                  onPressed: () => Navigator.pop(context, {..._benchSelected}),
+                  child: const Text('完成'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    if (result == null || !mounted) return;
+    setState(() => _benchSelected = result);
+    await _loadBenchmarks();
+  }
+
+  Future<void> _loadBenchmarks() async {
+    final missing = _benchSelected
+        .where((code) => !_benchData.containsKey(code))
+        .toList();
+    if (missing.isEmpty) return;
+    final now = DateTime.now();
+    final source = SinaKLineSource();
+    final data = <String, HistoryPriceLookup>{};
+    for (final code in missing) {
       try {
-        final now = DateTime.now();
-        final source = SinaKLineSource();
-        // 1000 trading days (~4 years) covers most ranges.
         final history = await source.fetch(
-          'sh000300',
+          code,
           now.subtract(const Duration(days: 1500)),
           now,
         );
-        if (history.isNotEmpty && mounted) {
-          setState(() => _benchmark = HistoryPriceLookup(history));
-        } else if (mounted) {
-          setState(() => _showBenchmark = false);
+        if (history.isNotEmpty) {
+          data[code] = HistoryPriceLookup(history);
         }
       } catch (_) {
-        if (mounted) setState(() => _showBenchmark = false);
+        // Skip failed index.
       }
+    }
+    if (mounted && data.isNotEmpty) {
+      setState(() => _benchData = {..._benchData, ...data});
     }
   }
 
@@ -236,11 +298,15 @@ class _NetWorthChartState extends ConsumerState<NetWorthChart> {
                 ),
                 const SizedBox(width: 8),
                 FilterChip(
-                  label: const Text('沪深300'),
-                  selected: _showBenchmark,
+                  label: Text(
+                    _benchSelected.isEmpty
+                        ? '指数对比'
+                        : '指数对比(${_benchSelected.length})',
+                  ),
+                  selected: _benchSelected.isNotEmpty,
                   showCheckmark: false,
                   visualDensity: VisualDensity.compact,
-                  onSelected: _toggleBenchmark,
+                  onSelected: (_) => _showBenchmarkPanel(),
                 ),
               ],
             ),
@@ -360,19 +426,23 @@ class _NetWorthChartState extends ConsumerState<NetWorthChart> {
                       const SizedBox(height: 12),
                     ],
                     // Legend above the chart (no overlay).
-                    if (_showBenchmark && _benchmark != null)
+                    if (_benchSelected.isNotEmpty)
                       Padding(
                         padding: const EdgeInsets.only(bottom: 8),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
+                        child: Wrap(
+                          spacing: 14,
+                          runSpacing: 4,
                           children: [
                             _LegendDot(color: AppColors.up, label: '资产'),
-                            const SizedBox(width: 14),
-                            _LegendDot(
-                              color: Theme.of(context).colorScheme.outline,
-                              label: '沪深300',
-                              dashed: true,
-                            ),
+                            for (final code in _benchSelected)
+                              if (_benchData.containsKey(code))
+                                _LegendDot(
+                                  color: _benchColor(code),
+                                  label: _benchIndexes
+                                      .firstWhere((b) => b.code == code)
+                                      .label,
+                                  dashed: true,
+                                ),
                           ],
                         ),
                       ),
@@ -380,7 +450,17 @@ class _NetWorthChartState extends ConsumerState<NetWorthChart> {
                       list: list,
                       view: _view,
                       rates: rates,
-                      benchmark: _showBenchmark ? _benchmark : null,
+                      benchmarks: {
+                        for (final code in _benchSelected)
+                          if (_benchData.containsKey(code))
+                            code: _BenchSeries(
+                              name: _benchIndexes
+                                  .firstWhere((b) => b.code == code)
+                                  .label,
+                              color: _benchColor(code),
+                              lookup: _benchData[code]!,
+                            ),
+                      },
                       onDayTap: (date) => _showDayDetail(context, date),
                     ),
                     if (isRate)
@@ -545,12 +625,21 @@ final _dayDetailProvider = FutureProvider.autoDispose.family<DayDetail?, DateTim
 
 enum _TrendView { returnRate, netValue }
 
+/// One benchmark index overlay series.
+class _BenchSeries {
+  const _BenchSeries({required this.name, required this.color, required this.lookup});
+
+  final String name;
+  final Color color;
+  final HistoryPriceLookup lookup;
+}
+
 class _TrendChart extends StatelessWidget {
   const _TrendChart({
     required this.list,
     required this.view,
     required this.rates,
-    this.benchmark,
+    this.benchmarks = const {},
     this.onDayTap,
   });
 
@@ -562,8 +651,8 @@ class _TrendChart extends StatelessWidget {
   /// Daily return rates (%) aligned with [list] (return-rate view).
   final List<double> rates;
 
-  /// CSI300 index history for the benchmark overlay.
-  final HistoryPriceLookup? benchmark;
+  /// Selected benchmark indexes (code -> series).
+  final Map<String, _BenchSeries> benchmarks;
 
   /// Called with the tapped snapshot date (yyyy-MM-dd).
   final ValueChanged<String>? onDayTap;
@@ -588,16 +677,21 @@ class _TrendChart extends StatelessWidget {
     final pad = span == 0 ? maxV.abs() * 0.05 : span * 0.12;
     final longRange = list.length > 250;
 
-    // Benchmark: CSI300 normalized return rate (%), same start point as the
+    // Benchmarks: normalized return rates (%), same start point as the
     // portfolio return-rate view: (price / base - 1) * 100.
-    final benchSpots = <FlSpot>[];
-    if (isRate && benchmark != null) {
-      var base = 0.0;
-      for (var i = 0; i < list.length; i++) {
-        final idx = benchmark!.priceOnOrBefore(list[i].date);
-        if (idx == null || idx <= 0) continue;
-        if (base == 0) base = idx;
-        benchSpots.add(FlSpot(i.toDouble(), (idx / base - 1) * 100));
+    final benchSeries = <_BenchSeries, List<FlSpot>>{};
+    if (isRate) {
+      for (final entry in benchmarks.entries) {
+        final series = entry.value;
+        final spots = <FlSpot>[];
+        var base = 0.0;
+        for (var i = 0; i < list.length; i++) {
+          final idx = series.lookup.priceOnOrBefore(list[i].date);
+          if (idx == null || idx <= 0) continue;
+          if (base == 0) base = idx;
+          spots.add(FlSpot(i.toDouble(), (idx / base - 1) * 100));
+        }
+        if (spots.isNotEmpty) benchSeries[series] = spots;
       }
     }
 
@@ -710,12 +804,12 @@ class _TrendChart extends StatelessWidget {
                 ),
               ),
             ),
-            if (benchSpots.isNotEmpty)
+            for (final entry in benchSeries.entries)
               LineChartBarData(
-                spots: benchSpots,
+                spots: entry.value,
                 isCurved: true,
                 curveSmoothness: 0.25,
-                color: Theme.of(context).colorScheme.outline,
+                color: entry.key.color,
                 barWidth: 1.5,
                 dashArray: [4, 4],
                 dotData: const FlDotData(show: false),
