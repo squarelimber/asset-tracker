@@ -24,7 +24,16 @@ class AppDatabase extends _$AppDatabase {
   int get schemaVersion => 6;
 
   static QueryExecutor _openConnection() {
-    return driftDatabase(name: 'asset_tracker');
+    // Web requires explicit web options: sqlite3.wasm and drift_worker.js
+    // are bundled into web/ (see drift_flutter README). On native platforms
+    // the web parameter is ignored.
+    return driftDatabase(
+      name: 'asset_tracker',
+      web: DriftWebOptions(
+        sqlite3Wasm: Uri.parse('sqlite3.wasm'),
+        driftWorker: Uri.parse('drift_worker.js'),
+      ),
+    );
   }
 
   // ---------------------------------------------------------------------------
