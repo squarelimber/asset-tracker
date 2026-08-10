@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
@@ -109,11 +108,16 @@ class SettingsPage extends ConsumerWidget {
     const suggested = XTypeGroup(label: 'JSON', extensions: ['json']);
     final location = await getSaveLocation(suggestedName: backupFileName(), acceptedTypeGroups: [suggested]);
     if (location == null) return;
-    final file = File(location.path);
-    await file.writeAsString(json);
+    // XFile.saveTo works on every platform: it writes through the native
+    // file dialog on desktop/mobile and triggers a download on the web.
+    await XFile.fromData(
+      utf8.encode(json),
+      mimeType: 'application/json',
+      name: backupFileName(),
+    ).saveTo(location.path);
     if (!context.mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('已导出到 ${location.path}')),
+      const SnackBar(content: Text('已导出备份')),
     );
   }
 
@@ -178,11 +182,14 @@ class SettingsPage extends ConsumerWidget {
       acceptedTypeGroups: [typeGroup],
     );
     if (location == null) return;
-    final file = File(location.path);
-    await file.writeAsString(content, encoding: utf8);
+    await XFile.fromData(
+      utf8.encode(content),
+      mimeType: 'text/csv',
+      name: holdings ? '持仓_${todayKey()}.csv' : '流水_${todayKey()}.csv',
+    ).saveTo(location.path);
     if (!context.mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('已导出 ${location.path}')),
+      const SnackBar(content: Text('已导出 CSV')),
     );
   }
 }

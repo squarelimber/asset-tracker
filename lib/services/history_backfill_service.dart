@@ -1,4 +1,6 @@
-﻿import '../core/enums.dart';
+﻿import 'package:flutter/foundation.dart' show kIsWeb;
+
+import '../core/enums.dart';
 import '../core/formats.dart';
 import '../core/symbols.dart';
 import '../data/asset_dao.dart';
@@ -57,6 +59,16 @@ class HistoryBackfillService {
   /// window (including already-snapshot days) is recomputed and overwritten,
   /// which merges newly added / edited / removed holdings into the history.
   Future<BackfillResult> backfill({DateTime? now, bool forceRebuild = false}) async {
+    // The Sina/Eastmoney history endpoints have no CORS support; the web
+    // build cannot backfill history. Use the desktop/mobile app for this.
+    if (kIsWeb) {
+      return const BackfillResult(
+        ok: false,
+        days: 0,
+        holdings: 0,
+        message: '网页版暂不支持历史回填，请使用桌面版',
+      );
+    }
     final current = (now ?? DateTime.now());
     final todayDate = DateTime(current.year, current.month, current.day);
 

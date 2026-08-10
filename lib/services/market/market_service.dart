@@ -1,12 +1,16 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
+
 import '../../core/enums.dart';
 import '../../core/symbols.dart';
 import '../../data/asset_dao.dart';
 import '../../data/database.dart';
 import 'coingecko_source.dart';
+import 'eastmoney_fund_quote_source.dart';
 import 'eastmoney_source.dart';
 import 'gold_fx_source.dart';
 import 'market_data_source.dart';
 import 'sina_source.dart';
+import 'tencent_quote_source.dart';
 
 /// Result of a full refresh cycle.
 class MarketRefreshResult {
@@ -32,14 +36,26 @@ class MarketService {
 
   final AssetDao _dao;
 
-  late final Map<MarketSource, MarketDataSource> _sources = {
-    MarketSource.sina: SinaSource(),
-    MarketSource.eastmoney: EastmoneySource(),
-    // Gold (sge) holdings are served by the combined gold/fx source.
-    MarketSource.sge: GoldFxSource(),
-    MarketSource.forex: GoldFxSource(),
-    MarketSource.coingecko: CoinGeckoSource(),
-  };
+  // The Sina/Eastmoney endpoints used on native platforms have no CORS
+  // headers and require a Referer header, so the web build uses the
+  // CORS-friendly Tencent / Eastmoney push2 endpoints instead.
+  late final Map<MarketSource, MarketDataSource> _sources = kIsWeb
+      ? {
+          MarketSource.sina: TencentQuoteSource(source: MarketSource.sina),
+          MarketSource.eastmoney: EastmoneyFundQuoteSource(),
+          // Gold (sge) holdings are served by the combined gold/fx adapter.
+          MarketSource.sge: TencentGoldFxAdapter(),
+          MarketSource.forex: TencentGoldFxAdapter(),
+          MarketSource.coingecko: CoinGeckoSource(),
+        }
+      : {
+          MarketSource.sina: SinaSource(),
+          MarketSource.eastmoney: EastmoneySource(),
+          // Gold (sge) holdings are served by the combined gold/fx source.
+          MarketSource.sge: GoldFxSource(),
+          MarketSource.forex: GoldFxSource(),
+          MarketSource.coingecko: CoinGeckoSource(),
+        };
 
   /// Refresh prices for all market-linked holdings.
   Future<MarketRefreshResult> refreshAll() async {

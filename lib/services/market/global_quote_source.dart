@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:http/http.dart' as http;
 
 /// One global market quote (index / commodity / FX).
@@ -87,6 +88,7 @@ class GlobalQuoteSource {
   static const _base = 'https://hq.sinajs.cn/list=';
 
   Future<List<GlobalQuote>> fetch() async {
+    if (kIsWeb) return _fetchTencent();
     final codes = [for (final d in GlobalQuoteCatalog.items) d.code];
     final results = <GlobalQuote>[];
     try {
@@ -215,6 +217,136 @@ class GlobalQuoteSource {
       price: price,
       change: change,
       changePct: prev == 0 ? 0 : change / prev,
+      unit: def.unit,
+      fxSymbol: def.fxSymbol,
+    );
+  }
+
+  // -------------------------------------------------------------------------
+  // Web: Tencent (qt.gtimg.cn) serves the same catalog with full CORS
+  // support. Nikkei 225 has no Tencent symbol and is skipped on the web.
+  // Field layouts are identical to [TencentQuoteSource]: hf_* are
+  // comma-separated (price [0], prevClose [7], changePct [1]), everything
+  // else tilde-separated with price [3] / change [31] / changePct [32] for
+  // stocks & indices, and price [3] / change [12] / changePct [13] for FX.
+  // -------------------------------------------------------------------------
+
+  static const _tencentCodes = {
+    'sh000001': 'sh000001',
+    'sz399001': 'sz399001',
+    'sz399006': 'sz399006',
+    'rt_hkHSI': 'hkHSI',
+    // int_nikkei: no Tencent symbol; skipped on the web.
+    r'gb_$dji': 'usDJI',
+    'gb_inx': 'usINX',
+    'gb_ixic': 'usIXIC',
+    'hf_XAU': 'hf_XAU',
+    'hf_GC': 'hf_GC',
+    'hf_CL': 'hf_CL',
+    'hf_OIL': 'hf_OIL',
+    'hf_HG': 'hf_HG',
+    'fx_susdcny': 'whUSDCNY',
+    'fx_seurcny': 'whEURCNY',
+    'fx_shkdcny': 'whHKDCNY',
+    'fx_sgbpcny': 'whGBPCNY',
+    'fx_sjpycny': 'whJPYCNY',
+    'fx_saudcny': 'whAUDCNY',
+    'fx_scadcny': 'whCADCNY',
+    'fx_schfcny': 'whCHFCNY',
+  };
+
+  Future<List<GlobalQuote>> _fetchTencent() async {
+    final results = <GlobalQuote>[];
+    final defOf = <String, GlobalQuoteDef>{
+      for (final d in GlobalQuoteCatalog.items)
+        if (_tencentCodes.containsKey(d.code)) d.code: d,
+    };
+    try {
+      final resp = await _client.get(
+        Uri.parse(
+          '$_baseTencent${[for (final c in defOf.keys) _tencentCodes[c]].join(',')}',
+        ),
+      );
+      if (resp.statusCode != 200) return results;
+      final text = latin1.decode(resp.bodyBytes, allowInvalid: true);
+      final map = _parseTencent(text);
+      for (final entry in defOf.entries) {
+        final q = map[_tencentCodes[entry.key]];
+        if (q == null) continue;
+        final parsed = _tencentQuote(entry.key, entry.value, q);
+        if (parsed != null) results.add(parsed);
+      }
+    } catch (_) {
+      // Return whatever parsed successfully.
+    }
+    return results;
+  }
+
+  static const _baseTencent = 'https://qt.gtimg.cn/q=';
+
+  Map<String, List<String>> _parseTencent(String text) {
+    final map = <String, List<String>>{};
+    final regex = RegExp(r'v_(\w+)="([^"]*)"');
+    for (final m in regex.allMatches(text)) {
+      map[m.group(1)!] = m.group(2)!.split(',');
+    }
+    return map;
+  }
+
+  GlobalQuote? _tencentQuote(String code, GlobalQuoteDef def, List<String> f) {
+    if (def.code.startsWith('hf_')) {
+      // Comma-separated: price [0], prevClose [7], changePct [1].
+      if (f.length < 8) return null;
+      final price = double.tryParse(f[0]);
+      final prev = double.tryParse(f[7]);
+      if (price == null || price <= 0) return null;
+      if (prev == null || prev <= 0) {
+        return GlobalQuote(
+          code: code,
+          name: def.name,
+          group: def.group,
+          price: price,
+          change: 0,
+          changePct: 0,
+          unit: def.unit,
+          fxSymbol: def.fxSymbol,
+        );
+      }
+      return _quote(def, price, price - prev, prev);
+    }
+    // Tilde-separated. Tencent splits on '~'; split(',') above leaves the
+    // whole payload in f[0], so re-split the raw payload.
+    final raw = f.length == 1 ? f[0] : f.join(',');
+    final parts = raw.split('~');
+    if (def.code.startsWith('fx_')) {
+      if (parts.length < 14) return null;
+      final price = double.tryParse(parts[3]);
+      final change = double.tryParse(parts[12]);
+      final pct = double.tryParse(parts[13]);
+      if (price == null || price <= 0) return null;
+      return GlobalQuote(
+        code: code,
+        name: def.name,
+        group: def.group,
+        price: price,
+        change: change ?? 0,
+        changePct: (pct ?? 0) / 100,
+        unit: def.unit,
+        fxSymbol: def.fxSymbol,
+      );
+    }
+    if (parts.length < 33) return null;
+    final price = double.tryParse(parts[3]);
+    final change = double.tryParse(parts[31]);
+    final pct = double.tryParse(parts[32]);
+    if (price == null || price <= 0) return null;
+    return GlobalQuote(
+      code: code,
+      name: def.name,
+      group: def.group,
+      price: price,
+      change: change ?? 0,
+      changePct: (pct ?? 0) / 100,
       unit: def.unit,
       fxSymbol: def.fxSymbol,
     );

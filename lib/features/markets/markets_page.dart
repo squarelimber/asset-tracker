@@ -1,4 +1,5 @@
 import 'package:fl_chart/fl_chart.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -9,6 +10,7 @@ import '../../services/market/futures_kline_source.dart';
 import '../../services/market/global_quote_source.dart';
 import '../../services/market/history_lookup.dart';
 import '../../services/market/history_source.dart';
+import '../../services/market/tencent_history_source.dart';
 
 final _quotesProvider = FutureProvider<List<GlobalQuote>>((ref) async {
   return GlobalQuoteSource().fetch();
@@ -16,14 +18,17 @@ final _quotesProvider = FutureProvider<List<GlobalQuote>>((ref) async {
 
 /// Trend history for a quote code, when available:
 /// A-share indices via the Sina K-line API; commodities via domestic futures.
+/// On the web the CORS-friendly Tencent K-line endpoint is used instead.
 final _trendProvider = FutureProvider.autoDispose.family<List<FlSpot>, String>(
   (ref, code) async {
     final symbol = _historySymbol(code);
     if (symbol == null) return const [];
     final now = DateTime.now();
-    final source = code.startsWith('hf_')
-        ? FuturesKLineSource()
-        : SinaKLineSource();
+    final HistoryDataSource source = kIsWeb
+        ? TencentHistorySource()
+        : (code.startsWith('hf_')
+            ? FuturesKLineSource()
+            : SinaKLineSource());
     final history = await source.fetch(symbol, now.subtract(const Duration(days: 900)), now);
     if (history.isEmpty) return const [];
     final lookup = HistoryPriceLookup(history);
@@ -37,6 +42,9 @@ final _trendProvider = FutureProvider.autoDispose.family<List<FlSpot>, String>(
 
 String? _historySymbol(String code) {
   if (code.startsWith('sh') || code.startsWith('sz')) return code;
+  // Tencent has no domestic futures K-lines, so commodity trends are
+  // unavailable on the web.
+  if (kIsWeb && code.startsWith('hf_')) return null;
   if (code.startsWith('hf_')) {
     return switch (code) {
       'hf_XAU' || 'hf_GC' => 'AU0', // 沪金
