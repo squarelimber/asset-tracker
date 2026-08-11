@@ -1,4 +1,5 @@
 ﻿import 'package:fl_chart/fl_chart.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -13,6 +14,7 @@ import '../../domain/range_stats.dart';
 import '../../domain/rate_series.dart';
 import '../../services/market/history_lookup.dart';
 import '../../services/market/history_source.dart';
+import '../../services/market/tencent_history_source.dart';
 
 enum _AllocationView { byType, byRisk }
 
@@ -330,7 +332,10 @@ class _NetWorthChartState extends ConsumerState<NetWorthChart> {
         .toList();
     if (missing.isEmpty) return;
     final now = DateTime.now();
-    final source = SinaKLineSource();
+    // Sina K-lines have no CORS support; the web build uses Tencent's.
+    final HistoryDataSource source = kIsWeb
+        ? TencentHistorySource()
+        : SinaKLineSource();
     final data = <String, HistoryPriceLookup>{};
     for (final code in missing) {
       try {
@@ -604,7 +609,7 @@ class _NetWorthChartState extends ConsumerState<NetWorthChart> {
                       const Padding(
                         padding: EdgeInsets.only(top: 6),
                         child: Text(
-                          '收益率自区间首日归零，与指数同起点对比；已剔除转入资金影响（成本口径近似）',
+                          '收益率为累计收益率（自首次记录起），已剔除转入资金影响；指数对比自区间首日归一',
                           style: TextStyle(fontSize: 11),
                         ),
                       ),
@@ -800,15 +805,14 @@ class _TrendChart extends StatelessWidget {
     // not change with gains/losses (conveyed by the stats figures instead).
     final color = AppColors.up;
     final isRate = view == _TrendView.returnRate;
-    // Normalize the asset series to start at 0% at the range start, so it
-    // shares the same baseline as the normalized index benchmarks.
-    final rateBase = isRate && rates.isNotEmpty ? rates.first : 0.0;
-
+    // The asset series shows the true cumulative return rate (starting at
+    // the range's first recorded rate, which is usually non-zero), while
+    // benchmark indexes are normalized to 0% at the range start.
     final points = <FlSpot>[];
     var minV = double.infinity;
     var maxV = 0.0;
     for (var i = 0; i < list.length; i++) {
-      final v = isRate ? rates[i] - rateBase : list[i].totalValue;
+      final v = isRate ? rates[i] : list[i].totalValue;
       points.add(FlSpot(i.toDouble(), v));
       if (v < minV) minV = v;
       if (v > maxV) maxV = v;
