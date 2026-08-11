@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../core/symbols.dart';
 import '../data/asset_dao.dart';
 import '../data/database.dart';
 import '../domain/holding_details.dart';
@@ -66,6 +67,24 @@ final holdingsProvider = StreamProvider<List<HoldingRow>>(
 
 final holdingsByAccountProvider = StreamProvider.family<List<HoldingRow>, int>(
   (ref, accountId) => ref.watch(daoProvider).watchHoldingsByAccount(accountId),
+);
+
+// ---------------------------------------------------------------------------
+// Price cache (today's change for each holding's quote)
+// ---------------------------------------------------------------------------
+
+/// Cached quotes by normalized cache symbol, keyed the same way
+/// `MarketService` writes them. Invalidated after every market refresh.
+final priceCacheProvider = FutureProvider<Map<String, PriceCacheRow>>(
+  (ref) async {
+    final holdings = await ref.watch(holdingsProvider.future);
+    final symbols = holdings
+        .map(cacheSymbolFor)
+        .whereType<String>()
+        .toSet()
+        .toList();
+    return ref.read(daoProvider).getCachedPrices(symbols);
+  },
 );
 
 // ---------------------------------------------------------------------------

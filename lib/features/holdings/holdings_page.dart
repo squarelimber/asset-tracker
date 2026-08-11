@@ -33,6 +33,34 @@ double _holdingMarketValue(HoldingRow h) {
   return type.isAmountBased ? h.quantity : h.quantity * h.latestPrice;
 }
 
+/// Today's profit for a holding from its cached quote: the cached unit
+/// price change x quantity. Returns null when the quote is missing or the
+/// cache was not written today (stale data would be misleading).
+double? todayProfitOf(PriceCacheRow? row, double quantity, {DateTime? now}) {
+  if (row == null || row.change == null) return null;
+  final fetched = row.fetchedAt;
+  final n = now ?? DateTime.now();
+  if (fetched.year != n.year ||
+      fetched.month != n.month ||
+      fetched.day != n.day) {
+    return null;
+  }
+  return row.change! * quantity;
+}
+
+/// Today's change percentage (fraction) from the cached quote, or null.
+double? todayChangePctOf(PriceCacheRow? row, {DateTime? now}) {
+  if (row == null || row.changePct == null) return null;
+  final fetched = row.fetchedAt;
+  final n = now ?? DateTime.now();
+  if (fetched.year != n.year ||
+      fetched.month != n.month ||
+      fetched.day != n.day) {
+    return null;
+  }
+  return row.changePct;
+}
+
 class HoldingsPage extends ConsumerStatefulWidget {
   const HoldingsPage({super.key});
 
@@ -169,6 +197,7 @@ class _HoldingsPageState extends ConsumerState<HoldingsPage> {
     final result = await ref.read(marketServiceProvider).refreshAll();
     // FX rates may have changed with the refresh.
     ref.invalidate(cnyRatesProvider);
+    ref.invalidate(priceCacheProvider);
     ref.read(_refreshingProvider.notifier).state = false;
     if (!mounted) return;
     if (showSnack) {
@@ -521,6 +550,12 @@ class _HoldingCard extends ConsumerWidget {
         : holding.quantity * holding.costPrice;
     final profit = marketValue - cost;
     final profitPct = cost == 0 ? 0.0 : profit / cost;
+    // Today's change from the price cache (only when written today).
+    final cache = ref.watch(priceCacheProvider).value ?? const <String, PriceCacheRow>{};
+    final cacheSymbol = cacheSymbolFor(holding);
+    final todayRow = cacheSymbol == null ? null : cache[cacheSymbol];
+    final todayProfit = todayProfitOf(todayRow, holding.quantity);
+    final todayPct = todayChangePctOf(todayRow);
 
     return Card(
       child: InkWell(
@@ -618,6 +653,43 @@ class _HoldingCard extends ConsumerWidget {
                   ),
                 ],
               ),
+              if (todayProfit != null) ...[
+                const SizedBox(height: 6),
+                Row(
+                  children: [
+                    Text(
+                      '今日',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: Theme.of(context).colorScheme.outline,
+                          ),
+                    ),
+                    const SizedBox(width: 10),
+                    Flexible(
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            '${todayProfit >= 0 ? '+' : ''}${Formats.money(todayProfit, holding.currency)}',
+                            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                  color: context.changeColor(todayProfit),
+                                  fontWeight: FontWeight.w600,
+                                ),
+                          ),
+                          if (todayPct != null) ...[
+                            const SizedBox(width: 8),
+                            Text(
+                              '(${Formats.pct(todayPct)})',
+                              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                    color: context.changeColor(todayProfit),
+                                  ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ],
             ],
           ),
         ),
@@ -963,6 +1035,11 @@ class _HoldingDetailSheet extends ConsumerWidget {
     final buyDate = holding.purchaseDate ?? holding.createdAt;
     final days = DateTime.now().difference(buyDate).inDays;
     final annualized = Formats.annualizedReturn(profitPct, days);
+    final cache = ref.watch(priceCacheProvider).value ?? const <String, PriceCacheRow>{};
+    final cacheSymbol = cacheSymbolFor(holding);
+    final todayRow = cacheSymbol == null ? null : cache[cacheSymbol];
+    final todayProfit = todayProfitOf(todayRow, holding.quantity);
+    final todayPct = todayChangePctOf(todayRow);
     return ListView(
       controller: scrollController,
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 32),
@@ -1006,6 +1083,15 @@ class _HoldingDetailSheet extends ConsumerWidget {
                 _InfoRow(label: '币种', value: holding.currency),
                 _InfoRow(label: '买入日期', value: Formats.date(buyDate)),
                 _InfoRow(label: '持有时间', value: Formats.holdingDuration(buyDate)),
+                if (todayProfit != null)
+                  _InfoRow(
+                    label: '今日收益',
+                    value: todayPct == null
+                        ? '${todayProfit >= 0 ? '+' : ''}${Formats.money(todayProfit, holding.currency)}'
+                        : '${todayProfit >= 0 ? '+' : ''}${Formats.money(todayProfit, holding.currency)}'
+                            ' (${Formats.pct(todayPct)})',
+                    valueColor: context.changeColor(todayProfit),
+                  ),
                 if (annualized != null)
                   _InfoRow(
                     label: '年化收益率',
