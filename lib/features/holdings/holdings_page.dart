@@ -653,21 +653,30 @@ class _HoldingCard extends ConsumerWidget {
                   ),
                 ],
               ),
-              if (todayProfit != null) ...[
-                const SizedBox(height: 6),
-                Row(
-                  children: [
-                    Text(
-                      '今日',
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: Theme.of(context).colorScheme.outline,
-                          ),
-                    ),
-                    const SizedBox(width: 10),
-                    Flexible(
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
+              const SizedBox(height: 6),
+              // Always rendered (placeholder when there is no quote data)
+              // so every card keeps the same height and grid rows align.
+              Row(
+                children: [
+                  Text(
+                    '今日',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: Theme.of(context).colorScheme.outline,
+                        ),
+                  ),
+                  const SizedBox(width: 10),
+                  Flexible(
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (todayProfit == null)
+                          Text(
+                            '--',
+                            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                  color: Theme.of(context).colorScheme.outline,
+                                ),
+                          )
+                        else ...[
                           Text(
                             '${todayProfit >= 0 ? '+' : ''}${Formats.money(todayProfit, holding.currency)}',
                             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
@@ -685,11 +694,11 @@ class _HoldingCard extends ConsumerWidget {
                             ),
                           ],
                         ],
-                      ),
+                      ],
                     ),
-                  ],
-                ),
-              ],
+                  ),
+                ],
+              ),
             ],
           ),
         ),
