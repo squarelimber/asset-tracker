@@ -609,7 +609,7 @@ class _NetWorthChartState extends ConsumerState<NetWorthChart> {
                       const Padding(
                         padding: EdgeInsets.only(top: 6),
                         child: Text(
-                          '收益率为累计收益率（自首次记录起），已剔除转入资金影响；指数对比自区间首日归一',
+                          '收益率自区间首日归零，与指数同起点对比；已剔除转入资金影响（成本口径近似）',
                           style: TextStyle(fontSize: 11),
                         ),
                       ),
@@ -805,14 +805,16 @@ class _TrendChart extends StatelessWidget {
     // not change with gains/losses (conveyed by the stats figures instead).
     final color = AppColors.up;
     final isRate = view == _TrendView.returnRate;
-    // The asset series shows the true cumulative return rate (starting at
-    // the range's first recorded rate, which is usually non-zero), while
-    // benchmark indexes are normalized to 0% at the range start.
+    // Normalize the asset series to start at 0% at the range start, so it
+    // shares the same baseline as the normalized index benchmarks: both
+    // series compare the return over the selected range.
+    final rateBase = isRate && rates.isNotEmpty ? rates.first : 0.0;
+
     final points = <FlSpot>[];
     var minV = double.infinity;
     var maxV = 0.0;
     for (var i = 0; i < list.length; i++) {
-      final v = isRate ? rates[i] : list[i].totalValue;
+      final v = isRate ? rates[i] - rateBase : list[i].totalValue;
       points.add(FlSpot(i.toDouble(), v));
       if (v < minV) minV = v;
       if (v > maxV) maxV = v;
