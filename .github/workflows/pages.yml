@@ -3,6 +3,14 @@ name: Deploy Web
 on:
   push:
     branches: [main]
+    # Only rebuild when something that affects the web build changed;
+    # docs/tests-only commits skip the ~3 min wasm build.
+    paths:
+      - 'lib/**'
+      - 'web/**'
+      - 'pubspec.yaml'
+      - 'pubspec.lock'
+      - '.github/workflows/pages.yml'
   workflow_dispatch:
 
 permissions:
@@ -24,6 +32,8 @@ jobs:
         uses: subosito/flutter-action@v2
         with:
           channel: stable
+          flutter-version: 3.44.9
+          cache: true
 
       - name: Install dependencies
         run: flutter pub get
