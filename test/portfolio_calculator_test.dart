@@ -140,6 +140,7 @@ void main() {
           currency: 'CNY',
           occurredAt: DateTime(2026, 1, 1),
           note: null,
+          costMoved: true,
         ),
       ],
     );

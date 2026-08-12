@@ -171,6 +171,86 @@ void main() {
     expect(fund.costPrice, 2.5); // untouched
   });
 
+  test('legacy transfers are marked and cash costs calibrated', () async {
+    final accountId = await dao.createAccount(AccountsCompanion.insert(
+      name: '测试',
+      type: 'general',
+    ));
+    final cash = await dao.createHolding(HoldingsCompanion.insert(
+      accountId: accountId,
+      name: '天天宝',
+      assetType: 'liquid_wealth',
+      marketSource: const Value('manual'),
+      quantity: const Value(96071.69),
+      costPrice: const Value(96252.85), // legacy transfer left cost unsynced
+      latestPrice: const Value(1),
+    ));
+    final loan = await dao.createHolding(HoldingsCompanion.insert(
+      accountId: accountId,
+      name: '信用卡',
+      assetType: 'liability',
+      marketSource: const Value('manual'),
+      quantity: const Value(181.16),
+      costPrice: const Value(1),
+      latestPrice: const Value(1),
+    ));
+    await dao.createTransaction(TransactionsCompanion.insert(
+      accountId: accountId,
+      type: 'transfer_out',
+      amount: 181.16,
+      cashSourceId: Value(cash),
+      cashTargetId: Value(loan),
+      occurredAt: DateTime(2026, 8, 1),
+    ));
+
+    await DataMigrationService(db).run();
+
+    final txns = await dao.getTransactions();
+    expect(txns.single.costMoved, isFalse); // legacy transfer marked
+    // Calibrated to cost = quantity + net outflow (the legacy transfer
+    // amount stays invested until the flow is removed).
+    final h = (await dao.getHolding(cash))!;
+    expect(h.costPrice, closeTo(h.quantity + 181.16, 1e-9));
+  });
+
+  test('corrupted cash costs are restored by the transfer migration', () async {
+    final accountId = await dao.createAccount(AccountsCompanion.insert(
+      name: '测试',
+      type: 'general',
+    ));
+    final cash = await dao.createHolding(HoldingsCompanion.insert(
+      accountId: accountId,
+      name: '现金',
+      assetType: 'savings',
+      marketSource: const Value('manual'),
+      quantity: const Value(7000),
+      costPrice: const Value(9500), // corrupted: should be 7000 + 3000
+      latestPrice: const Value(1),
+    ));
+    final loan = await dao.createHolding(HoldingsCompanion.insert(
+      accountId: accountId,
+      name: '贷款',
+      assetType: 'liability',
+      marketSource: const Value('manual'),
+      quantity: const Value(3000),
+      costPrice: const Value(1),
+      latestPrice: const Value(1),
+    ));
+    await dao.createTransaction(TransactionsCompanion.insert(
+      accountId: accountId,
+      type: 'transfer_out',
+      amount: 3000,
+      cashSourceId: Value(cash),
+      cashTargetId: Value(loan),
+      occurredAt: DateTime(2026, 8, 1),
+    ));
+
+    await DataMigrationService(db).run();
+
+    final h = (await dao.getHolding(cash))!;
+    expect(h.costPrice, closeTo(10000, 1e-9)); // quantity + net outflow
+  });
+
   test('rebuild drops the legacy UNIQUE(symbol) constraint', () async {
     // Simulate a v1-era database: holdings table with UNIQUE(symbol).
     await db.customStatement(

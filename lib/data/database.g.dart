@@ -1382,6 +1382,21 @@ class $TransactionsTable extends Transactions
     type: DriftSqlType.string,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _costMovedMeta = const VerificationMeta(
+    'costMoved',
+  );
+  @override
+  late final GeneratedColumn<bool> costMoved = GeneratedColumn<bool>(
+    'cost_moved',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("cost_moved" IN (0, 1))',
+    ),
+    defaultValue: const Constant(true),
+  );
   @override
   List<GeneratedColumn> get $columns => [
     id,
@@ -1396,6 +1411,7 @@ class $TransactionsTable extends Transactions
     currency,
     occurredAt,
     note,
+    costMoved,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -1492,6 +1508,12 @@ class $TransactionsTable extends Transactions
         note.isAcceptableOrUnknown(data['note']!, _noteMeta),
       );
     }
+    if (data.containsKey('cost_moved')) {
+      context.handle(
+        _costMovedMeta,
+        costMoved.isAcceptableOrUnknown(data['cost_moved']!, _costMovedMeta),
+      );
+    }
     return context;
   }
 
@@ -1553,6 +1575,10 @@ class $TransactionsTable extends Transactions
         DriftSqlType.string,
         data['${effectivePrefix}note'],
       ),
+      costMoved: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}cost_moved'],
+      )!,
     );
   }
 
@@ -1575,6 +1601,11 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
   final String currency;
   final DateTime occurredAt;
   final String? note;
+
+  /// Whether the cash side of this transfer moved its invested amount
+  /// (costPrice) together with the balance. Legacy transfers recorded
+  /// before the fix have this false, so removal must not roll the cost back.
+  final bool costMoved;
   const TransactionRow({
     required this.id,
     required this.accountId,
@@ -1588,6 +1619,7 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
     required this.currency,
     required this.occurredAt,
     this.note,
+    required this.costMoved,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -1616,6 +1648,7 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
     if (!nullToAbsent || note != null) {
       map['note'] = Variable<String>(note);
     }
+    map['cost_moved'] = Variable<bool>(costMoved);
     return map;
   }
 
@@ -1643,6 +1676,7 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
       currency: Value(currency),
       occurredAt: Value(occurredAt),
       note: note == null && nullToAbsent ? const Value.absent() : Value(note),
+      costMoved: Value(costMoved),
     );
   }
 
@@ -1664,6 +1698,7 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
       currency: serializer.fromJson<String>(json['currency']),
       occurredAt: serializer.fromJson<DateTime>(json['occurredAt']),
       note: serializer.fromJson<String?>(json['note']),
+      costMoved: serializer.fromJson<bool>(json['costMoved']),
     );
   }
   @override
@@ -1682,6 +1717,7 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
       'currency': serializer.toJson<String>(currency),
       'occurredAt': serializer.toJson<DateTime>(occurredAt),
       'note': serializer.toJson<String?>(note),
+      'costMoved': serializer.toJson<bool>(costMoved),
     };
   }
 
@@ -1698,6 +1734,7 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
     String? currency,
     DateTime? occurredAt,
     Value<String?> note = const Value.absent(),
+    bool? costMoved,
   }) => TransactionRow(
     id: id ?? this.id,
     accountId: accountId ?? this.accountId,
@@ -1711,6 +1748,7 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
     currency: currency ?? this.currency,
     occurredAt: occurredAt ?? this.occurredAt,
     note: note.present ? note.value : this.note,
+    costMoved: costMoved ?? this.costMoved,
   );
   TransactionRow copyWithCompanion(TransactionsCompanion data) {
     return TransactionRow(
@@ -1732,6 +1770,7 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
           ? data.occurredAt.value
           : this.occurredAt,
       note: data.note.present ? data.note.value : this.note,
+      costMoved: data.costMoved.present ? data.costMoved.value : this.costMoved,
     );
   }
 
@@ -1749,7 +1788,8 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
           ..write('amount: $amount, ')
           ..write('currency: $currency, ')
           ..write('occurredAt: $occurredAt, ')
-          ..write('note: $note')
+          ..write('note: $note, ')
+          ..write('costMoved: $costMoved')
           ..write(')'))
         .toString();
   }
@@ -1768,6 +1808,7 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
     currency,
     occurredAt,
     note,
+    costMoved,
   );
   @override
   bool operator ==(Object other) =>
@@ -1784,7 +1825,8 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
           other.amount == this.amount &&
           other.currency == this.currency &&
           other.occurredAt == this.occurredAt &&
-          other.note == this.note);
+          other.note == this.note &&
+          other.costMoved == this.costMoved);
 }
 
 class TransactionsCompanion extends UpdateCompanion<TransactionRow> {
@@ -1800,6 +1842,7 @@ class TransactionsCompanion extends UpdateCompanion<TransactionRow> {
   final Value<String> currency;
   final Value<DateTime> occurredAt;
   final Value<String?> note;
+  final Value<bool> costMoved;
   const TransactionsCompanion({
     this.id = const Value.absent(),
     this.accountId = const Value.absent(),
@@ -1813,6 +1856,7 @@ class TransactionsCompanion extends UpdateCompanion<TransactionRow> {
     this.currency = const Value.absent(),
     this.occurredAt = const Value.absent(),
     this.note = const Value.absent(),
+    this.costMoved = const Value.absent(),
   });
   TransactionsCompanion.insert({
     this.id = const Value.absent(),
@@ -1827,6 +1871,7 @@ class TransactionsCompanion extends UpdateCompanion<TransactionRow> {
     this.currency = const Value.absent(),
     required DateTime occurredAt,
     this.note = const Value.absent(),
+    this.costMoved = const Value.absent(),
   }) : accountId = Value(accountId),
        type = Value(type),
        amount = Value(amount),
@@ -1844,6 +1889,7 @@ class TransactionsCompanion extends UpdateCompanion<TransactionRow> {
     Expression<String>? currency,
     Expression<DateTime>? occurredAt,
     Expression<String>? note,
+    Expression<bool>? costMoved,
   }) {
     return RawValuesInsertable({
       if (id != null) 'id': id,
@@ -1858,6 +1904,7 @@ class TransactionsCompanion extends UpdateCompanion<TransactionRow> {
       if (currency != null) 'currency': currency,
       if (occurredAt != null) 'occurred_at': occurredAt,
       if (note != null) 'note': note,
+      if (costMoved != null) 'cost_moved': costMoved,
     });
   }
 
@@ -1874,6 +1921,7 @@ class TransactionsCompanion extends UpdateCompanion<TransactionRow> {
     Value<String>? currency,
     Value<DateTime>? occurredAt,
     Value<String?>? note,
+    Value<bool>? costMoved,
   }) {
     return TransactionsCompanion(
       id: id ?? this.id,
@@ -1888,6 +1936,7 @@ class TransactionsCompanion extends UpdateCompanion<TransactionRow> {
       currency: currency ?? this.currency,
       occurredAt: occurredAt ?? this.occurredAt,
       note: note ?? this.note,
+      costMoved: costMoved ?? this.costMoved,
     );
   }
 
@@ -1930,6 +1979,9 @@ class TransactionsCompanion extends UpdateCompanion<TransactionRow> {
     if (note.present) {
       map['note'] = Variable<String>(note.value);
     }
+    if (costMoved.present) {
+      map['cost_moved'] = Variable<bool>(costMoved.value);
+    }
     return map;
   }
 
@@ -1947,7 +1999,8 @@ class TransactionsCompanion extends UpdateCompanion<TransactionRow> {
           ..write('amount: $amount, ')
           ..write('currency: $currency, ')
           ..write('occurredAt: $occurredAt, ')
-          ..write('note: $note')
+          ..write('note: $note, ')
+          ..write('costMoved: $costMoved')
           ..write(')'))
         .toString();
   }
@@ -4776,6 +4829,7 @@ typedef $$TransactionsTableCreateCompanionBuilder =
       Value<String> currency,
       required DateTime occurredAt,
       Value<String?> note,
+      Value<bool> costMoved,
     });
 typedef $$TransactionsTableUpdateCompanionBuilder =
     TransactionsCompanion Function({
@@ -4791,6 +4845,7 @@ typedef $$TransactionsTableUpdateCompanionBuilder =
       Value<String> currency,
       Value<DateTime> occurredAt,
       Value<String?> note,
+      Value<bool> costMoved,
     });
 
 final class $$TransactionsTableReferences
@@ -4912,6 +4967,11 @@ class $$TransactionsTableFilterComposer
 
   ColumnFilters<String> get note => $composableBuilder(
     column: $table.note,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get costMoved => $composableBuilder(
+    column: $table.costMoved,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -5057,6 +5117,11 @@ class $$TransactionsTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<bool> get costMoved => $composableBuilder(
+    column: $table.costMoved,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   $$AccountsTableOrderingComposer get accountId {
     final $$AccountsTableOrderingComposer composer = $composerBuilder(
       composer: this,
@@ -5184,6 +5249,9 @@ class $$TransactionsTableAnnotationComposer
 
   GeneratedColumn<String> get note =>
       $composableBuilder(column: $table.note, builder: (column) => column);
+
+  GeneratedColumn<bool> get costMoved =>
+      $composableBuilder(column: $table.costMoved, builder: (column) => column);
 
   $$AccountsTableAnnotationComposer get accountId {
     final $$AccountsTableAnnotationComposer composer = $composerBuilder(
@@ -5323,6 +5391,7 @@ class $$TransactionsTableTableManager
                 Value<String> currency = const Value.absent(),
                 Value<DateTime> occurredAt = const Value.absent(),
                 Value<String?> note = const Value.absent(),
+                Value<bool> costMoved = const Value.absent(),
               }) => TransactionsCompanion(
                 id: id,
                 accountId: accountId,
@@ -5336,6 +5405,7 @@ class $$TransactionsTableTableManager
                 currency: currency,
                 occurredAt: occurredAt,
                 note: note,
+                costMoved: costMoved,
               ),
           createCompanionCallback:
               ({
@@ -5351,6 +5421,7 @@ class $$TransactionsTableTableManager
                 Value<String> currency = const Value.absent(),
                 required DateTime occurredAt,
                 Value<String?> note = const Value.absent(),
+                Value<bool> costMoved = const Value.absent(),
               }) => TransactionsCompanion.insert(
                 id: id,
                 accountId: accountId,
@@ -5364,6 +5435,7 @@ class $$TransactionsTableTableManager
                 currency: currency,
                 occurredAt: occurredAt,
                 note: note,
+                costMoved: costMoved,
               ),
           withReferenceMapper: (p0) => p0
               .map(

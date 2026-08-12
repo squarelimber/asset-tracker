@@ -154,12 +154,13 @@ class TransactionService {
     required int? sourceId,
     required int? targetId,
     required double amount,
+    bool moveCost = true,
   }) async {
     if (sourceId == null || targetId == null || amount <= 0) {
       throw ArgumentError('转账需指定源和目标持仓');
     }
-    await _applyBalanceMove(sourceId, -amount);
-    await _applyBalanceMove(targetId, amount);
+    await _applyBalanceMove(sourceId, -amount, moveCost: moveCost);
+    await _applyBalanceMove(targetId, amount, moveCost: moveCost);
   }
 
   /// Moves [delta] on a cash or liability holding. For liabilities the
@@ -167,18 +168,22 @@ class TransactionService {
   /// paying out increases the debt.
   ///
   /// Cash holdings move their invested amount (costPrice) together with the
-  /// balance, so internal transfers (repayment, moving money between
-  /// accounts) never distort the capital-gains return rate: value and cost
-  /// change by the same amount. Liabilities have no cost basis and only
-  /// move the outstanding balance.
-  Future<void> _applyBalanceMove(int holdingId, double delta) async {
+  /// balance (when [moveCost] is set), so internal transfers (repayment,
+  /// moving money between accounts) never distort the capital-gains return
+  /// rate: value and cost change by the same amount. Liabilities have no
+  /// cost basis and only move the outstanding balance.
+  Future<void> _applyBalanceMove(
+    int holdingId,
+    double delta, {
+    bool moveCost = true,
+  }) async {
     final holding = await _getHolding(holdingId);
     final type = AssetType.fromStorage(holding.assetType);
     if (!type.isAmountBased && type != AssetType.liability) {
       throw ArgumentError('目标持仓不是现金/负债类资产');
     }
     final effective = type == AssetType.liability ? -delta : delta;
-    final newCost = type.isAmountBased
+    final newCost = type.isAmountBased && moveCost
         ? (holding.costPrice + delta).clamp(0.0, double.infinity)
         : holding.costPrice;
     await _updateHolding(
@@ -256,10 +261,15 @@ class TransactionService {
           case TransactionType.sell:
             await _reverseSell(txn);
           case TransactionType.transferIn || TransactionType.transferOut:
+            // Reversing a transfer swaps the source and target; rolling the
+            // same direction back would deduct twice. Legacy transfers did
+            // not move the cash cost, so that is only rolled back when the
+            // original recording did (costMoved).
             await _applyTransfer(
-              sourceId: txn.cashSourceId,
-              targetId: txn.cashTargetId,
+              sourceId: txn.cashTargetId,
+              targetId: txn.cashSourceId,
               amount: txn.amount,
+              moveCost: txn.costMoved,
             );
           case TransactionType.dividend:
             await _applyCashMove(txn.cashTargetId, -txn.amount, invested: false);
