@@ -119,11 +119,27 @@ class AssetDao {
         .watch();
   }
 
+  /// Transactions where the holding is the subject (holdingId) or a transfer
+  /// counterparty (cashSourceId / cashTargetId), so transfers and loan
+  /// repayments show up in the holding's detail sheet too.
   Stream<List<TransactionRow>> watchTransactionsByHolding(int holdingId) {
     return (_db.select(_db.transactions)
-          ..where((t) => t.holdingId.equals(holdingId))
+          ..where((t) =>
+              t.holdingId.equals(holdingId) |
+              t.cashSourceId.equals(holdingId) |
+              t.cashTargetId.equals(holdingId))
           ..orderBy([(t) => OrderingTerm.desc(t.occurredAt)]))
         .watch();
+  }
+
+  /// One-shot variant of [watchTransactionsByHolding].
+  Future<List<TransactionRow>> getTransactionsForHolding(int holdingId) {
+    return (_db.select(_db.transactions)
+          ..where((t) =>
+              t.holdingId.equals(holdingId) |
+              t.cashSourceId.equals(holdingId) |
+              t.cashTargetId.equals(holdingId)))
+        .get();
   }
 
   Future<List<TransactionRow>> getTransactions() => _db.select(_db.transactions).get();

@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:asset_tracker/core/enums.dart';
 import 'package:asset_tracker/data/asset_dao.dart';
 import 'package:asset_tracker/data/database.dart';
+import 'package:asset_tracker/domain/rate_series.dart';
 import 'package:asset_tracker/domain/transaction_service.dart';
 
 void main() {
@@ -141,8 +142,9 @@ void main() {
       expect(r.ok, isTrue);
       expect((await dao.getHolding(a))!.quantity, 7000);
       expect((await dao.getHolding(b))!.quantity, 4000);
-      // Invested untouched on plain transfers.
-      expect((await dao.getHolding(a))!.costPrice, 9000);
+      // Invested moves with the transfer so return rates stay undistorted.
+      expect((await dao.getHolding(a))!.costPrice, 6000);
+      expect((await dao.getHolding(b))!.costPrice, 4000);
     });
 
     test('repaying a liability reduces both balances', () async {
@@ -181,6 +183,51 @@ void main() {
       );
       expect((await dao.getHolding(cash))!.quantity, 3000);
       expect((await dao.getHolding(loan))!.quantity, 5000);
+    });
+
+    test('repaying a liability keeps the cash return rate unchanged', () async {
+      final acc = await addAccount('A');
+      final cash = await addHolding(
+        accountId: acc, name: '现金', type: AssetType.bankDeposit,
+        quantity: 10000, costPrice: 10000, latestPrice: 1,
+      );
+      final loan = await addHolding(
+        accountId: acc, name: '贷款', type: AssetType.liability,
+        quantity: 5000, costPrice: 1, latestPrice: 1,
+      );
+      final before = RateSeriesCalculator.dailyRate(10000, 10000);
+      // Repay 3000: both balance and invested fall together.
+      await service.record(
+        accountId: acc, type: TransactionType.transferOut,
+        amount: 3000, cashSourceId: cash, cashTargetId: loan,
+      );
+      final afterRow = (await dao.getHolding(cash))!;
+      expect(afterRow.quantity, 7000);
+      expect(afterRow.costPrice, 7000);
+      final after =
+          RateSeriesCalculator.dailyRate(afterRow.quantity, afterRow.costPrice);
+      expect(after - before, closeTo(0, 1e-9));
+    });
+
+    test('repayment shows up in the liability detail query', () async {
+      final acc = await addAccount('A');
+      final cash = await addHolding(
+        accountId: acc, name: '现金', type: AssetType.bankDeposit,
+        quantity: 5000, costPrice: 5000, latestPrice: 1,
+      );
+      final card = await addHolding(
+        accountId: acc, name: '信用卡', type: AssetType.liability,
+        quantity: 2000, costPrice: 1, latestPrice: 1,
+      );
+      await service.record(
+        accountId: acc, type: TransactionType.transferOut,
+        amount: 800, cashSourceId: cash, cashTargetId: card,
+      );
+      // The transfer has holdingId = null but references the card as the
+      // cash target; the detail query must still return it.
+      final rows = await dao.getTransactionsForHolding(card);
+      expect(rows, hasLength(1));
+      expect(rows.single.amount, 800);
     });
   });
 
