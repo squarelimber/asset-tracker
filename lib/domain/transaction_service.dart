@@ -165,6 +165,12 @@ class TransactionService {
   /// Moves [delta] on a cash or liability holding. For liabilities the
   /// direction is inverted: receiving money repays debt (balance falls),
   /// paying out increases the debt.
+  ///
+  /// Cash holdings move their invested amount (costPrice) together with the
+  /// balance, so internal transfers (repayment, moving money between
+  /// accounts) never distort the capital-gains return rate: value and cost
+  /// change by the same amount. Liabilities have no cost basis and only
+  /// move the outstanding balance.
   Future<void> _applyBalanceMove(int holdingId, double delta) async {
     final holding = await _getHolding(holdingId);
     final type = AssetType.fromStorage(holding.assetType);
@@ -172,9 +178,13 @@ class TransactionService {
       throw ArgumentError('目标持仓不是现金/负债类资产');
     }
     final effective = type == AssetType.liability ? -delta : delta;
+    final newCost = type.isAmountBased
+        ? (holding.costPrice + delta).clamp(0.0, double.infinity)
+        : holding.costPrice;
     await _updateHolding(
       holding,
       quantity: holding.quantity + effective,
+      costPrice: newCost,
     );
   }
 
