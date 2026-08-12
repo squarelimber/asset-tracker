@@ -88,9 +88,10 @@ class HoldingsPage extends ConsumerStatefulWidget {
   ConsumerState<HoldingsPage> createState() => _HoldingsPageState();
 }
 
-class _HoldingsPageState extends ConsumerState<HoldingsPage>
-    with SingleTickerProviderStateMixin {
-  late final TabController _tabController = TabController(length: 2, vsync: this);
+enum _HoldingSection { assets, liabilities }
+
+class _HoldingsPageState extends ConsumerState<HoldingsPage> {
+  _HoldingSection _section = _HoldingSection.assets;
   HoldingSort _sort = HoldingSort.defaultOrder;
   bool _searching = false;
   final _searchCtrl = TextEditingController();
@@ -110,7 +111,6 @@ class _HoldingsPageState extends ConsumerState<HoldingsPage>
 
   @override
   void dispose() {
-    _tabController.dispose();
     _searchCtrl.dispose();
     super.dispose();
   }
@@ -153,13 +153,6 @@ class _HoldingsPageState extends ConsumerState<HoldingsPage>
                 onChanged: (v) => setState(() => _query = v),
               )
             : const Text('持仓'),
-        bottom: TabBar(
-          controller: _tabController,
-          tabs: const [
-            Tab(text: '资产'),
-            Tab(text: '负债'),
-          ],
-        ),
         actions: [
           IconButton(
             tooltip: '搜索',
@@ -215,49 +208,64 @@ class _HoldingsPageState extends ConsumerState<HoldingsPage>
             ..sort((a, b) =>
                 _holdingMarketValue(b).compareTo(_holdingMarketValue(a)));
           final rates = ref.watch(cnyRatesProvider).value ?? const {};
-          return TabBarView(
-            controller: _tabController,
-            children: [
-              // 资产页
-              ResponsiveShell(
-                child: ListView(
-                  children: [
-                    _SectionHeader(
-                      title: '资产',
-                      total: assetTotalOf(assets, rates),
-                    ),
-                    ResponsiveGrid(
-                      children: [
-                        for (final h in assets) _HoldingCard(holding: h),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-              // 负债页
-              ResponsiveShell(
-                child: liabilities.isEmpty
-                    ? const Padding(
-                        padding: EdgeInsets.all(32),
-                        child: Center(child: Text('暂无负债')),
-                      )
-                    : ListView(
-                        children: [
-                          _SectionHeader(
-                            title: '负债',
-                            total: liabilityTotalOf(liabilities, rates),
-                            isLiability: true,
-                          ),
-                          ResponsiveGrid(
-                            children: [
-                              for (final h in liabilities)
-                                _HoldingCard(holding: h),
-                            ],
-                          ),
-                        ],
+          final isAssets = _section == _HoldingSection.assets;
+          return ResponsiveShell(
+            child: ListView(
+              children: [
+                Center(
+                  child: SegmentedButton<_HoldingSection>(
+                    segments: const [
+                      ButtonSegment(
+                        value: _HoldingSection.assets,
+                        label: Text('资产'),
+                        icon: Icon(Icons.account_balance_wallet_outlined, size: 18),
                       ),
-              ),
-            ],
+                      ButtonSegment(
+                        value: _HoldingSection.liabilities,
+                        label: Text('负债'),
+                        icon: Icon(Icons.credit_card_outlined, size: 18),
+                      ),
+                    ],
+                    selected: {_section},
+                    showSelectedIcon: false,
+                    style: const ButtonStyle(
+                      visualDensity: VisualDensity.comfortable,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                    onSelectionChanged: (s) =>
+                        setState(() => _section = s.first),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                if (isAssets) ...[
+                  _SectionHeader(
+                    title: '资产',
+                    total: assetTotalOf(assets, rates),
+                  ),
+                  ResponsiveGrid(
+                    children: [
+                      for (final h in assets) _HoldingCard(holding: h),
+                    ],
+                  ),
+                ] else if (liabilities.isEmpty)
+                  const Padding(
+                    padding: EdgeInsets.all(32),
+                    child: Center(child: Text('暂无负债')),
+                  )
+                else ...[
+                  _SectionHeader(
+                    title: '负债',
+                    total: liabilityTotalOf(liabilities, rates),
+                    isLiability: true,
+                  ),
+                  ResponsiveGrid(
+                    children: [
+                      for (final h in liabilities) _HoldingCard(holding: h),
+                    ],
+                  ),
+                ],
+              ],
+            ),
           );
         },
         loading: () => const Center(child: CircularProgressIndicator()),
@@ -807,52 +815,54 @@ class _HoldingCard extends ConsumerWidget {
                     ),
                   ],
                 ),
-              const SizedBox(height: 6),
-              // Always rendered (placeholder when there is no quote data)
-              // so every card keeps the same height and grid rows align.
-              Row(
-                children: [
-                  Text(
-                    '今日',
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: Theme.of(context).colorScheme.outline,
-                        ),
-                  ),
-                  const SizedBox(width: 10),
-                  Flexible(
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        if (todayProfit == null)
-                          Text(
-                            '--',
-                            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                  color: Theme.of(context).colorScheme.outline,
-                                ),
-                          )
-                        else ...[
-                          Text(
-                            '${todayProfit >= 0 ? '+' : ''}${Formats.money(todayProfit, holding.currency)}',
-                            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                  color: context.changeColor(todayProfit),
-                                  fontWeight: FontWeight.w600,
-                                ),
+              if (type != AssetType.liability) ...[
+                const SizedBox(height: 6),
+                // Always rendered (placeholder when there is no quote data)
+                // so every card keeps the same height and grid rows align.
+                Row(
+                  children: [
+                    Text(
+                      '今日',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: Theme.of(context).colorScheme.outline,
                           ),
-                          if (todayPct != null) ...[
-                            const SizedBox(width: 8),
+                    ),
+                    const SizedBox(width: 10),
+                    Flexible(
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (todayProfit == null)
                             Text(
-                              '(${Formats.pct(todayPct)})',
-                              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              '--',
+                              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                    color: Theme.of(context).colorScheme.outline,
+                                  ),
+                            )
+                          else ...[
+                            Text(
+                              '${todayProfit >= 0 ? '+' : ''}${Formats.money(todayProfit, holding.currency)}',
+                              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                                     color: context.changeColor(todayProfit),
+                                    fontWeight: FontWeight.w600,
                                   ),
                             ),
+                            if (todayPct != null) ...[
+                              const SizedBox(width: 8),
+                              Text(
+                                '(${Formats.pct(todayPct)})',
+                                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                      color: context.changeColor(todayProfit),
+                                    ),
+                              ),
+                            ],
                           ],
                         ],
-                      ],
+                      ),
                     ),
-                  ),
-                ],
-              ),
+                  ],
+                ),
+              ],
             ],
           ),
         ),
