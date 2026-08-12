@@ -1,5 +1,6 @@
 import 'package:drift/drift.dart';
 
+import '../core/enums.dart';
 import '../data/database.dart';
 
 /// One-time data migrations that run after the schema is in place.
@@ -27,12 +28,19 @@ class DataMigrationService {
   /// the cost (quantity x costPrice) explode. Reset those to 1.
   static const _liabilityCostFixed = 'liability_cost_fixed_v6';
 
+  /// Transfers recorded before the cost-move fix did not sync the cash
+  /// invested amount, so removing them would over-roll the cost. Adds the
+  /// cost_moved marker (legacy transfers = 0) and calibrates affected cash
+  /// holdings to cost = quantity.
+  static const _transferCostMarked = 'transfer_cost_marked_v7';
+
   /// Runs all pending one-time migrations. Safe to call on every launch.
   Future<void> run() async {
     await _migrateAmountBased();
     await _migrateGoldSymbol();
     await _rebuildHoldingsTable();
     await _migrateLiabilityCost();
+    await _migrateTransferCost();
   }
 
   /// SQLite cannot drop a UNIQUE constraint without rebuilding the table.
@@ -135,6 +143,64 @@ class DataMigrationService {
     }
 
     await _setSetting(_liabilityCostFixed, '${DateTime.now().millisecondsSinceEpoch}');
+  }
+
+  /// Marks legacy transfer rows as not having moved the cash cost and
+  /// recalibrates the affected cash holdings (cost = quantity), so both the
+  /// display and removal rollbacks become consistent again.
+  Future<void> _migrateTransferCost() async {
+    final marker = await _getSetting(_transferCostMarked);
+    if (marker != null) return;
+
+    // Old databases may not have the column yet (drift reads the new schema,
+    // so the column must exist before any typed query runs).
+    try {
+      await _db.customStatement(
+        'ALTER TABLE transactions ADD COLUMN cost_moved INTEGER NOT NULL DEFAULT 1;',
+      );
+    } catch (_) {
+      // Column already present.
+    }
+    await _db.customStatement(
+      "UPDATE transactions SET cost_moved = 0 "
+      "WHERE type IN ('transfer_in', 'transfer_out');",
+    );
+
+    // Recalibrate cash holdings referenced by transfers. Legacy transfers
+    // moved the balance without the cost, so the correct invested amount is
+    // cost = quantity + net outflow (money that left via transfer still
+    // counts as invested until the transfer is removed). This keeps the
+    // displayed rate unchanged while making removal roll back exactly.
+    final transferRows = await _db.select(_db.transactions).get();
+    final outflow = <int, double>{};
+    final inflow = <int, double>{};
+    for (final t in transferRows) {
+      final isTransfer = t.type == 'transfer_in' || t.type == 'transfer_out';
+      if (!isTransfer) continue;
+      if (t.cashSourceId != null) {
+        outflow[t.cashSourceId!] = (outflow[t.cashSourceId!] ?? 0) + t.amount;
+      }
+      if (t.cashTargetId != null) {
+        inflow[t.cashTargetId!] = (inflow[t.cashTargetId!] ?? 0) + t.amount;
+      }
+    }
+    final affected = {...outflow.keys, ...inflow.keys};
+    if (affected.isNotEmpty) {
+      final cashHoldings = await (_db.select(_db.holdings)
+            ..where((t) => t.id.isIn(affected.toList())))
+          .get();
+      for (final h in cashHoldings) {
+        final type = AssetType.fromStorage(h.assetType);
+        if (!type.isAmountBased) continue;
+        final netOut = (outflow[h.id] ?? 0) - (inflow[h.id] ?? 0);
+        final target = h.quantity + netOut;
+        if ((h.costPrice - target).abs() < 0.005) continue;
+        final stmt = _db.update(_db.holdings)..where((t) => t.id.equals(h.id));
+        await stmt.write(HoldingsCompanion(costPrice: Value(target)));
+      }
+    }
+
+    await _setSetting(_transferCostMarked, '${DateTime.now().millisecondsSinceEpoch}');
   }
 
   Future<String?> _getSetting(String key) async {

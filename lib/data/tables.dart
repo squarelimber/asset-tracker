@@ -49,6 +49,11 @@ class Transactions extends Table {
   DateTimeColumn get occurredAt => dateTime()();
   TextColumn get note => text().nullable()();
 
+  /// Whether the cash side of this transfer moved its invested amount
+  /// (costPrice) together with the balance. Legacy transfers recorded
+  /// before the fix have this false, so removal must not roll the cost back.
+  BoolColumn get costMoved => boolean().withDefault(const Constant(true))();
+
   @override
   List<Set<Column>> get uniqueKeys => [
         {accountId, holdingId, type, occurredAt, amount},

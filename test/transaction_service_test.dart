@@ -231,6 +231,55 @@ void main() {
     });
   });
 
+  group('remove transfer rollback', () {
+    test('legacy transfer (costMoved=false) only restores the balance', () async {
+      final acc = await addAccount('A');
+      final cash = await addHolding(
+        accountId: acc, name: '现金', type: AssetType.bankDeposit,
+        quantity: 7000, costPrice: 10000, latestPrice: 1, // legacy: cost unsynced
+      );
+      final loan = await addHolding(
+        accountId: acc, name: '贷款', type: AssetType.liability,
+        quantity: 3000, costPrice: 1, latestPrice: 1,
+      );
+      final id = await dao.createTransaction(TransactionsCompanion.insert(
+        accountId: acc,
+        type: 'transfer_out',
+        amount: 3000,
+        cashSourceId: Value(cash),
+        cashTargetId: Value(loan),
+        occurredAt: DateTime(2026, 1, 1),
+        costMoved: const Value(false),
+      ));
+      await service.remove(id);
+      final h = (await dao.getHolding(cash))!;
+      expect(h.quantity, 10000);
+      expect(h.costPrice, 10000); // cost untouched for legacy transfers
+    });
+
+    test('new transfer (costMoved=true) rolls back balance and cost', () async {
+      final acc = await addAccount('A');
+      final cash = await addHolding(
+        accountId: acc, name: '现金', type: AssetType.bankDeposit,
+        quantity: 10000, costPrice: 10000, latestPrice: 1,
+      );
+      final loan = await addHolding(
+        accountId: acc, name: '贷款', type: AssetType.liability,
+        quantity: 3000, costPrice: 1, latestPrice: 1,
+      );
+      await service.record(
+        accountId: acc, type: TransactionType.transferOut,
+        amount: 3000, cashSourceId: cash, cashTargetId: loan,
+      );
+      expect((await dao.getHolding(cash))!.quantity, 7000);
+      final txns = await dao.getTransactions();
+      await service.remove(txns.single.id);
+      final h = (await dao.getHolding(cash))!;
+      expect(h.quantity, 10000);
+      expect(h.costPrice, 10000); // cost moves back together
+    });
+  });
+
   group('consume', () {
     test('credit-card spend increases the liability balance', () async {
       final acc = await addAccount('A');

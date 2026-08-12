@@ -26,6 +26,7 @@ TransactionRow _txn({
     currency: currency,
     occurredAt: at ?? DateTime(2026, 8, 1),
     note: null,
+    costMoved: true,
   );
 }
 
