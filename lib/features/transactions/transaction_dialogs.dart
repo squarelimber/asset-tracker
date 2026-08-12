@@ -21,6 +21,7 @@ Future<void> showHoldingTransactionDialog(
   final holdings = ref.read(holdingsProvider).value ?? const [];
   final type = AssetType.fromStorage(holding.assetType);
   final isShare = type.isMarketLinked || type == AssetType.bankWealth;
+  final isLiability = type == AssetType.liability;
 
   // Money holdings usable as the counterparty for transfers.
   final moneyHoldings = holdings
@@ -33,12 +34,18 @@ Future<void> showHoldingTransactionDialog(
   // Available transaction types for this holding.
   final available = isShare
       ? <TransactionType>[TransactionType.buy, TransactionType.sell, TransactionType.dividend]
-      : <TransactionType>[
-          TransactionType.income,
-          TransactionType.expense,
-          TransactionType.transferIn,
-          TransactionType.transferOut,
-        ];
+      : isLiability
+          ? <TransactionType>[
+              TransactionType.consume,
+              TransactionType.transferIn, // 还款
+              TransactionType.transferOut, // 借款
+            ]
+          : <TransactionType>[
+              TransactionType.income,
+              TransactionType.expense,
+              TransactionType.transferIn,
+              TransactionType.transferOut,
+            ];
 
   final txnType = ValueNotifier<TransactionType>(available.first);
   final qtyCtrl = TextEditingController();
@@ -57,7 +64,8 @@ Future<void> showHoldingTransactionDialog(
     if (t == TransactionType.income ||
         t == TransactionType.expense ||
         t == TransactionType.transferIn ||
-        t == TransactionType.transferOut) {
+        t == TransactionType.transferOut ||
+        t == TransactionType.consume) {
       if (amountCtrl.text.trim().isEmpty) return '请填写金额';
       if ((t == TransactionType.transferIn ||
               t == TransactionType.transferOut) &&
@@ -137,13 +145,15 @@ Future<void> showHoldingTransactionDialog(
                     TransactionType.expense => '支出金额',
                     TransactionType.transferIn => '转入金额',
                     TransactionType.transferOut => '转出金额',
+                    TransactionType.consume => '消费金额',
                     _ => '金额',
                   },
                 ),
               ),
             ],
             const SizedBox(height: 12),
-            if (moneyHoldings.isNotEmpty) ...[
+            if (moneyHoldings.isNotEmpty &&
+                txnType.value != TransactionType.consume) ...[
               ValueListenableBuilder<int?>(
                 valueListenable: cashId,
                 builder: (context, value, _) => DropdownButtonFormField<int>(
@@ -199,7 +209,7 @@ Future<void> showHoldingTransactionDialog(
             final t = txnType.value;
             final result = await ref.read(transactionServiceProvider).record(
               accountId: holding.accountId,
-              holdingId: isShare ? holding.id : null,
+              holdingId: (isShare || t == TransactionType.consume) ? holding.id : null,
               type: t,
               quantity: isShare && t != TransactionType.dividend ? qty : null,
               price: isShare && t != TransactionType.dividend ? price : null,

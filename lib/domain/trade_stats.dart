@@ -89,6 +89,8 @@ class TradeStatsCalculator {
           monthly[month] = flow + amount;
         case TransactionType.transferIn || TransactionType.transferOut:
           break; // internal movement, no net-worth effect
+        case TransactionType.consume:
+          break; // liability change, not a cash flow
       }
     }
 

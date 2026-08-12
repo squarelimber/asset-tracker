@@ -84,6 +84,8 @@ class TransactionService {
             await _applyCashMove(cashTargetId, amount, invested: true);
           case TransactionType.expense:
             await _applyCashMove(cashTargetId, -amount, invested: true);
+          case TransactionType.consume:
+            await _applyConsume(holdingId, amount);
         }
 
         await _dao.createTransaction(TransactionsCompanion.insert(
@@ -176,6 +178,20 @@ class TransactionService {
     );
   }
 
+  /// Records consumption on a liability holding (e.g. credit-card spend):
+  /// the outstanding balance (quantity) increases by [amount]. No cash
+  /// holding is involved. A negative [amount] reverses the effect.
+  Future<void> _applyConsume(int? holdingId, double amount) async {
+    if (holdingId == null) {
+      throw ArgumentError('消费需指定负债持仓');
+    }
+    final holding = await _getHolding(holdingId);
+    if (AssetType.fromStorage(holding.assetType) != AssetType.liability) {
+      throw ArgumentError('消费只能记在负债类持仓上');
+    }
+    await _updateHolding(holding, quantity: holding.quantity + amount);
+  }
+
   /// Moves [delta] on a cash holding (buy deduction, sell credit,
   /// dividend, income, expense). Liabilities are not allowed here —
   /// their flows go through transfers (repayment/borrowing).
@@ -241,6 +257,8 @@ class TransactionService {
             await _applyCashMove(txn.cashTargetId, -txn.amount, invested: true);
           case TransactionType.expense:
             await _applyCashMove(txn.cashTargetId, txn.amount, invested: true);
+          case TransactionType.consume:
+            await _applyConsume(txn.holdingId, -txn.amount);
         }
 
         await _dao.deleteTransaction(transactionId);
