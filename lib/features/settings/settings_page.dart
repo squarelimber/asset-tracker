@@ -1,8 +1,13 @@
 import 'dart:convert';
+import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:file_selector/file_selector.dart';
+import 'package:flutter/foundation.dart' show defaultTargetPlatform, kIsWeb, TargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../../app/providers.dart';
 import '../../app/theme.dart';
@@ -10,6 +15,13 @@ import '../../core/formats.dart';
 import '../../core/responsive.dart';
 import '../../services/backup_service.dart';
 import '../../services/csv_export.dart';
+
+/// Whether the platform has a native save dialog. Android/iOS do not, so
+/// exports go through the system share sheet instead.
+bool get _isMobilePlatform =>
+    !kIsWeb &&
+    (defaultTargetPlatform == TargetPlatform.android ||
+        defaultTargetPlatform == TargetPlatform.iOS);
 
 final backupServiceProvider = Provider<BackupService>(
   (ref) => BackupService(ref.watch(daoProvider)),
@@ -105,19 +117,53 @@ class SettingsPage extends ConsumerWidget {
 
   Future<void> _export(BuildContext context, WidgetRef ref) async {
     final json = await ref.read(backupServiceProvider).exportJson();
-    const suggested = XTypeGroup(label: 'JSON', extensions: ['json']);
-    final location = await getSaveLocation(suggestedName: backupFileName(), acceptedTypeGroups: [suggested]);
+    if (!context.mounted) return;
+    await _exportFile(
+      context,
+      Uint8List.fromList(utf8.encode(json)),
+      fileName: backupFileName(),
+      mime: 'application/json',
+      typeGroup: const XTypeGroup(label: 'JSON', extensions: ['json']),
+    );
+  }
+
+  /// Exports [bytes] as [fileName]: the native save dialog on desktop/web,
+  /// or the system share sheet on Android/iOS (which have no save dialog).
+  Future<void> _exportFile(
+    BuildContext context,
+    Uint8List bytes, {
+    required String fileName,
+    required String mime,
+    required XTypeGroup typeGroup,
+  }) async {
+    if (_isMobilePlatform) {
+      final dir = await getTemporaryDirectory();
+      final file = File('${dir.path}/$fileName');
+      await file.writeAsBytes(bytes);
+      await Share.shareXFiles(
+        [XFile(file.path, mimeType: mime, name: fileName)],
+      );
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('已发起分享')),
+      );
+      return;
+    }
+    final location = await getSaveLocation(
+      suggestedName: fileName,
+      acceptedTypeGroups: [typeGroup],
+    );
     if (location == null) return;
-    // XFile.saveTo works on every platform: it writes through the native
-    // file dialog on desktop/mobile and triggers a download on the web.
+    // XFile.saveTo writes through the native file dialog on desktop and
+    // triggers a download on the web.
     await XFile.fromData(
-      utf8.encode(json),
-      mimeType: 'application/json',
-      name: backupFileName(),
+      bytes,
+      mimeType: mime,
+      name: fileName,
     ).saveTo(location.path);
     if (!context.mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('已导出备份')),
+      const SnackBar(content: Text('已导出')),
     );
   }
 
@@ -176,20 +222,14 @@ class SettingsPage extends ConsumerWidget {
         ? csvExport.holdings(allHoldings, accountName)
         : csvExport.transactions(await dao.getTransactions(), holdingName);
 
-    const typeGroup = XTypeGroup(label: 'CSV', extensions: ['csv']);
-    final location = await getSaveLocation(
-      suggestedName: holdings ? '持仓_${todayKey()}.csv' : '流水_${todayKey()}.csv',
-      acceptedTypeGroups: [typeGroup],
-    );
-    if (location == null) return;
-    await XFile.fromData(
-      utf8.encode(content),
-      mimeType: 'text/csv',
-      name: holdings ? '持仓_${todayKey()}.csv' : '流水_${todayKey()}.csv',
-    ).saveTo(location.path);
+    final fileName = holdings ? '持仓_${todayKey()}.csv' : '流水_${todayKey()}.csv';
     if (!context.mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('已导出 CSV')),
+    await _exportFile(
+      context,
+      Uint8List.fromList(utf8.encode(content)),
+      fileName: fileName,
+      mime: 'text/csv',
+      typeGroup: const XTypeGroup(label: 'CSV', extensions: ['csv']),
     );
   }
 }
