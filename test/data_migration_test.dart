@@ -135,6 +135,42 @@ void main() {
     expect(wealth.symbol, isNull);
   });
 
+  test('liability holdings get costPrice reset to 1', () async {
+    final accountId = await dao.createAccount(AccountsCompanion.insert(
+      name: '测试',
+      type: 'general',
+    ));
+    // Old buggy format: costPrice stored the balance instead of unit price 1.
+    await dao.createHolding(HoldingsCompanion.insert(
+      accountId: accountId,
+      name: '信用卡',
+      assetType: 'liability',
+      marketSource: const Value('manual'),
+      quantity: const Value(3200),
+      costPrice: const Value(3200),
+      latestPrice: const Value(1),
+    ));
+    // A stock holding must NOT be touched.
+    await dao.createHolding(HoldingsCompanion.insert(
+      accountId: accountId,
+      name: '基金',
+      assetType: 'mutual_fund',
+      marketSource: const Value('eastmoney'),
+      symbol: const Value('110022'),
+      quantity: const Value(100),
+      costPrice: const Value(2.5),
+      latestPrice: const Value(2.9),
+    ));
+
+    await DataMigrationService(db).run();
+
+    final holdings = await dao.getHoldings();
+    final card = holdings.firstWhere((h) => h.name == '信用卡');
+    expect(card.costPrice, 1);
+    final fund = holdings.firstWhere((h) => h.name == '基金');
+    expect(fund.costPrice, 2.5); // untouched
+  });
+
   test('rebuild drops the legacy UNIQUE(symbol) constraint', () async {
     // Simulate a v1-era database: holdings table with UNIQUE(symbol).
     await db.customStatement(

@@ -88,7 +88,9 @@ class HoldingsPage extends ConsumerStatefulWidget {
   ConsumerState<HoldingsPage> createState() => _HoldingsPageState();
 }
 
-class _HoldingsPageState extends ConsumerState<HoldingsPage> {
+class _HoldingsPageState extends ConsumerState<HoldingsPage>
+    with SingleTickerProviderStateMixin {
+  late final TabController _tabController = TabController(length: 2, vsync: this);
   HoldingSort _sort = HoldingSort.defaultOrder;
   bool _searching = false;
   final _searchCtrl = TextEditingController();
@@ -108,6 +110,7 @@ class _HoldingsPageState extends ConsumerState<HoldingsPage> {
 
   @override
   void dispose() {
+    _tabController.dispose();
     _searchCtrl.dispose();
     super.dispose();
   }
@@ -150,6 +153,13 @@ class _HoldingsPageState extends ConsumerState<HoldingsPage> {
                 onChanged: (v) => setState(() => _query = v),
               )
             : const Text('持仓'),
+        bottom: TabBar(
+          controller: _tabController,
+          tabs: const [
+            Tab(text: '资产'),
+            Tab(text: '负债'),
+          ],
+        ),
         actions: [
           IconButton(
             tooltip: '搜索',
@@ -205,35 +215,49 @@ class _HoldingsPageState extends ConsumerState<HoldingsPage> {
             ..sort((a, b) =>
                 _holdingMarketValue(b).compareTo(_holdingMarketValue(a)));
           final rates = ref.watch(cnyRatesProvider).value ?? const {};
-          return ResponsiveShell(
-            // ListView so many holdings stay scrollable; grid rows are
-            // full-width with equal-width cards (no stray gaps).
-            child: ListView(
-              children: [
-                _SectionHeader(
-                  title: '资产',
-                  total: assetTotalOf(assets, rates),
-                ),
-                ResponsiveGrid(
+          return TabBarView(
+            controller: _tabController,
+            children: [
+              // 资产页
+              ResponsiveShell(
+                child: ListView(
                   children: [
-                    for (final h in assets) _HoldingCard(holding: h),
+                    _SectionHeader(
+                      title: '资产',
+                      total: assetTotalOf(assets, rates),
+                    ),
+                    ResponsiveGrid(
+                      children: [
+                        for (final h in assets) _HoldingCard(holding: h),
+                      ],
+                    ),
                   ],
                 ),
-                if (liabilities.isNotEmpty) ...[
-                  const SizedBox(height: 20),
-                  _SectionHeader(
-                    title: '负债',
-                    total: liabilityTotalOf(liabilities, rates),
-                    isLiability: true,
-                  ),
-                  ResponsiveGrid(
-                    children: [
-                      for (final h in liabilities) _HoldingCard(holding: h),
-                    ],
-                  ),
-                ],
-              ],
-            ),
+              ),
+              // 负债页
+              ResponsiveShell(
+                child: liabilities.isEmpty
+                    ? const Padding(
+                        padding: EdgeInsets.all(32),
+                        child: Center(child: Text('暂无负债')),
+                      )
+                    : ListView(
+                        children: [
+                          _SectionHeader(
+                            title: '负债',
+                            total: liabilityTotalOf(liabilities, rates),
+                            isLiability: true,
+                          ),
+                          ResponsiveGrid(
+                            children: [
+                              for (final h in liabilities)
+                                _HoldingCard(holding: h),
+                            ],
+                          ),
+                        ],
+                      ),
+              ),
+            ],
           );
         },
         loading: () => const Center(child: CircularProgressIndicator()),
@@ -516,7 +540,9 @@ class _HoldingsPageState extends ConsumerState<HoldingsPage> {
                   symbol: hasSymbol ? Value(symbol) : const Value.absent(),
                   quantity: Value(qty),
                   costPrice: Value(isAmount
-                      ? (type.isAmountBased ? (investedResult ?? qty) : qty)
+                      ? (type.isAmountBased
+                          ? (investedResult ?? qty)
+                          : 1) // liability: unit price 1, cost = balance
                       : (invested ?? 0)),
                   latestPrice: Value(isAmount ? 1 : (userPrice ?? 0)),
                   purchaseDate: Value(purchaseDate.value),
@@ -744,38 +770,43 @@ class _HoldingCard extends ConsumerWidget {
                     ),
               ),
               const SizedBox(height: 4),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.baseline,
-                textBaseline: TextBaseline.alphabetic,
-                children: [
-                  Flexible(
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          '${profit >= 0 ? '+' : ''}${Formats.money(profit, holding.currency)}',
-                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                color: context.changeColor(profit),
-                                fontWeight: FontWeight.w600,
-                              ),
-                        ),
-                        const SizedBox(width: 8),
-                        Text(
-                          '(${Formats.pct(profitPct)})',
-                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                color: context.changeColor(profit),
-                              ),
-                        ),
-                      ],
+              if (type == AssetType.liability)
+                // Liabilities have no cost basis / return rate; only the
+                // outstanding balance and today's row are shown.
+                const SizedBox(height: 12)
+              else
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.baseline,
+                  textBaseline: TextBaseline.alphabetic,
+                  children: [
+                    Flexible(
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            '${profit >= 0 ? '+' : ''}${Formats.money(profit, holding.currency)}',
+                            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                  color: context.changeColor(profit),
+                                  fontWeight: FontWeight.w600,
+                                ),
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            '(${Formats.pct(profitPct)})',
+                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                  color: context.changeColor(profit),
+                                ),
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    '成本 ${Formats.money(cost, holding.currency)}',
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                ],
-              ),
+                    const SizedBox(width: 8),
+                    Text(
+                      '成本 ${Formats.money(cost, holding.currency)}',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ],
+                ),
               const SizedBox(height: 6),
               // Always rendered (placeholder when there is no quote data)
               // so every card keeps the same height and grid rows align.
@@ -1112,7 +1143,7 @@ class _HoldingCard extends ConsumerWidget {
         marketSource: marketSource,
         quantity: qty,
         costPrice: isAmount
-            ? (isAmountBased ? (investedResult ?? qty) : qty)
+            ? (isAmountBased ? (investedResult ?? qty) : 1) // liability: cost = balance
             : (cost ?? holding.costPrice),
         latestPrice: isAmount ? 1 : (price ?? holding.latestPrice),
         purchaseDate: Value(purchaseDate.value),
@@ -1214,7 +1245,14 @@ class _HoldingDetailSheet extends ConsumerWidget {
             padding: const EdgeInsets.all(16),
             child: Column(
               children: [
-                if (type.isAmountBased) ...[
+                if (type == AssetType.liability)
+                  // Liabilities have no cost basis / return rate.
+                  _InfoRow(
+                    label: '当前欠款',
+                    value: Formats.money(marketValue, holding.currency),
+                    valueColor: AppColors.down,
+                  )
+                else if (type.isAmountBased) ...[
                   _InfoRow(label: '当前金额', value: Formats.money(marketValue, holding.currency)),
                   _InfoRow(label: '累计投入', value: Formats.money(cost, holding.currency)),
                   _InfoRow(
@@ -1244,7 +1282,7 @@ class _HoldingDetailSheet extends ConsumerWidget {
                             ' (${Formats.pct(todayPct)})',
                     valueColor: context.changeColor(todayProfit),
                   ),
-                if (annualized != null)
+                if (annualized != null && type != AssetType.liability)
                   _InfoRow(
                     label: '年化收益率',
                     value: Formats.pct(annualized),

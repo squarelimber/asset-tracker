@@ -100,7 +100,7 @@ void main() {
     expect(h.assetType, 'liability');
     expect(h.quantity, 3200);
     expect(h.latestPrice, 1); // balance-style: amount tracked in quantity
-    expect(h.costPrice, 3200); // principal = balance, so P/L is zero
+    expect(h.costPrice, 1); // unit price 1 -> cost = balance, no P/L
 
     await tester.pump(const Duration(milliseconds: 500));
     await db.close();

@@ -22,11 +22,17 @@ class DataMigrationService {
   /// constraint (present in databases created at schema v1).
   static const _holdingsRebuilt = 'holdings_rebuilt_v5';
 
+  /// Liability holdings store the outstanding balance in quantity with a
+  /// unit price of 1; older records stored costPrice = balance, which made
+  /// the cost (quantity x costPrice) explode. Reset those to 1.
+  static const _liabilityCostFixed = 'liability_cost_fixed_v6';
+
   /// Runs all pending one-time migrations. Safe to call on every launch.
   Future<void> run() async {
     await _migrateAmountBased();
     await _migrateGoldSymbol();
     await _rebuildHoldingsTable();
+    await _migrateLiabilityCost();
   }
 
   /// SQLite cannot drop a UNIQUE constraint without rebuilding the table.
@@ -110,6 +116,25 @@ class DataMigrationService {
     }
 
     await _setSetting(_goldSymbolMigrated, '${DateTime.now().millisecondsSinceEpoch}');
+  }
+
+  Future<void> _migrateLiabilityCost() async {
+    final marker = await _getSetting(_liabilityCostFixed);
+    if (marker != null) return;
+
+    final liabilities = await (_db.select(_db.holdings)
+          ..where((t) =>
+              t.assetType.equals('liability') & t.costPrice.equals(1).not()))
+        .get();
+
+    for (final h in liabilities) {
+      final stmt = _db.update(_db.holdings)..where((t) => t.id.equals(h.id));
+      await stmt.write(
+        const HoldingsCompanion(costPrice: Value(1)),
+      );
+    }
+
+    await _setSetting(_liabilityCostFixed, '${DateTime.now().millisecondsSinceEpoch}');
   }
 
   Future<String?> _getSetting(String key) async {
