@@ -83,7 +83,9 @@ void main() {
       );
       final cashAfter = (await dao.getHolding(cash))!;
       expect(cashAfter.quantity, 3000);
-      expect(cashAfter.costPrice, 5000); // invested untouched
+      // Invested moves with the balance: the cash return rate is immune to
+      // buying (money left the cash pool for the security's cost basis).
+      expect(cashAfter.costPrice, 3000);
     });
   });
 
@@ -106,7 +108,9 @@ void main() {
       final fundAfter = (await dao.getHolding(fund))!;
       expect(fundAfter.quantity, 150);
       expect(fundAfter.costPrice, 15);
-      expect((await dao.getHolding(cash))!.quantity, 1000);
+      final cashAfter = (await dao.getHolding(cash))!;
+      expect(cashAfter.quantity, 1000);
+      expect(cashAfter.costPrice, 1000); // invested moves with the credit
     });
 
     test('rejects selling more than owned', () async {
@@ -374,6 +378,31 @@ void main() {
       final h = (await dao.getHolding(cash))!;
       expect(h.quantity, 1100);
       expect(h.costPrice, 900); // counts as gain
+    });
+  });
+
+  group('deleteHolding orphan cleanup', () {
+    test('removing a cash holding deletes transfers referencing it', () async {
+      final acc = await addAccount('A');
+      final cash = await addHolding(
+        accountId: acc, name: '现金', type: AssetType.bankDeposit,
+        quantity: 5000, costPrice: 5000, latestPrice: 1,
+      );
+      final card = await addHolding(
+        accountId: acc, name: '信用卡', type: AssetType.liability,
+        quantity: 2000, costPrice: 1, latestPrice: 1,
+      );
+      await service.record(
+        accountId: acc, type: TransactionType.transferOut,
+        amount: 800, cashSourceId: cash, cashTargetId: card,
+      );
+      expect(await dao.getTransactions(), hasLength(1));
+
+      await dao.deleteHolding(cash);
+
+      // The transfer referencing the deleted holding must not be orphaned.
+      expect(await dao.getTransactions(), isEmpty);
+      expect(await dao.getHolding(card), isNot(null));
     });
   });
 

@@ -85,9 +85,14 @@ class AssetDao {
     );
   }
 
+  /// Deletes a holding and every transaction referencing it — as the direct
+  /// subject (holdingId) or as a transfer counterparty (cashSourceId /
+  /// cashTargetId), so no orphan flows are left behind.
   Future<int> deleteHolding(int id) async {
     return _db.transaction(() async {
       await (_db.delete(_db.transactions)..where((t) => t.holdingId.equals(id))).go();
+      await (_db.delete(_db.transactions)..where((t) => t.cashSourceId.equals(id))).go();
+      await (_db.delete(_db.transactions)..where((t) => t.cashTargetId.equals(id))).go();
       return (_db.delete(_db.holdings)..where((t) => t.id.equals(id))).go();
     });
   }

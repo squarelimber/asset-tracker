@@ -242,11 +242,17 @@ class _HoldingsPageState extends ConsumerState<HoldingsPage> {
                     title: '资产',
                     total: assetTotalOf(assets, rates),
                   ),
-                  ResponsiveGrid(
-                    children: [
-                      for (final h in assets) _HoldingCard(holding: h),
-                    ],
-                  ),
+                  if (assets.isEmpty)
+                    const Padding(
+                      padding: EdgeInsets.all(32),
+                      child: Center(child: Text('暂无资产')),
+                    )
+                  else
+                    ResponsiveGrid(
+                      children: [
+                        for (final h in assets) _HoldingCard(holding: h),
+                      ],
+                    ),
                 ] else if (liabilities.isEmpty)
                   const Padding(
                     padding: EdgeInsets.all(32),
