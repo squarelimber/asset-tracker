@@ -7,10 +7,18 @@ import '../../core/formats.dart';
 /// - holding days (relative: today - N days)
 /// Editing either updates the other automatically.
 class PurchaseDateField extends StatefulWidget {
-  const PurchaseDateField({super.key, required this.value, this.label = '买入日期'});
+  const PurchaseDateField({
+    super.key,
+    required this.value,
+    this.label = '买入日期',
+    this.daysLabel = '持有天数（选填，与日期二选一）',
+    this.daysHint = '如 400 = 400 天前买入',
+  });
 
   final ValueNotifier<DateTime?> value;
   final String label;
+  final String daysLabel;
+  final String daysHint;
 
   @override
   State<PurchaseDateField> createState() => _PurchaseDateFieldState();
@@ -89,8 +97,8 @@ class _PurchaseDateFieldState extends State<PurchaseDateField> {
           controller: _daysCtrl,
           keyboardType: const TextInputType.numberWithOptions(decimal: false),
           decoration: InputDecoration(
-            labelText: '持有天数（选填，与日期二选一）',
-            hintText: '如 400 = 400 天前买入',
+            labelText: widget.daysLabel,
+            hintText: widget.daysHint,
           ),
           onChanged: (text) {
             final days = int.tryParse(text.trim());
