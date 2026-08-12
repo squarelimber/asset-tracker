@@ -184,6 +184,56 @@ void main() {
     });
   });
 
+  group('consume', () {
+    test('credit-card spend increases the liability balance', () async {
+      final acc = await addAccount('A');
+      final card = await addHolding(
+        accountId: acc, name: '信用卡', type: AssetType.liability,
+        quantity: 1200, costPrice: 1200, latestPrice: 1,
+      );
+      final r = await service.record(
+        accountId: acc, holdingId: card, type: TransactionType.consume,
+        amount: 800, note: '超市购物',
+      );
+      expect(r.ok, isTrue);
+      final h = (await dao.getHolding(card))!;
+      expect(h.quantity, 2000);
+      // No cash holding was touched: costPrice stays as the principal.
+      expect(h.costPrice, 1200);
+    });
+
+    test('rejects consume on a non-liability holding', () async {
+      final acc = await addAccount('A');
+      final cash = await addHolding(
+        accountId: acc, name: '现金', type: AssetType.bankDeposit,
+        quantity: 5000, costPrice: 5000, latestPrice: 1,
+      );
+      final r = await service.record(
+        accountId: acc, holdingId: cash, type: TransactionType.consume,
+        amount: 100,
+      );
+      expect(r.ok, isFalse);
+      expect((await dao.getHolding(cash))!.quantity, 5000);
+    });
+
+    test('removing a consume reverses the balance', () async {
+      final acc = await addAccount('A');
+      final card = await addHolding(
+        accountId: acc, name: '信用卡', type: AssetType.liability,
+        quantity: 2000, costPrice: 2000, latestPrice: 1,
+      );
+      final r = await service.record(
+        accountId: acc, holdingId: card, type: TransactionType.consume,
+        amount: 500,
+      );
+      expect(r.ok, isTrue);
+      expect((await dao.getHolding(card))!.quantity, 2500);
+      final txns = await dao.getTransactions();
+      await service.remove(txns.single.id);
+      expect((await dao.getHolding(card))!.quantity, 2000);
+    });
+  });
+
   group('income/expense/dividend', () {
     test('income adds cash AND invested (excluded from P/L)', () async {
       final acc = await addAccount('A');

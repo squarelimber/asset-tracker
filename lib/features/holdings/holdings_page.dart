@@ -298,28 +298,33 @@ class _HoldingsPageState extends ConsumerState<HoldingsPage> {
               ValueListenableBuilder<AssetType>(
                 valueListenable: assetType,
                 builder: (context, type, _) {
-                  if (type.isAmountBased) {
-                    // Amount-based assets: amount + linked invested/profit.
+                  if (type.isAmountBased || type == AssetType.liability) {
+                    // Amount-based assets (and liabilities) track a plain
+                    // balance; liabilities get a tailored label and no
+                    // invested/profit linkage.
+                    final isLiability = type == AssetType.liability;
                     return Column(
                       children: [
                         TextField(
                           controller: quantityCtrl,
                           keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                          decoration: const InputDecoration(
-                            labelText: '当前金额',
-                            hintText: '如 50000',
+                          decoration: InputDecoration(
+                            labelText: isLiability ? '当前欠款金额' : '当前金额',
+                            hintText: isLiability ? '如 3000' : '如 50000',
                           ),
                           onChanged: (v) {
                             amount.value = double.tryParse(v.trim()) ?? 0;
                           },
                         ),
-                        const SizedBox(height: 12),
-                        InvestedProfitField(
-                          amount: amount,
-                          initialInvested: null,
-                          onChanged: (v) => investedResult = v,
-                        ),
-                        const SizedBox(height: 12),
+                        if (type.isAmountBased) ...[
+                          const SizedBox(height: 12),
+                          InvestedProfitField(
+                            amount: amount,
+                            initialInvested: null,
+                            onChanged: (v) => investedResult = v,
+                          ),
+                          const SizedBox(height: 12),
+                        ],
                       ],
                     );
                   }
@@ -407,11 +412,12 @@ class _HoldingsPageState extends ConsumerState<HoldingsPage> {
               final type = assetType.value;
               final qty = double.tryParse(quantityCtrl.text.trim());
               final invested = double.tryParse(costPriceCtrl.text.trim());
-              final costRequired = type.isAmountBased ? 1 : 2;
+              final isAmount = type.isAmountBased || type == AssetType.liability;
+              final costRequired = isAmount ? 1 : 2;
               if (name.isEmpty || qty == null || (costRequired == 2 && invested == null)) {
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
-                    content: Text(type.isAmountBased
+                    content: Text(isAmount
                         ? '请填写名称和当前金额'
                         : '请填写名称、数量、成本单价'),
                   ),
@@ -447,10 +453,10 @@ class _HoldingsPageState extends ConsumerState<HoldingsPage> {
                   marketSource: Value(marketSource),
                   symbol: hasSymbol ? Value(symbol) : const Value.absent(),
                   quantity: Value(qty),
-                  costPrice: Value(type.isAmountBased
-                      ? (investedResult ?? qty)
+                  costPrice: Value(isAmount
+                      ? (type.isAmountBased ? (investedResult ?? qty) : qty)
                       : (invested ?? 0)),
-                  latestPrice: Value(type.isAmountBased ? 1 : (userPrice ?? 0)),
+                  latestPrice: Value(isAmount ? 1 : (userPrice ?? 0)),
                   purchaseDate: Value(purchaseDate.value),
                   riskLevel: riskLevel.value == null
                       ? const Value.absent()
@@ -556,6 +562,12 @@ class _HoldingCard extends ConsumerWidget {
     final todayRow = cacheSymbol == null ? null : cache[cacheSymbol];
     final todayProfit = todayProfitOf(todayRow, holding.quantity);
     final todayPct = todayChangePctOf(todayRow);
+    // Account name for disambiguating the same security across accounts.
+    final accounts = ref.watch(accountsProvider).value ?? const <AccountRow>[];
+    final accountName = accounts
+        .where((a) => a.id == holding.accountId)
+        .map((a) => a.name)
+        .firstOrNull;
 
     return Card(
       child: InkWell(
@@ -590,6 +602,15 @@ class _HoldingCard extends ConsumerWidget {
                               : '${holding.symbol ?? '手动净值'} · 持有 ${_holdingAge(holding)}',
                           style: Theme.of(context).textTheme.bodySmall,
                         ),
+                        if (accountName != null)
+                          Text(
+                            accountName,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                  color: Theme.of(context).colorScheme.outline,
+                                ),
+                          ),
                       ],
                     ),
                   ),
@@ -787,6 +808,8 @@ class _HoldingCard extends ConsumerWidget {
         builder: (context, setState) {
           final type = typeNotifier.value;
           final isAmountBased = type.isAmountBased;
+          final isAmount = isAmountBased || type == AssetType.liability;
+          final isLiability = type == AssetType.liability;
           final autoCny = type.isMarketLinked || type == AssetType.bankWealth;
           return AlertDialog(
             title: const Text('编辑持仓'),
@@ -847,7 +870,7 @@ class _HoldingCard extends ConsumerWidget {
                       riskLevelNotifier.value = v == 'auto' ? null : v;
                     }),
                   ),
-                  if (!isAmountBased) ...[
+                  if (!isAmount) ...[
                     const SizedBox(height: 12),
                     TextField(
                       controller: symbolCtrl,
@@ -862,10 +885,12 @@ class _HoldingCard extends ConsumerWidget {
                     controller: quantityCtrl,
                     keyboardType: const TextInputType.numberWithOptions(decimal: true),
                     decoration: InputDecoration(
-                      labelText: isAmountBased ? '当前金额' : '数量 / 份额 / 克数',
+                      labelText: isLiability
+                          ? '当前欠款金额'
+                          : (isAmount ? '当前金额' : '数量 / 份额 / 克数'),
                     ),
                     onChanged: (v) {
-                      if (isAmountBased) {
+                      if (isAmount) {
                         amount.value = double.tryParse(v.trim()) ?? 0;
                       }
                     },
@@ -877,7 +902,7 @@ class _HoldingCard extends ConsumerWidget {
                       initialInvested: holding.costPrice > 0 ? holding.costPrice : null,
                       onChanged: (v) => investedResult = v,
                     ),
-                  ] else ...[
+                  ] else if (!isLiability) ...[
                     const SizedBox(height: 12),
                     TextField(
                       controller: costCtrl,
@@ -933,17 +958,18 @@ class _HoldingCard extends ConsumerWidget {
     if (ok == true) {
       final type = typeNotifier.value;
       final isAmountBased = type.isAmountBased;
+      final isAmount = isAmountBased || type == AssetType.liability;
       final autoCny = type.isMarketLinked || type == AssetType.bankWealth;
       final qty = double.tryParse(quantityCtrl.text.trim());
       if (qty == null) return;
       final cost = double.tryParse(costCtrl.text.trim());
       final price = double.tryParse(priceCtrl.text.trim());
-      if (!isAmountBased && (cost == null || price == null)) return;
+      if (!isAmount && (cost == null || price == null)) return;
       final symbol = symbolCtrl.text.trim();
       // Market source follows the new asset type; amount-based assets are
       // manual by nature. A symbol change on a share holding with an empty
       // source also re-derives the source.
-      final marketSource = isAmountBased
+      final marketSource = isAmount
           ? 'manual'
           : MarketSource.fromStorage(holding.marketSource) == MarketSource.manual
               ? switch (type) {
@@ -974,13 +1000,15 @@ class _HoldingCard extends ConsumerWidget {
         assetType: type.storageName,
         marketSource: marketSource,
         quantity: qty,
-        costPrice: isAmountBased ? (investedResult ?? qty) : (cost ?? holding.costPrice),
-        latestPrice: isAmountBased ? 1 : (price ?? holding.latestPrice),
+        costPrice: isAmount
+            ? (isAmountBased ? (investedResult ?? qty) : qty)
+            : (cost ?? holding.costPrice),
+        latestPrice: isAmount ? 1 : (price ?? holding.latestPrice),
         purchaseDate: Value(purchaseDate.value),
         riskLevel: riskLevelNotifier.value == null
             ? const Value.absent()
             : Value(riskLevelNotifier.value),
-        symbol: !isAmountBased ? (symbol.isEmpty ? const Value.absent() : Value(symbol)) : const Value.absent(),
+        symbol: !isAmount ? (symbol.isEmpty ? const Value.absent() : Value(symbol)) : const Value.absent(),
         currency: autoCny
             ? 'CNY'
             : (currencyCtrl.text.trim().toUpperCase().isEmpty
