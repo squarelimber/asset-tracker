@@ -168,30 +168,37 @@ class _AccountCard extends ConsumerWidget {
                   ),
                   // Per-account asset total + count (converted to CNY).
                   holdings.when(
-                    data: (list) => Column(
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
-                        FutureBuilder<Map<String, double>>(
-                          future: ref.watch(cnyRatesProvider.future),
-                          builder: (context, snapshot) {
-                            final rates = snapshot.data ?? const <String, double>{};
-                            return Text(
+                    data: (list) => FutureBuilder<Map<String, double>>(
+                      future: ref.watch(cnyRatesProvider.future),
+                      builder: (context, snapshot) {
+                        final rates = snapshot.data ?? const <String, double>{};
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            Text(
                               '¥${Formats.amount(_accountTotal(list, rates))}',
                               style: Theme.of(context)
                                   .textTheme
                                   .titleMedium
                                   ?.copyWith(fontWeight: FontWeight.w700),
-                            );
-                          },
-                        ),
-                        Text(
-                          '${list.length} 项持仓 · '
-                          '${_accountProfit(list) >= 0 ? '+' : ''}¥${Formats.amount(_accountProfit(list))}',
-                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                color: context.changeColor(_accountProfit(list)),
+                            ),
+                            Text(
+                              '${list.length} 项持仓 · '
+                              '${_accountProfit(list) >= 0 ? '+' : ''}¥${Formats.amount(_accountProfit(list))}',
+                              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                    color: context.changeColor(_accountProfit(list)),
+                                  ),
+                            ),
+                            if (_accountLiability(list, rates) > 0)
+                              Text(
+                                '负债 ¥${Formats.amount(_accountLiability(list, rates))}',
+                                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                      color: AppColors.down,
+                                    ),
                               ),
-                        ),
-                      ],
+                          ],
+                        );
+                      },
                     ),
                     loading: () => const SizedBox.shrink(),
                     error: (_, _) => const SizedBox.shrink(),
@@ -222,19 +229,32 @@ class _AccountCard extends ConsumerWidget {
     );
   }
 
-  /// Total market value of the account's holdings, converted to CNY.
+  /// Total market value of the account's assets (liabilities excluded),
+  /// converted to CNY.
   static double _accountTotal(List<HoldingRow> list, Map<String, double> rates) {
     return list.fold(0.0, (sum, h) {
       final type = AssetType.fromStorage(h.assetType);
+      if (type == AssetType.liability) return sum;
       final rate = (rates[h.currency.toUpperCase()] ?? 1);
       return sum + (type.isAmountBased ? h.quantity : h.quantity * h.latestPrice) * rate;
     });
   }
 
-  /// Total profit of the account's holdings.
+  /// Total outstanding balance of the account's liability holdings (CNY).
+  static double _accountLiability(List<HoldingRow> list, Map<String, double> rates) {
+    return list.fold(0.0, (sum, h) {
+      final type = AssetType.fromStorage(h.assetType);
+      if (type != AssetType.liability) return sum;
+      final rate = (rates[h.currency.toUpperCase()] ?? 1);
+      return sum + h.quantity * rate;
+    });
+  }
+
+  /// Total profit of the account's asset holdings (liabilities excluded).
   static double _accountProfit(List<HoldingRow> list) {
     return list.fold(0.0, (sum, h) {
       final type = AssetType.fromStorage(h.assetType);
+      if (type == AssetType.liability) return sum;
       final value =
           type.isAmountBased ? h.quantity : h.quantity * h.latestPrice;
       final cost = type.isAmountBased

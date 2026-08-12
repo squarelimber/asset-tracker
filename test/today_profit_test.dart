@@ -9,6 +9,7 @@ HoldingRow _holding({
   String assetType = 'stock',
   String marketSource = 'sina',
   double quantity = 100,
+  String currency = 'CNY',
 }) {
   return HoldingRow(
     id: 1,
@@ -23,7 +24,7 @@ HoldingRow _holding({
     purchaseDate: DateTime(2026, 1, 1),
     createdAt: DateTime(2026, 1, 1),
     updatedAt: DateTime(2026, 1, 1),
-    currency: 'CNY',
+    currency: currency,
     riskLevel: null,
     note: null,
   );
@@ -103,6 +104,28 @@ void main() {
         fetchedAt: DateTime.now().subtract(const Duration(days: 2)),
       );
       expect(todayChangePctOf(stale), isNull);
+    });
+  });
+
+  group('assetTotalOf / liabilityTotalOf', () {
+    HoldingRow amountHolding(String type, double qty, [double rate = 1]) =>
+        _holding(assetType: type, marketSource: 'manual', quantity: qty);
+
+    test('assets only: liabilities are excluded from the asset total', () {
+      final list = [
+        amountHolding('savings', 1000), // 现金 1000
+        _holding(symbol: 'sh600519', quantity: 100), // 茅台 100 * latestPrice(1) = 100
+        amountHolding('liability', 3000), // 负债 3000 -> excluded
+      ];
+      const rates = <String, double>{};
+      expect(assetTotalOf(list, rates), 1100);
+      expect(liabilityTotalOf(list, rates), 3000);
+    });
+
+    test('applies currency conversion rates', () {
+      final usd = _holding(quantity: 2, currency: 'USD');
+      const rates = <String, double>{'USD': 7.2};
+      expect(assetTotalOf([usd], rates), closeTo(2 * 1 * 7.2, 1e-9));
     });
   });
 }

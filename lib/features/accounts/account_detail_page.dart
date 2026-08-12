@@ -130,9 +130,11 @@ class _HoldingTile extends StatelessWidget {
                       overflow: TextOverflow.ellipsis,
                       style: Theme.of(context).textTheme.titleSmall),
                   Text(
-                    type.isAmountBased
-                        ? '持有 ${Formats.holdingDuration(holding.purchaseDate ?? holding.createdAt)}'
-                        : '${holding.symbol ?? ''}  ${MarketSource.fromStorage(holding.marketSource).label}',
+                    type == AssetType.liability
+                        ? '负债 · 起始 ${Formats.date(holding.purchaseDate ?? holding.createdAt)}'
+                        : type.isAmountBased
+                            ? '持有 ${Formats.holdingDuration(holding.purchaseDate ?? holding.createdAt)}'
+                            : '${holding.symbol ?? ''}  ${MarketSource.fromStorage(holding.marketSource).label}',
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
                 ],

@@ -61,6 +61,26 @@ double? todayChangePctOf(PriceCacheRow? row, {DateTime? now}) {
   return row.changePct;
 }
 
+/// CNY-converted market value of non-liability holdings.
+double assetTotalOf(List<HoldingRow> holdings, Map<String, double> rates) {
+  return holdings.fold(0.0, (sum, h) {
+    final type = AssetType.fromStorage(h.assetType);
+    if (type == AssetType.liability) return sum;
+    final rate = rates[h.currency.toUpperCase()] ?? 1;
+    return sum +
+        (type.isAmountBased ? h.quantity : h.quantity * h.latestPrice) * rate;
+  });
+}
+
+/// CNY-converted total outstanding balance of liability holdings.
+double liabilityTotalOf(List<HoldingRow> holdings, Map<String, double> rates) {
+  return holdings.fold(0.0, (sum, h) {
+    if (AssetType.fromStorage(h.assetType) != AssetType.liability) return sum;
+    final rate = rates[h.currency.toUpperCase()] ?? 1;
+    return sum + h.quantity * rate;
+  });
+}
+
 class HoldingsPage extends ConsumerStatefulWidget {
   const HoldingsPage({super.key});
 
@@ -171,21 +191,51 @@ class _HoldingsPageState extends ConsumerState<HoldingsPage> {
         label: const Text('添加持仓'),
       ),
       body: holdings.when(
-        data: (list) => list.isEmpty
-            ? const _EmptyHoldings()
-            : ResponsiveShell(
-                // ListView so many holdings stay scrollable; grid rows are
-                // full-width with equal-width cards (no stray gaps).
-                child: ListView(
+        data: (list) {
+          if (list.isEmpty) return const _EmptyHoldings();
+          final sorted = _sorted(list);
+          final assets = sorted
+              .where((h) =>
+                  AssetType.fromStorage(h.assetType) != AssetType.liability)
+              .toList();
+          final liabilities = sorted
+              .where((h) =>
+                  AssetType.fromStorage(h.assetType) == AssetType.liability)
+              .toList()
+            ..sort((a, b) =>
+                _holdingMarketValue(b).compareTo(_holdingMarketValue(a)));
+          final rates = ref.watch(cnyRatesProvider).value ?? const {};
+          return ResponsiveShell(
+            // ListView so many holdings stay scrollable; grid rows are
+            // full-width with equal-width cards (no stray gaps).
+            child: ListView(
+              children: [
+                _SectionHeader(
+                  title: '资产',
+                  total: assetTotalOf(assets, rates),
+                ),
+                ResponsiveGrid(
                   children: [
-                    ResponsiveGrid(
-                      children: [
-                        for (final h in _sorted(list)) _HoldingCard(holding: h),
-                      ],
-                    ),
+                    for (final h in assets) _HoldingCard(holding: h),
                   ],
                 ),
-              ),
+                if (liabilities.isNotEmpty) ...[
+                  const SizedBox(height: 20),
+                  _SectionHeader(
+                    title: '负债',
+                    total: liabilityTotalOf(liabilities, rates),
+                    isLiability: true,
+                  ),
+                  ResponsiveGrid(
+                    children: [
+                      for (final h in liabilities) _HoldingCard(holding: h),
+                    ],
+                  ),
+                ],
+              ],
+            ),
+          );
+        },
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, _) => Center(child: Text('加载失败: $e')),
       ),
@@ -379,7 +429,19 @@ class _HoldingsPageState extends ConsumerState<HoldingsPage> {
                   );
                 },
               ),
-              PurchaseDateField(value: purchaseDate),
+              ValueListenableBuilder<AssetType>(
+                valueListenable: assetType,
+                builder: (context, type, _) => PurchaseDateField(
+                  value: purchaseDate,
+                  label: type == AssetType.liability ? '开卡日期' : '买入日期',
+                  daysLabel: type == AssetType.liability
+                      ? '开卡天数（选填，与日期二选一）'
+                      : '持有天数（选填，与日期二选一）',
+                  daysHint: type == AssetType.liability
+                      ? '如 400 = 400 天前开卡'
+                      : '如 400 = 400 天前买入',
+                ),
+              ),
               const SizedBox(height: 12),
               ValueListenableBuilder<AssetType>(
                 valueListenable: assetType,
@@ -520,6 +582,40 @@ class _HoldingsPageState extends ConsumerState<HoldingsPage> {
   }
 }
 
+class _SectionHeader extends StatelessWidget {
+  const _SectionHeader({
+    required this.title,
+    required this.total,
+    this.isLiability = false,
+  });
+
+  final String title;
+  final double total;
+  final bool isLiability;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        children: [
+          Text(title, style: Theme.of(context).textTheme.titleMedium),
+          const Spacer(),
+          Text(
+            '¥${Formats.amount(total)}',
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w700,
+                  color: isLiability
+                      ? AppColors.down
+                      : Theme.of(context).colorScheme.onSurface,
+                ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _EmptyHoldings extends StatelessWidget {
   const _EmptyHoldings();
 
@@ -597,9 +693,11 @@ class _HoldingCard extends ConsumerWidget {
                           style: Theme.of(context).textTheme.titleMedium,
                         ),
                         Text(
-                          type.isAmountBased
-                              ? '持有 ${_holdingAge(holding)}'
-                              : '${holding.symbol ?? '手动净值'} · 持有 ${_holdingAge(holding)}',
+                          type == AssetType.liability
+                              ? '负债 · 起始 ${Formats.date(holding.purchaseDate ?? holding.createdAt)}'
+                              : type.isAmountBased
+                                  ? '持有 ${_holdingAge(holding)}'
+                                  : '${holding.symbol ?? '手动净值'} · 持有 ${_holdingAge(holding)}',
                           style: Theme.of(context).textTheme.bodySmall,
                         ),
                         if (accountName != null)
@@ -639,7 +737,11 @@ class _HoldingCard extends ConsumerWidget {
               const SizedBox(height: 12),
               Text(
                 Formats.money(marketValue, holding.currency),
-                style: Theme.of(context).textTheme.titleLarge,
+                style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      color: type == AssetType.liability
+                          ? AppColors.down
+                          : null,
+                    ),
               ),
               const SizedBox(height: 4),
               Row(
@@ -917,7 +1019,16 @@ class _HoldingCard extends ConsumerWidget {
                     ),
                   ],
                   const SizedBox(height: 12),
-                  PurchaseDateField(value: purchaseDate),
+                  PurchaseDateField(
+                    value: purchaseDate,
+                    label: type == AssetType.liability ? '开卡日期' : '买入日期',
+                    daysLabel: type == AssetType.liability
+                        ? '开卡天数（选填，与日期二选一）'
+                        : '持有天数（选填，与日期二选一）',
+                    daysHint: type == AssetType.liability
+                        ? '如 400 = 400 天前开卡'
+                        : '如 400 = 400 天前买入',
+                  ),
                   const SizedBox(height: 12),
                   if (autoCny)
                     const Align(
@@ -1118,8 +1229,12 @@ class _HoldingDetailSheet extends ConsumerWidget {
                   _InfoRow(label: '数量/份额', value: Formats.smartNum(holding.quantity)),
                 ],
                 _InfoRow(label: '币种', value: holding.currency),
-                _InfoRow(label: '买入日期', value: Formats.date(buyDate)),
-                _InfoRow(label: '持有时间', value: Formats.holdingDuration(buyDate)),
+                _InfoRow(
+                  label: type == AssetType.liability ? '开卡日期' : '买入日期',
+                  value: Formats.date(buyDate),
+                ),
+                if (type != AssetType.liability)
+                  _InfoRow(label: '持有时间', value: Formats.holdingDuration(buyDate)),
                 if (todayProfit != null)
                   _InfoRow(
                     label: '今日收益',
