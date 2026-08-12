@@ -18,17 +18,20 @@ class TransactionResult {
 
 /// Orchestrates transaction records and their effect on holdings.
 ///
-/// Linkage rules:
-/// - buy:     share holding quantity +q, moving-average cost;
-///            optional cash source holding -amount (invested untouched).
-/// - sell:    share holding quantity -q (must not go negative); cost
-///            unchanged; optional cash target holding +amount.
-/// - transfer: source and target are cash/liability holdings; source -amount,
-///            target +amount (repaying a liability = transfer to it).
-/// - dividend: cash holding +amount (invested untouched -> counts as gain).
-/// - income:   cash +amount AND invested +amount (capital entering, excluded
-///            from investment P/L).
-/// - expense:  cash -amount AND invested -amount (consumption).
+  /// Linkage rules:
+  /// - buy:     share holding quantity +q, moving-average cost;
+  ///            optional cash source holding -amount, invested moves with it
+  ///            so the cash return rate stays undistorted (the money leaves
+  ///            the cash pool and enters the security's cost basis).
+  /// - sell:    share holding quantity -q (must not go negative); cost
+  ///            unchanged; optional cash target holding +amount (invested
+  ///            moves with it, mirror of buy).
+  /// - transfer: source and target are cash/liability holdings; source -amount,
+  ///            target +amount (repaying a liability = transfer to it).
+  /// - dividend: cash holding +amount (invested untouched -> counts as gain).
+  /// - income:   cash +amount AND invested +amount (capital entering, excluded
+  ///            from investment P/L).
+  /// - expense:  cash -amount AND invested -amount (consumption).
 ///
 /// Removing a transaction reverses the linkage. Removing a `buy` requires
 /// that no later transaction exists for the same share holding (moving
@@ -122,7 +125,7 @@ class TransactionService {
     final totalCost = holding.quantity * holding.costPrice + amount;
     await _updateHolding(holding, quantity: newQty, costPrice: totalCost / newQty);
     if (cashSourceId != null) {
-      await _applyCashMove(cashSourceId, -amount, invested: false);
+      await _applyCashMove(cashSourceId, -amount, invested: true);
     }
   }
 
@@ -146,7 +149,7 @@ class TransactionService {
       costPrice: newQty == 0 ? 0 : holding.costPrice,
     );
     if (cashTargetId != null) {
-      await _applyCashMove(cashTargetId, amount, invested: false);
+      await _applyCashMove(cashTargetId, amount, invested: true);
     }
   }
 
@@ -313,7 +316,7 @@ class TransactionService {
       await _updateHolding(holding, quantity: newQty, costPrice: cost < 0 ? 0.0 : cost);
     }
     if (txn.cashSourceId != null) {
-      await _applyCashMove(txn.cashSourceId, txn.amount, invested: false);
+      await _applyCashMove(txn.cashSourceId, txn.amount, invested: true);
     }
   }
 
@@ -324,7 +327,7 @@ class TransactionService {
     final qty = txn.quantity ?? 0;
     await _updateHolding(holding, quantity: holding.quantity + qty);
     if (txn.cashTargetId != null) {
-      await _applyCashMove(txn.cashTargetId, -txn.amount, invested: false);
+      await _applyCashMove(txn.cashTargetId, -txn.amount, invested: true);
     }
   }
 }
