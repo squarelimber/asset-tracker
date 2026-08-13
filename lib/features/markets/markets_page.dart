@@ -24,11 +24,13 @@ final _trendProvider = FutureProvider.autoDispose.family<List<FlSpot>, String>(
     final symbol = _historySymbol(code);
     if (symbol == null) return const [];
     final now = DateTime.now();
+    // Tencent qfq (adjusted) klines on every platform: unit splits and
+    // ex-rights events stay continuous in the trend chart.
     final HistoryDataSource source = kIsWeb
         ? TencentHistorySource()
         : (code.startsWith('hf_')
             ? FuturesKLineSource()
-            : SinaKLineSource());
+            : TencentHistorySource());
     final history = await source.fetch(symbol, now.subtract(const Duration(days: 900)), now);
     if (history.isEmpty) return const [];
     final lookup = HistoryPriceLookup(history);

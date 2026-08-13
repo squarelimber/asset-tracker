@@ -34,6 +34,12 @@ class DataMigrationService {
   /// holdings to cost = quantity.
   static const _transferCostMarked = 'transfer_cost_marked_v7';
 
+  /// 512480 (半导体设备ETF) did a 1:2 unit split on 2026-07-03: price
+  /// 2.70 -> 1.33, shares x2. Holdings recorded before the split still use
+  /// the old share count, which understates the market value by ~50%.
+  /// Fix quantity x2 and costPrice /2 once.
+  static const _etfSplit512480 = 'etf_split_512480_v8';
+
   /// Runs all pending one-time migrations. Safe to call on every launch.
   Future<void> run() async {
     await _migrateAmountBased();
@@ -41,6 +47,7 @@ class DataMigrationService {
     await _rebuildHoldingsTable();
     await _migrateLiabilityCost();
     await _migrateTransferCost();
+    await _migrateEtfSplit512480();
   }
 
   /// SQLite cannot drop a UNIQUE constraint without rebuilding the table.
@@ -201,6 +208,35 @@ class DataMigrationService {
     }
 
     await _setSetting(_transferCostMarked, '${DateTime.now().millisecondsSinceEpoch}');
+  }
+
+  /// One-time fix for the 512480 1:2 unit split on 2026-07-03.
+  Future<void> _migrateEtfSplit512480() async {
+    final marker = await _getSetting(_etfSplit512480);
+    if (marker != null) return;
+
+    final rows = await (_db.select(_db.holdings)
+          ..where((t) => t.symbol.equals('sh512480')))
+        .get();
+    for (final h in rows) {
+      if (h.quantity <= 0) continue;
+      final stmt = _db.update(_db.holdings)..where((t) => t.id.equals(h.id));
+      await stmt.write(
+        HoldingsCompanion(
+          quantity: Value(h.quantity * 2),
+          costPrice: Value(h.costPrice / 2),
+        ),
+      );
+    }
+
+    await _setSetting(_etfSplit512480, '${DateTime.now().millisecondsSinceEpoch}');
+    // The holdings changed; force a snapshot rebuild on the next visit so
+    // the net worth history reflects the split correctly.
+    if (rows.isNotEmpty) {
+      await _db.into(_db.settings).insertOnConflictUpdate(
+        SettingsCompanion.insert(key: 'history_sync_dirty', value: const Value('1')),
+      );
+    }
   }
 
   Future<String?> _getSetting(String key) async {

@@ -1379,6 +1379,7 @@ class _TransactionTile extends ConsumerWidget {
         type == TransactionType.transferIn ||
         type == TransactionType.income ||
         type == TransactionType.dividend;
+    final isSplit = type == TransactionType.split;
     final realized = type == TransactionType.sell &&
             costPrice != null &&
             txn.quantity != null
@@ -1387,7 +1388,13 @@ class _TransactionTile extends ConsumerWidget {
     return Card(
       child: ListTile(
         dense: true,
-        leading: Icon(type.icon, size: 20, color: context.changeColor(isIn ? 1 : -1)),
+        leading: Icon(
+          type.icon,
+          size: 20,
+          color: isSplit
+              ? Theme.of(context).colorScheme.outline
+              : context.changeColor(isIn ? 1 : -1),
+        ),
         title: Text(type.label),
         subtitle: Text(
           realized == null
@@ -1401,10 +1408,14 @@ class _TransactionTile extends ConsumerWidget {
             SizedBox(
               width: 110,
               child: Text(
-                '${isIn ? '+' : '-'}${Formats.money(txn.amount, txn.currency)}',
+                isSplit
+                    ? '×${Formats.smartNum(txn.amount)}'
+                    : '${isIn ? '+' : '-'}${Formats.money(txn.amount, txn.currency)}',
                 textAlign: TextAlign.end,
                 style: TextStyle(
-                  color: context.changeColor(isIn ? 1 : -1),
+                  color: isSplit
+                      ? Theme.of(context).colorScheme.outline
+                      : context.changeColor(isIn ? 1 : -1),
                   fontWeight: FontWeight.w600,
                 ),
               ),

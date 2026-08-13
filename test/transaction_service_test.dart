@@ -429,6 +429,53 @@ void main() {
     });
   });
 
+  group('split', () {
+    test('1:2 split doubles quantity and halves unit cost', () async {
+      final acc = await addAccount('A');
+      final etf = await addHolding(
+        accountId: acc, name: '半导体', type: AssetType.etf,
+        quantity: 109300, costPrice: 2.7, latestPrice: 2.7,
+      );
+      await service.record(
+        accountId: acc, holdingId: etf, type: TransactionType.split,
+        amount: 2.0,
+      );
+      final h = (await dao.getHolding(etf))!;
+      expect(h.quantity, 218600);
+      expect(h.costPrice, closeTo(1.35, 1e-9));
+    });
+
+    test('rejects splits on non-share holdings', () async {
+      final acc = await addAccount('A');
+      final cash = await addHolding(
+        accountId: acc, name: '现金', type: AssetType.bankDeposit,
+        quantity: 1000, costPrice: 1000, latestPrice: 1,
+      );
+      final r = await service.record(
+        accountId: acc, holdingId: cash, type: TransactionType.split,
+        amount: 2.0,
+      );
+      expect(r.ok, isFalse);
+    });
+
+    test('removing a split reverses the ratio', () async {
+      final acc = await addAccount('A');
+      final etf = await addHolding(
+        accountId: acc, name: '半导体', type: AssetType.etf,
+        quantity: 109300, costPrice: 2.7, latestPrice: 2.7,
+      );
+      await service.record(
+        accountId: acc, holdingId: etf, type: TransactionType.split,
+        amount: 2.0,
+      );
+      final txnId = (await dao.getTransactions()).single.id;
+      await service.remove(txnId);
+      final h = (await dao.getHolding(etf))!;
+      expect(h.quantity, 109300);
+      expect(h.costPrice, closeTo(2.7, 1e-9));
+    });
+  });
+
   group('deleteHolding orphan cleanup', () {
     test('removing a cash holding deletes transfers referencing it', () async {
       final acc = await addAccount('A');

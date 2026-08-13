@@ -5,6 +5,7 @@ import '../data/asset_dao.dart';
 import '../data/database.dart';
 import '../services/market/history_lookup.dart';
 import '../services/market/history_source.dart';
+import '../services/market/tencent_history_source.dart';
 
 /// One holding's contribution on a given day.
 class HoldingDayDetail {
@@ -70,7 +71,9 @@ class HoldingDetailService {
       : _sources = sources ??
             {
               MarketSource.eastmoney: EastmoneyHistorySource(),
-              MarketSource.sina: SinaKLineSource(),
+              // Tencent qfq (adjusted) klines keep unit splits/ex-rights
+              // continuous, matching the backfill service.
+              MarketSource.sina: TencentHistorySource(),
               MarketSource.sge: AuGoldHistorySource(),
             };
 

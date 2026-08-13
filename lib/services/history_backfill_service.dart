@@ -7,6 +7,7 @@ import '../data/asset_dao.dart';
 import '../data/database.dart';
 import 'market/history_lookup.dart';
 import 'market/history_source.dart';
+import 'market/tencent_history_source.dart';
 
 /// Result of a history backfill run.
 class BackfillResult {
@@ -42,7 +43,9 @@ class HistoryBackfillService {
       : _sources = sources ??
             {
               MarketSource.eastmoney: EastmoneyHistorySource(),
-              MarketSource.sina: SinaKLineSource(),
+              // Tencent qfq (adjusted) klines keep unit splits/ex-rights
+              // continuous over time, so backfilled history has no jumps.
+              MarketSource.sina: TencentHistorySource(),
               MarketSource.sge: AuGoldHistorySource(),
             };
 
