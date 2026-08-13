@@ -25,6 +25,11 @@ class Holdings extends Table {
   RealColumn get costPrice => real().withDefault(const Constant(0))();
   RealColumn get latestPrice => real().withDefault(const Constant(0))();
   TextColumn get currency => text().withDefault(const Constant('CNY'))();
+
+  /// Foreign-currency -> CNY exchange rate recorded at purchase time, used
+  /// for the cost-basis conversion. Null falls back to the current rate.
+  RealColumn get costFxRate => real().nullable()();
+
   DateTimeColumn get purchaseDate => dateTime().nullable()();
   TextColumn get riskLevel => text().nullable()();
   TextColumn get note => text().nullable()();

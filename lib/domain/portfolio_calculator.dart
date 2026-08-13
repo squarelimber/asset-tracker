@@ -1,4 +1,5 @@
 import '../core/enums.dart';
+import '../core/symbols.dart';
 import '../data/database.dart';
 
 /// Per-asset-type breakdown entry (CNY-converted values).
@@ -75,11 +76,6 @@ class PortfolioCalculator {
     Map<String, double> cnyRates = const {},
     List<TransactionRow> sellTransactions = const [],
   }) {
-    double rateOf(String currency) {
-      final rate = cnyRates[currency.toUpperCase()];
-      return (rate == null || rate <= 0) ? 1 : rate;
-    }
-
     var assets = 0.0;
     var liabilities = 0.0;
     var cost = 0.0;
@@ -95,7 +91,7 @@ class PortfolioCalculator {
       final type = AssetType.fromStorage(h.assetType);
       final risk = RiskLevel.fromStorage(h.riskLevel) ??
           RiskLevel.autoOf(type);
-      final rate = rateOf(h.currency);
+      final rate = valueRateOf(h, cnyRates);
       // Amount-based assets: quantity = current amount, price fixed at 1 and
       // costPrice stores the cumulative invested amount (in the currency).
       final marketValue =
@@ -103,7 +99,7 @@ class PortfolioCalculator {
       final holdingCost = (type.isAmountBased
               ? (h.costPrice > 0 ? h.costPrice : h.quantity)
               : h.quantity * h.costPrice) *
-          rate;
+          costRateOf(h, cnyRates);
       if (type == AssetType.liability) {
         liabilities += marketValue;
         continue;

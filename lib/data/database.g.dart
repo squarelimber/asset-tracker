@@ -521,6 +521,17 @@ class $HoldingsTable extends Holdings
     requiredDuringInsert: false,
     defaultValue: const Constant('CNY'),
   );
+  static const VerificationMeta _costFxRateMeta = const VerificationMeta(
+    'costFxRate',
+  );
+  @override
+  late final GeneratedColumn<double> costFxRate = GeneratedColumn<double>(
+    'cost_fx_rate',
+    aliasedName,
+    true,
+    type: DriftSqlType.double,
+    requiredDuringInsert: false,
+  );
   static const VerificationMeta _purchaseDateMeta = const VerificationMeta(
     'purchaseDate',
   );
@@ -588,6 +599,7 @@ class $HoldingsTable extends Holdings
     costPrice,
     latestPrice,
     currency,
+    costFxRate,
     purchaseDate,
     riskLevel,
     note,
@@ -675,6 +687,15 @@ class $HoldingsTable extends Holdings
         currency.isAcceptableOrUnknown(data['currency']!, _currencyMeta),
       );
     }
+    if (data.containsKey('cost_fx_rate')) {
+      context.handle(
+        _costFxRateMeta,
+        costFxRate.isAcceptableOrUnknown(
+          data['cost_fx_rate']!,
+          _costFxRateMeta,
+        ),
+      );
+    }
     if (data.containsKey('purchase_date')) {
       context.handle(
         _purchaseDateMeta,
@@ -757,6 +778,10 @@ class $HoldingsTable extends Holdings
         DriftSqlType.string,
         data['${effectivePrefix}currency'],
       )!,
+      costFxRate: attachedDatabase.typeMapping.read(
+        DriftSqlType.double,
+        data['${effectivePrefix}cost_fx_rate'],
+      ),
       purchaseDate: attachedDatabase.typeMapping.read(
         DriftSqlType.dateTime,
         data['${effectivePrefix}purchase_date'],
@@ -797,6 +822,10 @@ class HoldingRow extends DataClass implements Insertable<HoldingRow> {
   final double costPrice;
   final double latestPrice;
   final String currency;
+
+  /// Foreign-currency -> CNY exchange rate recorded at purchase time, used
+  /// for the cost-basis conversion. Null falls back to the current rate.
+  final double? costFxRate;
   final DateTime? purchaseDate;
   final String? riskLevel;
   final String? note;
@@ -813,6 +842,7 @@ class HoldingRow extends DataClass implements Insertable<HoldingRow> {
     required this.costPrice,
     required this.latestPrice,
     required this.currency,
+    this.costFxRate,
     this.purchaseDate,
     this.riskLevel,
     this.note,
@@ -834,6 +864,9 @@ class HoldingRow extends DataClass implements Insertable<HoldingRow> {
     map['cost_price'] = Variable<double>(costPrice);
     map['latest_price'] = Variable<double>(latestPrice);
     map['currency'] = Variable<String>(currency);
+    if (!nullToAbsent || costFxRate != null) {
+      map['cost_fx_rate'] = Variable<double>(costFxRate);
+    }
     if (!nullToAbsent || purchaseDate != null) {
       map['purchase_date'] = Variable<DateTime>(purchaseDate);
     }
@@ -862,6 +895,9 @@ class HoldingRow extends DataClass implements Insertable<HoldingRow> {
       costPrice: Value(costPrice),
       latestPrice: Value(latestPrice),
       currency: Value(currency),
+      costFxRate: costFxRate == null && nullToAbsent
+          ? const Value.absent()
+          : Value(costFxRate),
       purchaseDate: purchaseDate == null && nullToAbsent
           ? const Value.absent()
           : Value(purchaseDate),
@@ -890,6 +926,7 @@ class HoldingRow extends DataClass implements Insertable<HoldingRow> {
       costPrice: serializer.fromJson<double>(json['costPrice']),
       latestPrice: serializer.fromJson<double>(json['latestPrice']),
       currency: serializer.fromJson<String>(json['currency']),
+      costFxRate: serializer.fromJson<double?>(json['costFxRate']),
       purchaseDate: serializer.fromJson<DateTime?>(json['purchaseDate']),
       riskLevel: serializer.fromJson<String?>(json['riskLevel']),
       note: serializer.fromJson<String?>(json['note']),
@@ -911,6 +948,7 @@ class HoldingRow extends DataClass implements Insertable<HoldingRow> {
       'costPrice': serializer.toJson<double>(costPrice),
       'latestPrice': serializer.toJson<double>(latestPrice),
       'currency': serializer.toJson<String>(currency),
+      'costFxRate': serializer.toJson<double?>(costFxRate),
       'purchaseDate': serializer.toJson<DateTime?>(purchaseDate),
       'riskLevel': serializer.toJson<String?>(riskLevel),
       'note': serializer.toJson<String?>(note),
@@ -930,6 +968,7 @@ class HoldingRow extends DataClass implements Insertable<HoldingRow> {
     double? costPrice,
     double? latestPrice,
     String? currency,
+    Value<double?> costFxRate = const Value.absent(),
     Value<DateTime?> purchaseDate = const Value.absent(),
     Value<String?> riskLevel = const Value.absent(),
     Value<String?> note = const Value.absent(),
@@ -946,6 +985,7 @@ class HoldingRow extends DataClass implements Insertable<HoldingRow> {
     costPrice: costPrice ?? this.costPrice,
     latestPrice: latestPrice ?? this.latestPrice,
     currency: currency ?? this.currency,
+    costFxRate: costFxRate.present ? costFxRate.value : this.costFxRate,
     purchaseDate: purchaseDate.present ? purchaseDate.value : this.purchaseDate,
     riskLevel: riskLevel.present ? riskLevel.value : this.riskLevel,
     note: note.present ? note.value : this.note,
@@ -968,6 +1008,9 @@ class HoldingRow extends DataClass implements Insertable<HoldingRow> {
           ? data.latestPrice.value
           : this.latestPrice,
       currency: data.currency.present ? data.currency.value : this.currency,
+      costFxRate: data.costFxRate.present
+          ? data.costFxRate.value
+          : this.costFxRate,
       purchaseDate: data.purchaseDate.present
           ? data.purchaseDate.value
           : this.purchaseDate,
@@ -991,6 +1034,7 @@ class HoldingRow extends DataClass implements Insertable<HoldingRow> {
           ..write('costPrice: $costPrice, ')
           ..write('latestPrice: $latestPrice, ')
           ..write('currency: $currency, ')
+          ..write('costFxRate: $costFxRate, ')
           ..write('purchaseDate: $purchaseDate, ')
           ..write('riskLevel: $riskLevel, ')
           ..write('note: $note, ')
@@ -1012,6 +1056,7 @@ class HoldingRow extends DataClass implements Insertable<HoldingRow> {
     costPrice,
     latestPrice,
     currency,
+    costFxRate,
     purchaseDate,
     riskLevel,
     note,
@@ -1032,6 +1077,7 @@ class HoldingRow extends DataClass implements Insertable<HoldingRow> {
           other.costPrice == this.costPrice &&
           other.latestPrice == this.latestPrice &&
           other.currency == this.currency &&
+          other.costFxRate == this.costFxRate &&
           other.purchaseDate == this.purchaseDate &&
           other.riskLevel == this.riskLevel &&
           other.note == this.note &&
@@ -1050,6 +1096,7 @@ class HoldingsCompanion extends UpdateCompanion<HoldingRow> {
   final Value<double> costPrice;
   final Value<double> latestPrice;
   final Value<String> currency;
+  final Value<double?> costFxRate;
   final Value<DateTime?> purchaseDate;
   final Value<String?> riskLevel;
   final Value<String?> note;
@@ -1066,6 +1113,7 @@ class HoldingsCompanion extends UpdateCompanion<HoldingRow> {
     this.costPrice = const Value.absent(),
     this.latestPrice = const Value.absent(),
     this.currency = const Value.absent(),
+    this.costFxRate = const Value.absent(),
     this.purchaseDate = const Value.absent(),
     this.riskLevel = const Value.absent(),
     this.note = const Value.absent(),
@@ -1083,6 +1131,7 @@ class HoldingsCompanion extends UpdateCompanion<HoldingRow> {
     this.costPrice = const Value.absent(),
     this.latestPrice = const Value.absent(),
     this.currency = const Value.absent(),
+    this.costFxRate = const Value.absent(),
     this.purchaseDate = const Value.absent(),
     this.riskLevel = const Value.absent(),
     this.note = const Value.absent(),
@@ -1102,6 +1151,7 @@ class HoldingsCompanion extends UpdateCompanion<HoldingRow> {
     Expression<double>? costPrice,
     Expression<double>? latestPrice,
     Expression<String>? currency,
+    Expression<double>? costFxRate,
     Expression<DateTime>? purchaseDate,
     Expression<String>? riskLevel,
     Expression<String>? note,
@@ -1119,6 +1169,7 @@ class HoldingsCompanion extends UpdateCompanion<HoldingRow> {
       if (costPrice != null) 'cost_price': costPrice,
       if (latestPrice != null) 'latest_price': latestPrice,
       if (currency != null) 'currency': currency,
+      if (costFxRate != null) 'cost_fx_rate': costFxRate,
       if (purchaseDate != null) 'purchase_date': purchaseDate,
       if (riskLevel != null) 'risk_level': riskLevel,
       if (note != null) 'note': note,
@@ -1138,6 +1189,7 @@ class HoldingsCompanion extends UpdateCompanion<HoldingRow> {
     Value<double>? costPrice,
     Value<double>? latestPrice,
     Value<String>? currency,
+    Value<double?>? costFxRate,
     Value<DateTime?>? purchaseDate,
     Value<String?>? riskLevel,
     Value<String?>? note,
@@ -1155,6 +1207,7 @@ class HoldingsCompanion extends UpdateCompanion<HoldingRow> {
       costPrice: costPrice ?? this.costPrice,
       latestPrice: latestPrice ?? this.latestPrice,
       currency: currency ?? this.currency,
+      costFxRate: costFxRate ?? this.costFxRate,
       purchaseDate: purchaseDate ?? this.purchaseDate,
       riskLevel: riskLevel ?? this.riskLevel,
       note: note ?? this.note,
@@ -1196,6 +1249,9 @@ class HoldingsCompanion extends UpdateCompanion<HoldingRow> {
     if (currency.present) {
       map['currency'] = Variable<String>(currency.value);
     }
+    if (costFxRate.present) {
+      map['cost_fx_rate'] = Variable<double>(costFxRate.value);
+    }
     if (purchaseDate.present) {
       map['purchase_date'] = Variable<DateTime>(purchaseDate.value);
     }
@@ -1227,6 +1283,7 @@ class HoldingsCompanion extends UpdateCompanion<HoldingRow> {
           ..write('costPrice: $costPrice, ')
           ..write('latestPrice: $latestPrice, ')
           ..write('currency: $currency, ')
+          ..write('costFxRate: $costFxRate, ')
           ..write('purchaseDate: $purchaseDate, ')
           ..write('riskLevel: $riskLevel, ')
           ..write('note: $note, ')
@@ -4320,6 +4377,7 @@ typedef $$HoldingsTableCreateCompanionBuilder =
       Value<double> costPrice,
       Value<double> latestPrice,
       Value<String> currency,
+      Value<double?> costFxRate,
       Value<DateTime?> purchaseDate,
       Value<String?> riskLevel,
       Value<String?> note,
@@ -4338,6 +4396,7 @@ typedef $$HoldingsTableUpdateCompanionBuilder =
       Value<double> costPrice,
       Value<double> latestPrice,
       Value<String> currency,
+      Value<double?> costFxRate,
       Value<DateTime?> purchaseDate,
       Value<String?> riskLevel,
       Value<String?> note,
@@ -4418,6 +4477,11 @@ class $$HoldingsTableFilterComposer
 
   ColumnFilters<String> get currency => $composableBuilder(
     column: $table.currency,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<double> get costFxRate => $composableBuilder(
+    column: $table.costFxRate,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -4524,6 +4588,11 @@ class $$HoldingsTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<double> get costFxRate => $composableBuilder(
+    column: $table.costFxRate,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<DateTime> get purchaseDate => $composableBuilder(
     column: $table.purchaseDate,
     builder: (column) => ColumnOrderings(column),
@@ -4613,6 +4682,11 @@ class $$HoldingsTableAnnotationComposer
   GeneratedColumn<String> get currency =>
       $composableBuilder(column: $table.currency, builder: (column) => column);
 
+  GeneratedColumn<double> get costFxRate => $composableBuilder(
+    column: $table.costFxRate,
+    builder: (column) => column,
+  );
+
   GeneratedColumn<DateTime> get purchaseDate => $composableBuilder(
     column: $table.purchaseDate,
     builder: (column) => column,
@@ -4692,6 +4766,7 @@ class $$HoldingsTableTableManager
                 Value<double> costPrice = const Value.absent(),
                 Value<double> latestPrice = const Value.absent(),
                 Value<String> currency = const Value.absent(),
+                Value<double?> costFxRate = const Value.absent(),
                 Value<DateTime?> purchaseDate = const Value.absent(),
                 Value<String?> riskLevel = const Value.absent(),
                 Value<String?> note = const Value.absent(),
@@ -4708,6 +4783,7 @@ class $$HoldingsTableTableManager
                 costPrice: costPrice,
                 latestPrice: latestPrice,
                 currency: currency,
+                costFxRate: costFxRate,
                 purchaseDate: purchaseDate,
                 riskLevel: riskLevel,
                 note: note,
@@ -4726,6 +4802,7 @@ class $$HoldingsTableTableManager
                 Value<double> costPrice = const Value.absent(),
                 Value<double> latestPrice = const Value.absent(),
                 Value<String> currency = const Value.absent(),
+                Value<double?> costFxRate = const Value.absent(),
                 Value<DateTime?> purchaseDate = const Value.absent(),
                 Value<String?> riskLevel = const Value.absent(),
                 Value<String?> note = const Value.absent(),
@@ -4742,6 +4819,7 @@ class $$HoldingsTableTableManager
                 costPrice: costPrice,
                 latestPrice: latestPrice,
                 currency: currency,
+                costFxRate: costFxRate,
                 purchaseDate: purchaseDate,
                 riskLevel: riskLevel,
                 note: note,

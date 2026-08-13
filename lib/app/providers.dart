@@ -46,7 +46,10 @@ final marketServiceProvider = Provider<MarketService>(
 
 /// Historical net worth backfill engine.
 final historyBackfillServiceProvider = Provider<HistoryBackfillService>(
-  (ref) => HistoryBackfillService(ref.watch(daoProvider)),
+  (ref) => HistoryBackfillService(
+    ref.watch(daoProvider),
+    market: ref.watch(marketServiceProvider),
+  ),
 );
 
 // ---------------------------------------------------------------------------

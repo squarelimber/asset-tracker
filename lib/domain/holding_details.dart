@@ -151,9 +151,11 @@ class HoldingDetailService {
       final price = lookup?.priceOnOrBefore(key) ?? h.latestPrice;
       final rate = rateOf(h.currency);
       final value = h.quantity * price;
-      final cost = type.isAmountBased
-          ? (h.costPrice > 0 ? h.costPrice : h.quantity)
-          : h.quantity * h.costPrice;
+      // Cost converts at the recorded purchase rate when available.
+      final cost = (type.isAmountBased
+              ? (h.costPrice > 0 ? h.costPrice : h.quantity)
+              : h.quantity * h.costPrice) *
+          costRateOf(h, cnyRates);
 
       if (type == AssetType.liability) {
         liabilitiesCny += value * rate;

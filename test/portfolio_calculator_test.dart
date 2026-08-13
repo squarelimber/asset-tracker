@@ -12,6 +12,8 @@ HoldingRow _holding({
   double quantity = 1,
   double price = 100,
   double cost = 90,
+  String currency = 'CNY',
+  double? costFxRate,
 }) {
   return HoldingRow(
     id: id,
@@ -23,7 +25,8 @@ HoldingRow _holding({
     quantity: quantity,
     costPrice: cost,
     latestPrice: price,
-    currency: 'CNY',
+    currency: currency,
+    costFxRate: costFxRate,
     note: null,
     createdAt: DateTime(2026, 1, 1),
     updatedAt: DateTime(2026, 1, 1),
@@ -170,5 +173,43 @@ void main() {
     final s = calc.compute([manual]);
     final low = s.riskBreakdown.firstWhere((b) => b.risk == RiskLevel.low);
     expect(low.marketValue, 300);
+  });
+
+  test('foreign cost uses the recorded purchase rate, value the current rate', () {
+    final s = calc.compute(
+      [
+        _holding(
+          id: 1,
+          type: 'mutual_fund',
+          quantity: 100,
+          price: 2,
+          cost: 1.5,
+          currency: 'USD',
+          costFxRate: 6.95,
+        ),
+      ],
+      cnyRates: const {'USD': 7.2},
+    );
+    // Value: 100 x 2 x 7.2 = 1440; cost: 100 x 1.5 x 6.95 = 1042.5.
+    expect(s.totalAssets, closeTo(1440, 1e-6));
+    expect(s.totalCost, closeTo(1042.5, 1e-6));
+    expect(s.profit, closeTo(397.5, 1e-6));
+  });
+
+  test('foreign cost falls back to the current rate without a recorded one', () {
+    final s = calc.compute(
+      [
+        _holding(
+          id: 1,
+          type: 'mutual_fund',
+          quantity: 100,
+          price: 2,
+          cost: 1.5,
+          currency: 'USD',
+        ),
+      ],
+      cnyRates: const {'USD': 7.2},
+    );
+    expect(s.totalCost, closeTo(1080, 1e-6)); // 100 x 1.5 x 7.2
   });
 }
