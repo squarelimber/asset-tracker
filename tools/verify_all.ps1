@@ -6,6 +6,12 @@
 #                                          # files changed (git diff vs HEAD)
 #   .\tools\verify_all.ps1 -Force          # always build every platform
 #
+# Optimizations:
+# - pub get runs exactly once; analyze/test/build all use --no-pub and
+#   --no-version-check (avoids 5x redundant dependency resolution)
+# - platform builds run in parallel (web/windows/android are independent
+#   toolchains), cutting wall-clock time to the slowest build
+#
 # Exit code 0 = all green; any failure stops the script.
 
 param(
@@ -19,7 +25,6 @@ param(
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 $flutter = 'C:\flutter\flutter\bin\flutter.bat'
-$failed = $false
 
 function Invoke-Step {
     param([string]$Name, [scriptblock]$Body)
@@ -27,7 +32,6 @@ function Invoke-Step {
     & $Body
     if ($LASTEXITCODE -ne 0) {
         Write-Host "FAILED: $Name" -ForegroundColor Red
-        $script:failed = $true
         exit 1
     }
 }
@@ -59,39 +63,64 @@ function Should-Build([string]$platform) {
     return $true
 }
 
-Invoke-Step 'flutter analyze' { & $flutter analyze 2>&1 | Out-Host }
+# Resolve dependencies exactly once.
+Invoke-Step 'flutter pub get' {
+    & $flutter --no-version-check pub get 2>&1 | Out-Null
+}
 
-Invoke-Step 'flutter test' { & $flutter test 2>&1 | Out-Host }
+Invoke-Step 'flutter analyze' {
+    & $flutter --no-version-check analyze --no-pub 2>&1 | Out-Host
+}
+
+Invoke-Step 'flutter test' {
+    & $flutter --no-version-check test --no-pub 2>&1 | Out-Host
+}
+
+# Platform builds in parallel jobs; logs go to %TEMP%\verify_all_logs.
+$jobsDir = Join-Path $env:TEMP 'verify_all_logs'
+New-Item -ItemType Directory -Force -Path $jobsDir | Out-Null
+$jobs = @()
 
 if (-not $SkipWeb -and (Should-Build 'web')) {
-    Invoke-Step 'build web (wasm release)' {
-        Push-Location $root
-        try { & $flutter build web --wasm --release --base-href=/asset-tracker/ 2>&1 | Out-Host }
-        finally { Pop-Location }
-    }
-} else {
-    Write-Host 'SKIP web build' -ForegroundColor Yellow
+    $jobs += Start-Job -Name web -ScriptBlock {
+        param($f, $r, $log)
+        Set-Location $r
+        & $f --no-version-check build web --wasm --release --base-href=/asset-tracker/ *> $log
+        $LASTEXITCODE
+    } -ArgumentList $flutter, $root, "$jobsDir\web.log"
 }
 
 if (-not $SkipWindows -and (Should-Build 'windows')) {
-    Invoke-Step 'build windows (release)' {
-        Push-Location $root
-        try { & $flutter build windows --release 2>&1 | Out-Host }
-        finally { Pop-Location }
-    }
-} else {
-    Write-Host 'SKIP windows build' -ForegroundColor Yellow
+    $jobs += Start-Job -Name windows -ScriptBlock {
+        param($f, $r, $log)
+        Set-Location $r
+        & $f --no-version-check build windows --release *> $log
+        $LASTEXITCODE
+    } -ArgumentList $flutter, $root, "$jobsDir\windows.log"
 }
 
 if (-not $SkipAndroid -and (Should-Build 'android')) {
-    Invoke-Step 'build android (debug apk)' {
-        Push-Location $root
-        try { & $flutter build apk --debug 2>&1 | Out-Host }
-        finally { Pop-Location }
-    }
-} else {
-    Write-Host 'SKIP android build' -ForegroundColor Yellow
+    $jobs += Start-Job -Name android -ScriptBlock {
+        param($f, $r, $log)
+        Set-Location $r
+        & $f --no-version-check build apk --debug *> $log
+        $LASTEXITCODE
+    } -ArgumentList $flutter, $root, "$jobsDir\android.log"
 }
+
+$failed = $false
+foreach ($j in $jobs) {
+    $result = Receive-Job -Job $j -Wait -AutoRemoveJob
+    $code = if ($result.Count -gt 0) { $result[-1] } else { 0 }
+    if ($code -ne 0) {
+        Write-Host "FAILED: $($j.Name) build (exit $code)" -ForegroundColor Red
+        Get-Content "$jobsDir\$($j.Name).log" -Tail 25 | Out-Host
+        $failed = $true
+    } else {
+        Write-Host "OK: $($j.Name) build" -ForegroundColor Green
+    }
+}
+if ($failed) { exit 1 }
 
 Write-Host "`nAll checks passed." -ForegroundColor Green
 exit 0
