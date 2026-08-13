@@ -2,19 +2,19 @@
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../app/providers.dart';
 import '../../app/theme.dart';
-import '../../core/enums.dart';
 import '../../core/formats.dart';
 import '../../data/database.dart';
-import '../../domain/holding_details.dart';
 import '../../domain/portfolio_calculator.dart';
 import '../../domain/range_stats.dart';
 import '../../domain/rate_series.dart';
 import '../../services/market/history_lookup.dart';
 import '../../services/market/history_source.dart';
 import '../../services/market/tencent_history_source.dart';
+import 'day_detail_sheet.dart';
 
 enum _AllocationView { byType, byRisk }
 
@@ -422,11 +422,17 @@ class _NetWorthChartState extends ConsumerState<NetWorthChart> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Toolbar: title + view toggle + benchmark chip.
+            // Toolbar: title + view toggle + benchmark chip + calendar.
             Row(
               children: [
                 Expanded(
                   child: Text('资产走势', style: Theme.of(context).textTheme.titleMedium),
+                ),
+                IconButton(
+                  tooltip: '收益日历',
+                  visualDensity: VisualDensity.compact,
+                  icon: const Icon(Icons.calendar_month_outlined, size: 20),
+                  onPressed: () => context.push('/earnings-calendar'),
                 ),
                 SegmentedButton<_TrendView>(
                   segments: const [
@@ -643,134 +649,7 @@ class _NetWorthChartState extends ConsumerState<NetWorthChart> {
       context: context,
       showDragHandle: true,
       isScrollControlled: true,
-      builder: (context) => _DayDetailSheet(date: day),
-    );
-  }
-}
-
-class _DayDetailSheet extends ConsumerWidget {
-  const _DayDetailSheet({required this.date});
-
-  final DateTime date;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final detail = ref.watch(_dayDetailProvider(date));
-    final hideAmounts = ref.watch(hideAmountsProvider);
-    return SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
-        child: detail.when(
-          data: (d) {
-            if (d == null) {
-              return const SizedBox(height: 120, child: Center(child: Text('无数据')));
-            }
-            return Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  '${Formats.date(date)} 持仓明细',
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  '当日总资产（折算人民币）${hideAmounts ? Formats.masked() : Formats.money(d.totalValue)}',
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
-                const SizedBox(height: 12),
-                Flexible(
-                  child: ListView(
-                    shrinkWrap: true,
-                    children: [
-                      for (final item in d.items)
-                        _DetailRow(item: item, hideAmounts: hideAmounts),
-                      const Divider(height: 16),
-                      Text(
-                        '点击走势图任意日期可查看当天明细',
-                        style: Theme.of(context).textTheme.bodySmall,
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            );
-          },
-          loading: () => const SizedBox(
-            height: 160,
-            child: Center(child: CircularProgressIndicator()),
-          ),
-          error: (e, _) => SizedBox(
-            height: 120,
-            child: Center(child: Text('加载失败: $e')),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-final _dayDetailProvider = FutureProvider.autoDispose.family<DayDetail?, DateTime>(
-  (ref, day) async {
-    final rates = await ref.watch(cnyRatesProvider.future);
-    return ref.watch(holdingDetailServiceProvider).compute(day, cnyRates: rates);
-  },
-);class _DetailRow extends StatelessWidget {
-  const _DetailRow({required this.item, required this.hideAmounts});
-
-  final HoldingDayDetail item;
-  final bool hideAmounts;
-
-  @override
-  Widget build(BuildContext context) {
-    final type = AssetType.fromStorage(item.holding.assetType);
-    String money(double v) => hideAmounts ? Formats.masked() : Formats.money(v);
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
-      child: Row(
-        children: [
-          Icon(type.icon, size: 18, color: type.color),
-          const SizedBox(width: 10),
-          Expanded(
-            flex: 2,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  item.holding.name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.bodyMedium,
-                ),
-                Text(
-                  type == AssetType.liability
-                      ? '负债'
-                      : '单价 ${Formats.smartNum(item.price)} · 成本 ${money(item.costCny)}',
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
-              ],
-            ),
-          ),
-          Expanded(
-            flex: 1,
-            child: Text(
-              money(item.marketValueCny),
-              textAlign: TextAlign.end,
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    fontWeight: FontWeight.w600,
-                  ),
-            ),
-          ),
-          SizedBox(
-            width: 56,
-            child: Text(
-              '${(item.ratio * 100).toStringAsFixed(1)}%',
-              textAlign: TextAlign.end,
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
-          ),
-        ],
-      ),
+      builder: (context) => DayDetailSheet(date: day),
     );
   }
 }
