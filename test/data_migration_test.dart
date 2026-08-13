@@ -251,11 +251,13 @@ void main() {
     expect(h.costPrice, closeTo(10000, 1e-9)); // quantity + net outflow
   });
 
-  test('512480 holdings get the 1:2 split fix and dirty marker', () async {
+  test('512480 v8+v9 net effect leaves already-adjusted holdings unchanged', () async {
     final accountId = await dao.createAccount(AccountsCompanion.insert(
       name: '测试',
       type: 'general',
     ));
+    // Post-split values: the v8 x2 fix (wrong for this data) is undone by
+    // the v9 rollback, so the final state equals the input.
     await dao.createHolding(HoldingsCompanion.insert(
       accountId: accountId,
       name: '半导体',
@@ -263,7 +265,7 @@ void main() {
       marketSource: const Value('sina'),
       symbol: const Value('sh512480'),
       quantity: const Value(109300),
-      costPrice: const Value(2.7),
+      costPrice: const Value(0.706),
       latestPrice: const Value(1.331),
     ));
     // Another holding must NOT be touched.
@@ -282,14 +284,41 @@ void main() {
 
     final holdings = await dao.getHoldings();
     final semi = holdings.firstWhere((h) => h.name == '半导体');
-    expect(semi.quantity, 218600);
-    expect(semi.costPrice, closeTo(1.35, 1e-9));
+    expect(semi.quantity, 109300);
+    expect(semi.costPrice, closeTo(0.706, 1e-9));
     final fund = holdings.firstWhere((h) => h.name == '基金');
     expect(fund.quantity, 100); // untouched
     expect(fund.costPrice, 2.5);
-    // History rebuild marker set so snapshots reflect the split.
+    // History rebuild marker set so snapshots reflect the corrected values.
     final dirty = await dao.getSetting('history_sync_dirty');
     expect(dirty, '1');
+  });
+
+  test('v9 rollback restores an already post-split 512480 holding', () async {
+    final accountId = await dao.createAccount(AccountsCompanion.insert(
+      name: '测试',
+      type: 'general',
+    ));
+    // Post-split values (user had already updated before the v8 fix ran).
+    await dao.createHolding(HoldingsCompanion.insert(
+      accountId: accountId,
+      name: '半导体',
+      assetType: 'etf',
+      marketSource: const Value('sina'),
+      symbol: const Value('sh512480'),
+      quantity: const Value(109300),
+      costPrice: const Value(0.706),
+      latestPrice: const Value(1.068),
+    ));
+
+    // First run applies v8 (wrong for this data) then v9 restores it.
+    await DataMigrationService(db).run();
+
+    final h = (await dao.getHolding(
+      (await dao.getHoldings()).single.id,
+    ))!;
+    expect(h.quantity, 109300); // v8 doubled, v9 rolled back
+    expect(h.costPrice, closeTo(0.706, 1e-9));
   });
 
   test('rebuild drops the legacy UNIQUE(symbol) constraint', () async {
