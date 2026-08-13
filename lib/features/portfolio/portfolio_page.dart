@@ -130,6 +130,17 @@ class _PortfolioPageState extends ConsumerState<PortfolioPage> {
       appBar: AppBar(
         title: const Text('总览'),
         actions: [
+          Consumer(builder: (context, ref, _) {
+            final hidden = ref.watch(hideAmountsProvider);
+            return IconButton(
+              tooltip: hidden ? '显示金额' : '隐藏金额',
+              onPressed: () =>
+                  ref.read(hideAmountsProvider.notifier).state = !hidden,
+              icon: Icon(hidden
+                  ? Icons.visibility_off_outlined
+                  : Icons.visibility_outlined),
+            );
+          }),
           ValueListenableBuilder<bool>(
             valueListenable: _refreshing,
             builder: (context, refreshing, _) => IconButton(
@@ -194,15 +205,17 @@ class _PortfolioPageState extends ConsumerState<PortfolioPage> {
   }
 }
 
-class _SummaryHeader extends StatelessWidget {
+class _SummaryHeader extends ConsumerWidget {
   const _SummaryHeader({required this.summary});
 
   final PortfolioSummary summary;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final netWorth = summary.netWorth;
+    final hidden = ref.watch(hideAmountsProvider);
     final changeColor = context.changeColor(summary.todayChange);
+    String amount(double v) => hidden ? Formats.masked() : '¥${Formats.amount(v)}';
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(20),
@@ -212,7 +225,7 @@ class _SummaryHeader extends StatelessWidget {
             Text('净资产', style: Theme.of(context).textTheme.bodyMedium),
             const SizedBox(height: 4),
             Text(
-              '¥${Formats.amount(netWorth)}',
+              amount(netWorth),
               style: Theme.of(context).textTheme.headlineMedium,
             ),
             const SizedBox(height: 12),
@@ -222,32 +235,32 @@ class _SummaryHeader extends StatelessWidget {
               children: [
                 _Chip(
                   label: '今日 ${summary.todayChangePct == null ? '--' : Formats.pct(summary.todayChangePct!)}',
-                  value: '${summary.todayChange >= 0 ? '+' : ''}¥${Formats.amount(summary.todayChange)}',
+                  value: '${summary.todayChange >= 0 ? '+' : ''}${amount(summary.todayChange)}',
                   color: changeColor,
                 ),
                 _Chip(
                   label: '累计收益 ${Formats.pct(summary.profitPct)}',
-                  value: '${summary.profit >= 0 ? '+' : ''}¥${Formats.amount(summary.profit)}',
+                  value: '${summary.profit >= 0 ? '+' : ''}${amount(summary.profit)}',
                   color: context.changeColor(summary.profit),
                 ),
                 if (summary.realizedProfit != 0)
                   _Chip(
                     label: '已落袋收益',
                     value:
-                        '${summary.realizedProfit >= 0 ? '+' : ''}¥${Formats.amount(summary.realizedProfit)}',
+                        '${summary.realizedProfit >= 0 ? '+' : ''}${amount(summary.realizedProfit)}',
                     color: context.changeColor(summary.realizedProfit),
                   ),
                 if (summary.unrealizedProfit != 0)
                   _Chip(
                     label: '当前浮盈',
                     value:
-                        '${summary.unrealizedProfit >= 0 ? '+' : ''}¥${Formats.amount(summary.unrealizedProfit)}',
+                        '${summary.unrealizedProfit >= 0 ? '+' : ''}${amount(summary.unrealizedProfit)}',
                     color: context.changeColor(summary.unrealizedProfit),
                   ),
                 if (summary.totalLiabilities > 0)
                   _Chip(
                     label: '负债',
-                    value: '¥${Formats.amount(summary.totalLiabilities)}',
+                    value: amount(summary.totalLiabilities),
                     color: Theme.of(context).colorScheme.outline,
                   ),
               ],

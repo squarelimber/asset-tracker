@@ -379,6 +379,54 @@ void main() {
       expect(h.quantity, 1100);
       expect(h.costPrice, 900); // counts as gain
     });
+
+    test('dividend reduces the share holding cost (cost-basis method)', () async {
+      final acc = await addAccount('A');
+      final fund = await addHolding(
+        accountId: acc, name: '基金', type: AssetType.mutualFund,
+        quantity: 1000, costPrice: 1.5, latestPrice: 1.5,
+      );
+      final cash = await addHolding(
+        accountId: acc, name: '现金', type: AssetType.bankDeposit,
+        quantity: 0, costPrice: 0, latestPrice: 1,
+      );
+      // 0.5/unit dividend: NAV drops 1.5 -> 1.0 ex-dividend.
+      await service.record(
+        accountId: acc, holdingId: fund, type: TransactionType.dividend,
+        amount: 500, cashTargetId: cash,
+      );
+      // Simulate the ex-dividend price drop.
+      await dao.updateHoldingPrice(fund, 1.0);
+      final f = (await dao.getHolding(fund))!;
+      // Cost 1.5 -> 1.0, so the return rate stays at 0 instead of -33%.
+      expect(f.costPrice, closeTo(1.0, 1e-9));
+      final rate =
+          RateSeriesCalculator.dailyRate(f.quantity * f.latestPrice, f.quantity * f.costPrice);
+      expect(rate, closeTo(0, 1e-9));
+      final c = (await dao.getHolding(cash))!;
+      expect(c.quantity, 500);
+    });
+
+    test('removing a dividend restores the share cost', () async {
+      final acc = await addAccount('A');
+      final fund = await addHolding(
+        accountId: acc, name: '基金', type: AssetType.mutualFund,
+        quantity: 1000, costPrice: 1.5, latestPrice: 1.5,
+      );
+      final cash = await addHolding(
+        accountId: acc, name: '现金', type: AssetType.bankDeposit,
+        quantity: 0, costPrice: 0, latestPrice: 1,
+      );
+      await service.record(
+        accountId: acc, holdingId: fund, type: TransactionType.dividend,
+        amount: 500, cashTargetId: cash,
+      );
+      final txnId = (await dao.getTransactions()).single.id;
+      await service.remove(txnId);
+      final f = (await dao.getHolding(fund))!;
+      expect(f.costPrice, closeTo(1.5, 1e-9));
+      expect((await dao.getHolding(cash))!.quantity, 0);
+    });
   });
 
   group('deleteHolding orphan cleanup', () {

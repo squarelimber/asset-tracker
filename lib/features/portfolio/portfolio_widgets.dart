@@ -48,6 +48,9 @@ class _AllocationCardState extends ConsumerState<AllocationCard> {
       );
     }
     final total = summary.totalAssets;
+    final hidden = ref.watch(hideAmountsProvider);
+    String amountText(double v) =>
+        hidden ? Formats.masked() : Formats.amountCompact(v);
 
     // Unified entry view: label + color + value + ratio.
     final entries = _view == _AllocationView.byType
@@ -57,7 +60,7 @@ class _AllocationCardState extends ConsumerState<AllocationCard> {
                 label: b.type.label,
                 color: b.type.color,
                 value: b.marketValue,
-                amount: Formats.amountCompact(b.marketValue),
+                amount: amountText(b.marketValue),
               ),
           ]
         : [
@@ -66,7 +69,7 @@ class _AllocationCardState extends ConsumerState<AllocationCard> {
                 label: b.risk.label,
                 color: b.risk.color,
                 value: b.marketValue,
-                amount: Formats.amountCompact(b.marketValue),
+                amount: amountText(b.marketValue),
               ),
           ];
 
@@ -146,7 +149,7 @@ class _AllocationCardState extends ConsumerState<AllocationCard> {
                         const SizedBox(height: 2),
                         Text(
                           selected == null
-                              ? Formats.amountCompact(total)
+                              ? amountText(total)
                               : selected.amount,
                           style: Theme.of(context).textTheme.titleMedium?.copyWith(
                                 fontWeight: FontWeight.w700,
@@ -528,6 +531,9 @@ class _NetWorthChartState extends ConsumerState<NetWorthChart> {
                     ? (rateDelta ?? 0) / 100
                     : (stats?.profitPct ?? 0);
                 final color = context.changeColor(mainValue);
+                final hideAmounts = ref.watch(hideAmountsProvider);
+                String moneyText(double v) =>
+                    hideAmounts ? Formats.masked() : Formats.money(v);
                 return Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -539,7 +545,7 @@ class _NetWorthChartState extends ConsumerState<NetWorthChart> {
                           Text(
                             isRate
                                 ? '${mainValue >= 0 ? '+' : ''}${Formats.pct(mainPct)}'
-                                : '${mainValue >= 0 ? '+' : ''}${Formats.money(mainValue)}',
+                                : '${mainValue >= 0 ? '+' : ''}${moneyText(mainValue)}',
                             style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                                   color: color,
                                   fontWeight: FontWeight.w700,
@@ -560,7 +566,7 @@ class _NetWorthChartState extends ConsumerState<NetWorthChart> {
                       const SizedBox(height: 4),
                       Text(
                         isRate
-                            ? '区间收益 ${stats.profit >= 0 ? '+' : ''}${Formats.money(stats.profit)}'
+                            ? '区间收益 ${stats.profit >= 0 ? '+' : ''}${moneyText(stats.profit)}'
                                 ' · 年化 ${rateAnnualized == null ? '--' : Formats.pct(rateAnnualized)} · ${stats.days} 天'
                             : '区间年化 ${stats.annualized == null ? '--' : Formats.pct(stats.annualized!)}'
                                 ' · ${stats.days} 天',
@@ -592,6 +598,7 @@ class _NetWorthChartState extends ConsumerState<NetWorthChart> {
                       list: list,
                       view: _view,
                       rates: rates,
+                      hideAmounts: hideAmounts,
                       benchmarks: {
                         for (final code in _benchSelected)
                           if (_benchData.containsKey(code))
@@ -649,6 +656,7 @@ class _DayDetailSheet extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final detail = ref.watch(_dayDetailProvider(date));
+    final hideAmounts = ref.watch(hideAmountsProvider);
     return SafeArea(
       child: Padding(
         padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
@@ -667,7 +675,7 @@ class _DayDetailSheet extends ConsumerWidget {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  '当日总资产（折算人民币）${Formats.money(d.totalValue)}',
+                  '当日总资产（折算人民币）${hideAmounts ? Formats.masked() : Formats.money(d.totalValue)}',
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
                 const SizedBox(height: 12),
@@ -676,7 +684,7 @@ class _DayDetailSheet extends ConsumerWidget {
                     shrinkWrap: true,
                     children: [
                       for (final item in d.items)
-                        _DetailRow(item: item),
+                        _DetailRow(item: item, hideAmounts: hideAmounts),
                       const Divider(height: 16),
                       Text(
                         '点击走势图任意日期可查看当天明细',
@@ -708,13 +716,15 @@ final _dayDetailProvider = FutureProvider.autoDispose.family<DayDetail?, DateTim
     return ref.watch(holdingDetailServiceProvider).compute(day, cnyRates: rates);
   },
 );class _DetailRow extends StatelessWidget {
-  const _DetailRow({required this.item});
+  const _DetailRow({required this.item, required this.hideAmounts});
 
   final HoldingDayDetail item;
+  final bool hideAmounts;
 
   @override
   Widget build(BuildContext context) {
     final type = AssetType.fromStorage(item.holding.assetType);
+    String money(double v) => hideAmounts ? Formats.masked() : Formats.money(v);
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6),
       child: Row(
@@ -735,7 +745,7 @@ final _dayDetailProvider = FutureProvider.autoDispose.family<DayDetail?, DateTim
                 Text(
                   type == AssetType.liability
                       ? '负债'
-                      : '单价 ${Formats.smartNum(item.price)} · 成本 ${Formats.money(item.costCny)}',
+                      : '单价 ${Formats.smartNum(item.price)} · 成本 ${money(item.costCny)}',
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
               ],
@@ -744,7 +754,7 @@ final _dayDetailProvider = FutureProvider.autoDispose.family<DayDetail?, DateTim
           Expanded(
             flex: 1,
             child: Text(
-              Formats.money(item.marketValueCny),
+              money(item.marketValueCny),
               textAlign: TextAlign.end,
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                     fontWeight: FontWeight.w600,
@@ -781,6 +791,7 @@ class _TrendChart extends StatelessWidget {
     required this.list,
     required this.view,
     required this.rates,
+    required this.hideAmounts,
     this.benchmarks = const {},
     this.onDayTap,
   });
@@ -792,6 +803,9 @@ class _TrendChart extends StatelessWidget {
 
   /// Daily return rates (%) aligned with [list] (return-rate view).
   final List<double> rates;
+
+  /// Privacy toggle: masks monetary labels and tooltips.
+  final bool hideAmounts;
 
   /// Selected benchmark indexes (code -> series).
   final Map<String, _BenchSeries> benchmarks;
@@ -850,7 +864,14 @@ class _TrendChart extends StatelessWidget {
     final longRange = list.length > 250;
     String valueText(double v) => isRate
         ? '${v >= 0 ? '+' : ''}${Formats.pct(v / 100)}'
-        : Formats.amountCompact(v);
+        : hideAmounts
+            ? Formats.masked()
+            : Formats.amountCompact(v);
+    String tooltipText(double v) => isRate
+        ? valueText(v)
+        : hideAmounts
+            ? Formats.masked()
+            : Formats.money(v);
 
     return SizedBox(
       height: 240,
@@ -915,7 +936,7 @@ class _TrendChart extends StatelessWidget {
                 for (final spot in spots)
                   LineTooltipItem(
                     '${Formats.date(DateTime.parse(list[spot.x.toInt()].date))}\n'
-                    '${isRate ? valueText(spot.y) : Formats.money(spot.y)}',
+                    '${tooltipText(spot.y)}',
                     TextStyle(
                       color: Theme.of(context).colorScheme.onSurface,
                       fontWeight: FontWeight.w600,

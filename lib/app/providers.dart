@@ -11,6 +11,10 @@ import '../services/market/market_service.dart';
 /// App-wide database instance.
 final databaseProvider = Provider<AppDatabase>((ref) => AppDatabase());
 
+/// Privacy toggle: hides monetary amounts on the portfolio page.
+/// Defaults to hidden; resets on every launch (not persisted).
+final hideAmountsProvider = StateProvider<bool>((ref) => true);
+
 /// Data access layer.
 final daoProvider = Provider<AssetDao>((ref) => AssetDao(ref.watch(databaseProvider)));
 
