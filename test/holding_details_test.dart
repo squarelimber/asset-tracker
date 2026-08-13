@@ -186,4 +186,82 @@ void main() {
     expect(usd.marketValueCny, closeTo(7200, 1e-6));
     expect(usd.ratio, closeTo(7200 / 9200, 1e-9));
   });
+
+  test('day change is computed against the previous trading day', () async {
+    await addHolding(
+      name: '基金A', type: AssetType.mutualFund,
+      quantity: 100, costPrice: 2.0, latestPrice: 2.2, symbol: '110022',
+    );
+    await addHolding(
+      name: '基金B', type: AssetType.mutualFund,
+      quantity: 50, costPrice: 1.0, latestPrice: 1.1, symbol: '005827',
+    );
+    final fake = _FakeHistorySource();
+    fake.data['110022'] = {
+      _FakeHistorySource.key(DateTime(2026, 7, 1)): 2.0, // prev day
+      _FakeHistorySource.key(DateTime(2026, 7, 2)): 2.2, // day
+    };
+    fake.data['005827'] = {
+      _FakeHistorySource.key(DateTime(2026, 7, 1)): 1.2,
+      _FakeHistorySource.key(DateTime(2026, 7, 2)): 1.1, // dropped
+    };
+
+    final service = HoldingDetailService(dao, sources: {MarketSource.eastmoney: fake});
+    final detail = await service.compute(DateTime(2026, 7, 2));
+
+    final a = detail!.items.firstWhere((i) => i.holding.name == '基金A');
+    expect(a.dayChange, closeTo(20, 1e-9)); // (2.2-2.0)*100
+    expect(a.dayChangePct, closeTo(0.1, 1e-9)); // +10%
+    final b = detail.items.firstWhere((i) => i.holding.name == '基金B');
+    expect(b.dayChange, closeTo(-5, 1e-9)); // (1.1-1.2)*50
+    expect(b.dayChangePct, closeTo(-0.0833333, 1e-6));
+  });
+
+  test('items sort by day change percentage descending, nulls last', () async {
+    await addHolding(
+      name: '基金A', type: AssetType.mutualFund,
+      quantity: 100, costPrice: 2.0, latestPrice: 2.2, symbol: '110022',
+    );
+    await addHolding(
+      name: '基金B', type: AssetType.mutualFund,
+      quantity: 50, costPrice: 1.0, latestPrice: 1.1, symbol: '005827',
+    );
+    await addHolding(
+      name: '现金', type: AssetType.bankDeposit,
+      quantity: 5000, costPrice: 5000, latestPrice: 1,
+    );
+    final fake = _FakeHistorySource();
+    fake.data['110022'] = {
+      _FakeHistorySource.key(DateTime(2026, 7, 1)): 2.0,
+      _FakeHistorySource.key(DateTime(2026, 7, 2)): 2.2,
+    };
+    fake.data['005827'] = {
+      _FakeHistorySource.key(DateTime(2026, 7, 1)): 1.2,
+      _FakeHistorySource.key(DateTime(2026, 7, 2)): 1.1,
+    };
+
+    final service = HoldingDetailService(dao, sources: {MarketSource.eastmoney: fake});
+    final detail = await service.compute(DateTime(2026, 7, 2));
+
+    final names = detail!.items.map((i) => i.holding.name).toList();
+    expect(names, ['基金A', '基金B', '现金']); // +10%, -8.3%, no baseline
+  });
+
+  test('purchase day has no day change baseline', () async {
+    await addHolding(
+      name: '新基金', type: AssetType.mutualFund,
+      quantity: 100, costPrice: 2.0, latestPrice: 2.0, symbol: '110022',
+      purchaseDate: DateTime(2026, 7, 2),
+    );
+    final fake = _FakeHistorySource();
+    fake.data['110022'] = {
+      _FakeHistorySource.key(DateTime(2026, 7, 2)): 2.0, // only the buy day
+    };
+    final service = HoldingDetailService(dao, sources: {MarketSource.eastmoney: fake});
+    final detail = await service.compute(DateTime(2026, 7, 2));
+    final item = detail!.items.single;
+    expect(item.prevPrice, isNull);
+    expect(item.dayChange, isNull);
+    expect(item.dayChangePct, isNull);
+  });
 }

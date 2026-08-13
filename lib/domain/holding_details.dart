@@ -16,6 +16,9 @@ class HoldingDayDetail {
     required this.cost,
     required this.ratio,
     this.cnyRate = 1,
+    this.prevPrice,
+    this.dayChange,
+    this.dayChangePct,
   });
 
   final HoldingRow holding;
@@ -36,6 +39,17 @@ class HoldingDayDetail {
 
   /// CNY per unit of the holding's currency (1 for CNY).
   final double cnyRate;
+
+  /// The previous trading day's price (null when there is no baseline,
+  /// e.g. the purchase day).
+  final double? prevPrice;
+
+  /// Day change in the holding's own currency: (price - prevPrice) x qty.
+  /// Null without a baseline (purchase day, amount-based, liabilities).
+  final double? dayChange;
+
+  /// Day change as a fraction of the previous price (0.01 = +1%).
+  final double? dayChangePct;
 
   double get profit => marketValue - cost;
 
@@ -157,6 +171,23 @@ class HoldingDetailService {
               : h.quantity * h.costPrice) *
           costRateOf(h, cnyRates);
 
+      // Day change: price vs the previous trading day (only meaningful for
+      // market-linked holdings; amount-based assets and liabilities have no
+      // price series).
+      double? prevPrice;
+      double? dayChange;
+      double? dayChangePct;
+      if (!type.isAmountBased && type != AssetType.liability) {
+        final prevDay = day.subtract(const Duration(days: 1));
+        final prevKey = todayKey(prevDay);
+        final prev = lookup?.priceOnOrBefore(prevKey);
+        if (prev != null && prev > 0 && price > 0) {
+          prevPrice = prev;
+          dayChange = (price - prev) * h.quantity;
+          dayChangePct = (price - prev) / prev;
+        }
+      }
+
       if (type == AssetType.liability) {
         liabilitiesCny += value * rate;
       } else {
@@ -169,6 +200,9 @@ class HoldingDetailService {
         cost: cost,
         cnyRate: rate,
         ratio: 0,
+        prevPrice: prevPrice,
+        dayChange: dayChange,
+        dayChangePct: dayChangePct,
       ));
     }
 
@@ -182,10 +216,22 @@ class HoldingDetailService {
             cost: it.cost,
             cnyRate: it.cnyRate,
             ratio: assetsCny == 0 ? 0 : it.marketValueCny / assetsCny,
+            prevPrice: it.prevPrice,
+            dayChange: it.dayChange,
+            dayChangePct: it.dayChangePct,
           )
         else
           it,
-    ];
+    ]..sort((a, b) {
+        // Sort by day change percentage descending; entries without a
+        // baseline (purchase day, amount-based, liabilities) go last.
+        final ap = a.dayChangePct;
+        final bp = b.dayChangePct;
+        if (ap == null && bp == null) return 0;
+        if (ap == null) return 1;
+        if (bp == null) return -1;
+        return bp.compareTo(ap);
+      });
     if (items.isEmpty) return null;
 
     final detail = DayDetail(
