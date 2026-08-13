@@ -76,6 +76,7 @@ class BackupService {
         }
         for (final a in accounts) {
           await _dao.createAccount(AccountsCompanion.insert(
+            id: _intOrAbsent(a['id']),
             name: a['name']?.toString() ?? '',
             type: a['type']?.toString() ?? 'cash',
             currency: Value(a['currency']?.toString() ?? 'CNY'),
@@ -86,6 +87,7 @@ class BackupService {
         }
         for (final h in holdings) {
           await _dao.createHolding(HoldingsCompanion.insert(
+            id: _intOrAbsent(h['id']),
             accountId: (h['accountId'] as num?)?.toInt() ?? 0,
             name: h['name']?.toString() ?? '',
             assetType: h['assetType']?.toString() ?? 'cash',
@@ -110,10 +112,17 @@ class BackupService {
         }
         for (final t in transactions) {
           await _dao.createTransaction(TransactionsCompanion.insert(
+            id: _intOrAbsent(t['id']),
             accountId: (t['accountId'] as num?)?.toInt() ?? 0,
             holdingId: t['holdingId'] == null
                 ? const Value.absent()
                 : Value((t['holdingId'] as num).toInt()),
+            cashSourceId: t['cashSourceId'] == null
+                ? const Value.absent()
+                : Value((t['cashSourceId'] as num).toInt()),
+            cashTargetId: t['cashTargetId'] == null
+                ? const Value.absent()
+                : Value((t['cashTargetId'] as num).toInt()),
             type: t['type']?.toString() ?? 'transfer_in',
             quantity: t['quantity'] == null
                 ? const Value.absent()
@@ -127,6 +136,9 @@ class BackupService {
             note: t['note'] == null
                 ? const Value.absent()
                 : Value(t['note'].toString()),
+            costMoved: t['costMoved'] == null
+                ? const Value.absent()
+                : Value(t['costMoved'] == true),
           ));
         }
         for (final s in snapshots) {
@@ -164,6 +176,13 @@ class BackupService {
     return value.whereType<Map<String, dynamic>>().toList();
   }
 
+  /// Original row id from a backup entry; backups created before the id
+  /// fields were added fall back to auto-increment.
+  static Value<int> _intOrAbsent(Object? value) {
+    if (value is num) return Value(value.toInt());
+    return const Value.absent();
+  }
+
   static DateTime? _parseDate(Object? value) {
     if (value is! String) return null;
     return DateTime.tryParse(value);
@@ -179,6 +198,7 @@ class BackupService {
       };
 
   static Map<String, dynamic> _holdingToJson(HoldingRow h) => {
+        'id': h.id,
         'accountId': h.accountId,
         'name': h.name,
         'assetType': h.assetType,
@@ -194,8 +214,11 @@ class BackupService {
       };
 
   static Map<String, dynamic> _transactionToJson(TransactionRow t) => {
+        'id': t.id,
         'accountId': t.accountId,
         'holdingId': t.holdingId,
+        'cashSourceId': t.cashSourceId,
+        'cashTargetId': t.cashTargetId,
         'type': t.type,
         'quantity': t.quantity,
         'price': t.price,
@@ -203,6 +226,7 @@ class BackupService {
         'currency': t.currency,
         'occurredAt': t.occurredAt.toIso8601String(),
         'note': t.note,
+        'costMoved': t.costMoved,
       };
 
   static Map<String, dynamic> _snapshotToJson(SnapshotRow s) => {
