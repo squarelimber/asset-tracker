@@ -430,8 +430,7 @@ class _NetWorthChartState extends ConsumerState<NetWorthChart> {
                 ),
                 IconButton(
                   tooltip: '收益日历',
-                  visualDensity: VisualDensity.compact,
-                  icon: const Icon(Icons.calendar_month_outlined, size: 20),
+                  icon: const Icon(Icons.event_note_outlined, size: 22),
                   onPressed: () => context.push('/earnings-calendar'),
                 ),
                 SegmentedButton<_TrendView>(

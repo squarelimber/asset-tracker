@@ -123,9 +123,7 @@ class _CalendarBody extends StatelessWidget {
                   child: Center(
                     child: Text(
                       label,
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: Theme.of(context).colorScheme.outline,
-                          ),
+                      style: Theme.of(context).textTheme.bodyMedium,
                     ),
                   ),
                 ),
@@ -198,11 +196,11 @@ class _MonthSummary extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('本月收益', style: Theme.of(context).textTheme.bodySmall),
+                  Text('本月收益', style: Theme.of(context).textTheme.bodyMedium),
                   const SizedBox(height: 4),
                   Text(
                     '${month.total >= 0 ? '+' : ''}¥${Formats.amount(month.total)}',
-                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                           color: context.changeColor(month.total),
                           fontWeight: FontWeight.w700,
                         ),
@@ -213,11 +211,11 @@ class _MonthSummary extends StatelessWidget {
             Column(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
-                Text('月收益率', style: Theme.of(context).textTheme.bodySmall),
+                Text('月收益率', style: Theme.of(context).textTheme.bodyMedium),
                 const SizedBox(height: 4),
                 Text(
                   rate == null ? '--' : Formats.pct(rate),
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
                         color: rate == null
                             ? Theme.of(context).colorScheme.outline
                             : context.changeColor(rate),
@@ -255,8 +253,8 @@ class _DayCell extends StatelessWidget {
                 builder: (context) => DayDetailSheet(date: date),
               ),
       child: Container(
-        margin: const EdgeInsets.all(2),
-        padding: const EdgeInsets.symmetric(vertical: 6),
+        margin: const EdgeInsets.all(3),
+        padding: const EdgeInsets.symmetric(vertical: 8),
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(10),
           color: isToday
@@ -268,7 +266,7 @@ class _DayCell extends StatelessWidget {
           children: [
             Text(
               '$day',
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                     fontWeight: isToday ? FontWeight.w700 : null,
                   ),
             ),
@@ -282,7 +280,7 @@ class _DayCell extends StatelessWidget {
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
-                fontSize: 10,
+                fontSize: 12.5,
                 fontWeight: FontWeight.w600,
                 color: hasEarning
                     ? context.changeColor(earning!.profit)
