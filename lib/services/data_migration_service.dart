@@ -40,6 +40,11 @@ class DataMigrationService {
   /// Fix quantity x2 and costPrice /2 once.
   static const _etfSplit512480 = 'etf_split_512480_v8';
 
+  /// Rollback for v8: the user's 512480 holding was already recorded with
+  /// post-split values, so the v8 x2 fix doubled it incorrectly. Restore
+  /// the original numbers (detected by the doubled-quantity signature).
+  static const _etfSplit512480Rollback = 'etf_split_512480_rollback_v9';
+
   /// Runs all pending one-time migrations. Safe to call on every launch.
   Future<void> run() async {
     await _migrateAmountBased();
@@ -48,6 +53,7 @@ class DataMigrationService {
     await _migrateLiabilityCost();
     await _migrateTransferCost();
     await _migrateEtfSplit512480();
+    await _rollbackEtfSplit512480();
   }
 
   /// SQLite cannot drop a UNIQUE constraint without rebuilding the table.
@@ -232,6 +238,38 @@ class DataMigrationService {
     await _setSetting(_etfSplit512480, '${DateTime.now().millisecondsSinceEpoch}');
     // The holdings changed; force a snapshot rebuild on the next visit so
     // the net worth history reflects the split correctly.
+    if (rows.isNotEmpty) {
+      await _db.into(_db.settings).insertOnConflictUpdate(
+        SettingsCompanion.insert(key: 'history_sync_dirty', value: const Value('1')),
+      );
+    }
+  }
+
+  /// Undoes [v8][_migrateEtfSplit512480] for holdings that were already
+  /// recorded post-split: the doubled-quantity signature (quantity above
+  /// 150k for this ETF) identifies the rows the v8 migration touched.
+  Future<void> _rollbackEtfSplit512480() async {
+    final marker = await _getSetting(_etfSplit512480Rollback);
+    if (marker != null) return;
+
+    final rows = await (_db.select(_db.holdings)
+          ..where((t) =>
+              t.symbol.equals('sh512480') & t.quantity.isBiggerThanValue(150000)))
+        .get();
+    for (final h in rows) {
+      final stmt = _db.update(_db.holdings)..where((t) => t.id.equals(h.id));
+      await stmt.write(
+        HoldingsCompanion(
+          quantity: Value(h.quantity / 2),
+          costPrice: Value(h.costPrice * 2),
+        ),
+      );
+    }
+
+    await _setSetting(
+      _etfSplit512480Rollback,
+      '${DateTime.now().millisecondsSinceEpoch}',
+    );
     if (rows.isNotEmpty) {
       await _db.into(_db.settings).insertOnConflictUpdate(
         SettingsCompanion.insert(key: 'history_sync_dirty', value: const Value('1')),
