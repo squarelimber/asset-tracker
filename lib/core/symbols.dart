@@ -50,3 +50,15 @@ double costRateOf(HoldingRow h, Map<String, double> cnyRates) {
   if (fx != null && fx > 0) return fx;
   return cnyRates[h.currency.toUpperCase()] ?? 1;
 }
+
+/// Whether the holding has no market source and its history should be
+/// smoothed by interpolation (bank wealth + cash-management types).
+/// Property and liabilities are excluded.
+bool isSmoothedHolding(HoldingRow h) {
+  final type = AssetType.fromStorage(h.assetType);
+  if (MarketSource.fromStorage(h.marketSource) != MarketSource.manual) {
+    return false;
+  }
+  if (type == AssetType.bankWealth) return true;
+  return type.isAmountBased;
+}

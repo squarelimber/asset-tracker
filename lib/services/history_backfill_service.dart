@@ -5,6 +5,7 @@ import '../core/formats.dart';
 import '../core/symbols.dart';
 import '../data/asset_dao.dart';
 import '../data/database.dart';
+import '../domain/smooth_history.dart';
 import 'market/history_lookup.dart';
 import 'market/history_source.dart';
 import 'market/market_service.dart';
@@ -110,10 +111,26 @@ class HistoryBackfillService {
         ? const <String, double>{}
         : await market.loadCnyRates(currencies);
 
-    // Fetch history per holding (in parallel).
+    // Fetch history per holding (in parallel). Holdings without a market
+    // source (bank wealth, cash management) get a smooth interpolated
+    // history instead of a fetched price series.
+    final smoothCalc = const SmoothHistoryCalculator();
+    final smoothValues = <int, Map<String, double>>{};
     final fillers = <int, HistoryPriceLookup>{};
     final futures = <Future<void>>[];
     for (final h in holdings) {
+      if (isSmoothedHolding(h)) {
+        if (AssetType.fromStorage(h.assetType).isAmountBased) {
+          final flows = await _dao.getTransactionsForHolding(h.id);
+          smoothValues[h.id] = smoothCalc.amountHistory(
+            h,
+            flows,
+            from: windowStart,
+            to: current,
+          );
+        }
+        continue;
+      }
       final source = MarketSource.fromStorage(h.marketSource);
       final adapter = _sources[source];
       if (adapter == null) continue;
@@ -136,7 +153,7 @@ class HistoryBackfillService {
       }());
     }
     await Future.wait(futures);
-    final coveredHoldings = fillers.length;
+    final coveredHoldings = fillers.length + smoothValues.length;
 
     final firstTimeRebuild = await _dao.getSetting(_backfillV3Marker) == null;
     final needFullRebuild = forceRebuild || firstTimeRebuild;
@@ -163,11 +180,27 @@ class HistoryBackfillService {
         // The holding did not exist yet on this day.
         if (day.isBefore(buyDay)) continue;
         final type = AssetType.fromStorage(h.assetType);
+        // Convert to CNY: market value at the current rate, cost at the
+        // recorded purchase rate (falling back to the current rate).
+        if (isSmoothedHolding(h)) {
+          final double value;
+          if (type.isAmountBased) {
+            value = smoothValues[h.id]?[key] ?? h.quantity;
+          } else {
+            final price = smoothCalc.sharePrice(h, day, windowStart, current);
+            value = h.quantity * price;
+          }
+          if (value > 0) hasPrice = true;
+          assets += value * valueRateOf(h, cnyRates);
+          cost += (type.isAmountBased
+                  ? (h.costPrice > 0 ? h.costPrice : h.quantity)
+                  : h.quantity * h.costPrice) *
+              costRateOf(h, cnyRates);
+          continue;
+        }
         final filler = fillers[h.id];
         final price = filler?.priceOnOrBefore(key) ?? h.latestPrice;
         if (price > 0) hasPrice = true;
-        // Convert to CNY: market value at the current rate, cost at the
-        // recorded purchase rate (falling back to the current rate).
         final value = h.quantity * price * valueRateOf(h, cnyRates);
         if (type == AssetType.liability) {
           liabilities += value;
