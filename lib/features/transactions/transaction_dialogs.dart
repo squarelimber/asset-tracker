@@ -33,7 +33,12 @@ Future<void> showHoldingTransactionDialog(
 
   // Available transaction types for this holding.
   final available = isShare
-      ? <TransactionType>[TransactionType.buy, TransactionType.sell, TransactionType.dividend]
+      ? <TransactionType>[
+          TransactionType.buy,
+          TransactionType.sell,
+          TransactionType.dividend,
+          TransactionType.split,
+        ]
       : isLiability
           ? <TransactionType>[
               TransactionType.consume,
@@ -65,7 +70,8 @@ Future<void> showHoldingTransactionDialog(
         t == TransactionType.expense ||
         t == TransactionType.transferIn ||
         t == TransactionType.transferOut ||
-        t == TransactionType.consume) {
+        t == TransactionType.consume ||
+        t == TransactionType.split) {
       if (amountCtrl.text.trim().isEmpty) return '请填写金额';
       if ((t == TransactionType.transferIn ||
               t == TransactionType.transferOut) &&
@@ -101,7 +107,9 @@ Future<void> showHoldingTransactionDialog(
               ),
             ),
             const SizedBox(height: 16),
-            if (isShare && txnType.value != TransactionType.dividend) ...[
+            if (isShare &&
+                txnType.value != TransactionType.dividend &&
+                txnType.value != TransactionType.split) ...[
               TextField(
                 controller: qtyCtrl,
                 keyboardType: const TextInputType.numberWithOptions(decimal: true),
@@ -146,14 +154,19 @@ Future<void> showHoldingTransactionDialog(
                     TransactionType.transferIn => '转入金额',
                     TransactionType.transferOut => '转出金额',
                     TransactionType.consume => '消费金额',
+                    TransactionType.split => '折算比例',
                     _ => '金额',
                   },
+                  hintText: txnType.value == TransactionType.split
+                      ? '如 2 = 1 份拆成 2 份'
+                      : null,
                 ),
               ),
             ],
             const SizedBox(height: 12),
             if (moneyHoldings.isNotEmpty &&
-                txnType.value != TransactionType.consume) ...[
+                txnType.value != TransactionType.consume &&
+                txnType.value != TransactionType.split) ...[
               ValueListenableBuilder<int?>(
                 valueListenable: cashId,
                 builder: (context, value, _) => DropdownButtonFormField<int>(
@@ -207,12 +220,26 @@ Future<void> showHoldingTransactionDialog(
             final qty = double.tryParse(qtyCtrl.text.trim());
             final price = double.tryParse(priceCtrl.text.trim());
             final t = txnType.value;
+            if (t == TransactionType.split && amount <= 0) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('折算比例必须大于 0')),
+              );
+              return;
+            }
             final result = await ref.read(transactionServiceProvider).record(
               accountId: holding.accountId,
               holdingId: (isShare || t == TransactionType.consume) ? holding.id : null,
               type: t,
-              quantity: isShare && t != TransactionType.dividend ? qty : null,
-              price: isShare && t != TransactionType.dividend ? price : null,
+              quantity: isShare &&
+                      t != TransactionType.dividend &&
+                      t != TransactionType.split
+                  ? qty
+                  : null,
+              price: isShare &&
+                      t != TransactionType.dividend &&
+                      t != TransactionType.split
+                  ? price
+                  : null,
               amount: amount,
               cashSourceId: switch (t) {
                 TransactionType.buy => cashId.value,

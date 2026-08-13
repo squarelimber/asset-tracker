@@ -251,6 +251,47 @@ void main() {
     expect(h.costPrice, closeTo(10000, 1e-9)); // quantity + net outflow
   });
 
+  test('512480 holdings get the 1:2 split fix and dirty marker', () async {
+    final accountId = await dao.createAccount(AccountsCompanion.insert(
+      name: '测试',
+      type: 'general',
+    ));
+    await dao.createHolding(HoldingsCompanion.insert(
+      accountId: accountId,
+      name: '半导体',
+      assetType: 'etf',
+      marketSource: const Value('sina'),
+      symbol: const Value('sh512480'),
+      quantity: const Value(109300),
+      costPrice: const Value(2.7),
+      latestPrice: const Value(1.331),
+    ));
+    // Another holding must NOT be touched.
+    await dao.createHolding(HoldingsCompanion.insert(
+      accountId: accountId,
+      name: '基金',
+      assetType: 'mutual_fund',
+      marketSource: const Value('eastmoney'),
+      symbol: const Value('110022'),
+      quantity: const Value(100),
+      costPrice: const Value(2.5),
+      latestPrice: const Value(2.9),
+    ));
+
+    await DataMigrationService(db).run();
+
+    final holdings = await dao.getHoldings();
+    final semi = holdings.firstWhere((h) => h.name == '半导体');
+    expect(semi.quantity, 218600);
+    expect(semi.costPrice, closeTo(1.35, 1e-9));
+    final fund = holdings.firstWhere((h) => h.name == '基金');
+    expect(fund.quantity, 100); // untouched
+    expect(fund.costPrice, 2.5);
+    // History rebuild marker set so snapshots reflect the split.
+    final dirty = await dao.getSetting('history_sync_dirty');
+    expect(dirty, '1');
+  });
+
   test('rebuild drops the legacy UNIQUE(symbol) constraint', () async {
     // Simulate a v1-era database: holdings table with UNIQUE(symbol).
     await db.customStatement(

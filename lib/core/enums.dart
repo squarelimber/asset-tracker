@@ -121,7 +121,8 @@ enum TransactionType {
   transferOut('转出', 'transfer_out', Icons.north_east),
   income('收入', 'income', Icons.south_west),
   expense('支出', 'expense', Icons.north_east),
-  consume('消费', 'consume', Icons.shopping_cart_outlined);
+  consume('消费', 'consume', Icons.shopping_cart_outlined),
+  split('份额折算', 'split', Icons.call_split_outlined);
 
   const TransactionType(this.label, this.storageName, this.icon);
 

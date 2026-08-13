@@ -91,6 +91,8 @@ class TradeStatsCalculator {
           break; // internal movement, no net-worth effect
         case TransactionType.consume:
           break; // liability change, not a cash flow
+        case TransactionType.split:
+          break; // share adjustment, not a cash flow
       }
     }
 

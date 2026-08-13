@@ -92,6 +92,8 @@ class TransactionService {
             await _applyCashMove(cashTargetId, -amount, invested: true);
           case TransactionType.consume:
             await _applyConsume(holdingId, amount);
+          case TransactionType.split:
+            await _applySplit(holdingId, amount);
         }
 
         await _dao.createTransaction(TransactionsCompanion.insert(
@@ -213,6 +215,28 @@ class TransactionService {
     await _updateHolding(holding, quantity: holding.quantity + amount);
   }
 
+  /// Unit split / reverse split on a share holding: quantity x ratio,
+  /// costPrice / ratio (market value and total cost stay unchanged).
+  /// Removal applies the inverse ratio.
+  Future<void> _applySplit(int? holdingId, double ratio) async {
+    if (holdingId == null) {
+      throw ArgumentError('份额折算需指定持仓');
+    }
+    if (ratio <= 0) {
+      throw ArgumentError('折算比例必须大于 0');
+    }
+    final holding = await _getHolding(holdingId);
+    final type = AssetType.fromStorage(holding.assetType);
+    if (type.isAmountBased || type == AssetType.liability) {
+      throw ArgumentError('份额折算只适用于份额类持仓');
+    }
+    await _updateHolding(
+      holding,
+      quantity: holding.quantity * ratio,
+      costPrice: holding.costPrice / ratio,
+    );
+  }
+
   /// Cash dividend on a share holding (cost-basis method):
   /// - the cash target receives [amount] (invested untouched: it is a gain);
   /// - the holding's unit cost is reduced by [amount] / quantity, so the
@@ -306,6 +330,8 @@ class TransactionService {
             await _applyCashMove(txn.cashTargetId, txn.amount, invested: true);
           case TransactionType.consume:
             await _applyConsume(txn.holdingId, -txn.amount);
+          case TransactionType.split:
+            await _applySplit(txn.holdingId, 1 / txn.amount);
         }
 
         await _dao.deleteTransaction(transactionId);
