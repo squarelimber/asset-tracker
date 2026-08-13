@@ -1,4 +1,6 @@
-﻿import 'package:drift/drift.dart';
+﻿import 'dart:math';
+
+import 'package:drift/drift.dart';
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -233,7 +235,7 @@ void main() {
     }
   });
 
-  test('amount-based assets count costPrice as invested, not qty x cost', () async {
+  test('amount-based assets smooth from invested to current balance', () async {
     final accountId = await dao.createAccount(AccountsCompanion.insert(
       name: '测试账户',
       type: 'general',
@@ -255,8 +257,13 @@ void main() {
 
     final snapshots = await dao.getSnapshots();
     expect(snapshots, isNotEmpty);
+    final byDate = {for (final s in snapshots) s.date: s};
+    // Smooth accrual: starts at the invested amount and grows geometrically
+    // toward the current balance (4000 -> 5000 over 2 days).
+    expect(byDate['2026-07-01']!.totalValue, closeTo(4000, 1e-6));
+    expect(byDate['2026-07-02']!.totalValue,
+        closeTo(4000 * pow(5000 / 4000, 0.5), 1e-6));
     for (final s in snapshots) {
-      expect(s.totalValue, closeTo(5000, 1e-6));
       // Cost must be 4000 (invested), NOT 5000 * 4000.
       expect(s.totalCost, closeTo(4000, 1e-6));
     }

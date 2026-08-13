@@ -3,6 +3,7 @@ import '../core/formats.dart';
 import '../core/symbols.dart';
 import '../data/asset_dao.dart';
 import '../data/database.dart';
+import '../domain/smooth_history.dart';
 import '../services/market/history_lookup.dart';
 import '../services/market/history_source.dart';
 import '../services/market/tencent_history_source.dart';
@@ -125,9 +126,23 @@ class HoldingDetailService {
     }
 
     // Fetch historical prices in parallel.
+    final smoothCalc = const SmoothHistoryCalculator();
+    final smoothValues = <int, Map<String, double>>{};
     final lookups = <int, HistoryPriceLookup>{};
     final futures = <Future<void>>[];
     for (final h in holdings) {
+      if (isSmoothedHolding(h)) {
+        if (AssetType.fromStorage(h.assetType).isAmountBased) {
+          final flows = await _dao.getTransactionsForHolding(h.id);
+          smoothValues[h.id] = smoothCalc.amountHistory(
+            h,
+            flows,
+            from: earliest ?? day,
+            to: day,
+          );
+        }
+        continue;
+      }
       final source = MarketSource.fromStorage(h.marketSource);
       final adapter = _sources[source];
       if (adapter == null) continue;
@@ -162,9 +177,21 @@ class HoldingDetailService {
       if (day.isBefore(buyDay)) continue;
 
       final lookup = lookups[h.id];
-      final price = lookup?.priceOnOrBefore(key) ?? h.latestPrice;
+      double price;
+      double value;
+      if (isSmoothedHolding(h)) {
+        if (type.isAmountBased) {
+          price = 1;
+          value = smoothValues[h.id]?[key] ?? h.quantity;
+        } else {
+          price = smoothCalc.sharePrice(h, day, earliest ?? day, day);
+          value = h.quantity * price;
+        }
+      } else {
+        price = lookup?.priceOnOrBefore(key) ?? h.latestPrice;
+        value = h.quantity * price;
+      }
       final rate = rateOf(h.currency);
-      final value = h.quantity * price;
       // Cost converts at the recorded purchase rate when available.
       final cost = (type.isAmountBased
               ? (h.costPrice > 0 ? h.costPrice : h.quantity)
@@ -180,8 +207,13 @@ class HoldingDetailService {
       if (!type.isAmountBased && type != AssetType.liability) {
         final prevDay = day.subtract(const Duration(days: 1));
         final prevKey = todayKey(prevDay);
-        final prev = lookup?.priceOnOrBefore(prevKey);
-        if (prev != null && prev > 0 && price > 0) {
+        final double prev;
+        if (isSmoothedHolding(h)) {
+          prev = smoothCalc.sharePrice(h, prevDay, earliest ?? day, day);
+        } else {
+          prev = lookup?.priceOnOrBefore(prevKey) ?? -1;
+        }
+        if (prev > 0 && price > 0) {
           prevPrice = prev;
           dayChange = (price - prev) * h.quantity;
           dayChangePct = (price - prev) / prev;
