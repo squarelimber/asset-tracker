@@ -321,6 +321,44 @@ void main() {
     expect(h.costPrice, closeTo(0.706, 1e-9));
   });
 
+  test('v10 adds cost_fx_rate and backfills the known USD holding', () async {
+    final accountId = await dao.createAccount(AccountsCompanion.insert(
+      name: '测试',
+      type: 'general',
+    ));
+    await dao.createHolding(HoldingsCompanion.insert(
+      accountId: accountId,
+      name: '汇利日盈6号A',
+      assetType: 'bank_wealth',
+      marketSource: const Value('manual'),
+      symbol: const Value('Y05A9W10006A'),
+      quantity: const Value(14375.56),
+      costPrice: const Value(1.098739),
+      latestPrice: const Value(1.11697),
+      currency: const Value('USD'),
+    ));
+    // A CNY holding must NOT get a rate.
+    await dao.createHolding(HoldingsCompanion.insert(
+      accountId: accountId,
+      name: '现金',
+      assetType: 'savings',
+      marketSource: const Value('manual'),
+      quantity: const Value(1000),
+      costPrice: const Value(1000),
+      latestPrice: const Value(1),
+    ));
+
+    await DataMigrationService(db).run();
+
+    final holdings = await dao.getHoldings();
+    final usd = holdings.firstWhere((h) => h.name == '汇利日盈6号A');
+    expect(usd.costFxRate, closeTo(6.95, 1e-9));
+    final cny = holdings.firstWhere((h) => h.name == '现金');
+    expect(cny.costFxRate, isNull);
+    final dirty = await dao.getSetting('history_sync_dirty');
+    expect(dirty, '1');
+  });
+
   test('rebuild drops the legacy UNIQUE(symbol) constraint', () async {
     // Simulate a v1-era database: holdings table with UNIQUE(symbol).
     await db.customStatement(

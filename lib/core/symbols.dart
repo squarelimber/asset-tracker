@@ -33,3 +33,20 @@ String? cacheSymbolFor(HoldingRow holding) {
   final source = MarketSource.fromStorage(holding.marketSource);
   return source == MarketSource.sina ? normalizeSinaSymbol(raw) : raw;
 }
+
+/// CNY conversion rate for a holding's market value: the current FX rate
+/// (1 for CNY holdings).
+double valueRateOf(HoldingRow h, Map<String, double> cnyRates) {
+  if (h.currency == 'CNY') return 1;
+  return cnyRates[h.currency.toUpperCase()] ?? 1;
+}
+
+/// CNY conversion rate for a holding's cost basis: the exchange rate
+/// recorded at purchase time (costFxRate), falling back to the current
+/// rate. 1 for CNY holdings.
+double costRateOf(HoldingRow h, Map<String, double> cnyRates) {
+  if (h.currency == 'CNY') return 1;
+  final fx = h.costFxRate;
+  if (fx != null && fx > 0) return fx;
+  return cnyRates[h.currency.toUpperCase()] ?? 1;
+}

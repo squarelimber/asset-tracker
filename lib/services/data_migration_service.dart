@@ -45,6 +45,11 @@ class DataMigrationService {
   /// the original numbers (detected by the doubled-quantity signature).
   static const _etfSplit512480Rollback = 'etf_split_512480_rollback_v9';
 
+  /// Adds the cost_fx_rate column (purchase-time exchange rate for
+  /// foreign-currency cost basis) and backfills the known USD holding
+  /// (汇利日盈6号A, bought at 6.95).
+  static const _costFxRateAdded = 'cost_fx_rate_v10';
+
   /// Runs all pending one-time migrations. Safe to call on every launch.
   Future<void> run() async {
     await _migrateAmountBased();
@@ -54,6 +59,7 @@ class DataMigrationService {
     await _migrateTransferCost();
     await _migrateEtfSplit512480();
     await _rollbackEtfSplit512480();
+    await _migrateCostFxRate();
   }
 
   /// SQLite cannot drop a UNIQUE constraint without rebuilding the table.
@@ -275,6 +281,33 @@ class DataMigrationService {
         SettingsCompanion.insert(key: 'history_sync_dirty', value: const Value('1')),
       );
     }
+  }
+
+  /// Adds the cost_fx_rate column and backfills the known USD holding's
+  /// purchase rate (6.95 for 汇利日盈6号A), then marks history dirty so the
+  /// snapshots rebuild with the correct FX conversion.
+  Future<void> _migrateCostFxRate() async {
+    final marker = await _getSetting(_costFxRateAdded);
+    if (marker != null) return;
+
+    try {
+      await _db.customStatement(
+        'ALTER TABLE holdings ADD COLUMN cost_fx_rate REAL NULL;',
+      );
+    } catch (_) {
+      // Column already present.
+    }
+    // 汇利日盈6号A (Y05A9W10006A) was bought when USD/CNY was 6.95.
+    final stmt = _db.update(_db.holdings)
+      ..where((t) => t.symbol.equals('Y05A9W10006A'));
+    await stmt.write(
+      const HoldingsCompanion(costFxRate: Value(6.95)),
+    );
+
+    await _setSetting(_costFxRateAdded, '${DateTime.now().millisecondsSinceEpoch}');
+    await _db.into(_db.settings).insertOnConflictUpdate(
+      SettingsCompanion.insert(key: 'history_sync_dirty', value: const Value('1')),
+    );
   }
 
   Future<String?> _getSetting(String key) async {

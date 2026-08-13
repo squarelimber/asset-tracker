@@ -81,6 +81,21 @@ double liabilityTotalOf(List<HoldingRow> holdings, Map<String, double> rates) {
   });
 }
 
+/// The cost_fx_rate companion value for the edit dialog: the parsed rate
+/// when the currency is foreign, absent otherwise.
+Value<double?> _editFxRateValue(
+  TextEditingController fxRateCtrl,
+  TextEditingController currencyCtrl,
+  bool autoCny,
+  HoldingRow holding,
+) {
+  final ccy = autoCny ? 'CNY' : currencyCtrl.text.trim().toUpperCase();
+  if (ccy.isEmpty || ccy == 'CNY') return const Value<double?>.absent();
+  final fx = double.tryParse(fxRateCtrl.text.trim());
+  if (fx != null && fx > 0) return Value<double?>(fx);
+  return const Value<double?>.absent();
+}
+
 class HoldingsPage extends ConsumerStatefulWidget {
   const HoldingsPage({super.key});
 
@@ -311,6 +326,9 @@ class _HoldingsPageState extends ConsumerState<HoldingsPage> {
     }
     if (!context.mounted) return;
 
+    // Current FX rates for pre-filling the purchase-rate field.
+    final fxRates = await ref.read(cnyRatesProvider.future);
+
     final accountId = ValueNotifier<int?>(accounts.first.id);
     final assetType = ValueNotifier<AssetType>(AssetType.stock);
     final riskLevel = ValueNotifier<String?>(null);
@@ -320,10 +338,12 @@ class _HoldingsPageState extends ConsumerState<HoldingsPage> {
     final costPriceCtrl = TextEditingController();
     final latestPriceCtrl = TextEditingController();
     final currencyCtrl = TextEditingController(text: 'CNY');
+    final fxRateCtrl = TextEditingController();
     final purchaseDate = ValueNotifier<DateTime?>(DateTime.now());
     final amount = ValueNotifier<double>(0);
     double? investedResult;
 
+    if (!context.mounted) return;
     await showDialog<void>(
       context: context,
       builder: (context) => AlertDialog(
@@ -495,9 +515,42 @@ class _HoldingsPageState extends ConsumerState<HoldingsPage> {
                       ),
                     );
                   }
-                  return TextField(
-                    controller: currencyCtrl,
-                    decoration: const InputDecoration(labelText: '币种 (ISO 代码)'),
+                  return Column(
+                    children: [
+                      TextField(
+                        controller: currencyCtrl,
+                        decoration: const InputDecoration(labelText: '币种 (ISO 代码)'),
+                        onChanged: (v) {
+                          // Pre-fill the purchase rate with the current
+                          // rate for the chosen currency.
+                          final ccy = v.trim().toUpperCase();
+                          final rate = fxRates[ccy];
+                          fxRateCtrl.text = (rate == null || rate <= 0)
+                              ? ''
+                              : rate.toString();
+                        },
+                      ),
+                      ValueListenableBuilder<TextEditingValue>(
+                        valueListenable: currencyCtrl,
+                        builder: (context, value, _) {
+                          final ccy = value.text.trim().toUpperCase();
+                          if (ccy.isEmpty || ccy == 'CNY') {
+                            return const SizedBox.shrink();
+                          }
+                          return Padding(
+                            padding: const EdgeInsets.only(top: 12),
+                            child: TextField(
+                              controller: fxRateCtrl,
+                              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                              decoration: InputDecoration(
+                                labelText: '买入时汇率（$ccy/CNY）',
+                                hintText: '默认已填当前汇率，可改为真实买入汇率',
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    ],
                   );
                 },
               ),
@@ -546,6 +599,12 @@ class _HoldingsPageState extends ConsumerState<HoldingsPage> {
                   type.isMarketLinked || type == AssetType.bankWealth;
               int createdId;
               try {
+                final finalCurrency = autoCny
+                    ? 'CNY'
+                    : (currencyCtrl.text.trim().toUpperCase().isEmpty
+                        ? 'CNY'
+                        : currencyCtrl.text.trim().toUpperCase());
+                final fx = double.tryParse(fxRateCtrl.text.trim());
                 createdId = await dao.createHolding(HoldingsCompanion.insert(
                   accountId: accountId.value!,
                   name: name,
@@ -559,15 +618,14 @@ class _HoldingsPageState extends ConsumerState<HoldingsPage> {
                           : 1) // liability: unit price 1, cost = balance
                       : (invested ?? 0)),
                   latestPrice: Value(isAmount ? 1 : (userPrice ?? 0)),
+                  costFxRate: finalCurrency != 'CNY' && fx != null && fx > 0
+                      ? Value(fx)
+                      : const Value.absent(),
                   purchaseDate: Value(purchaseDate.value),
                   riskLevel: riskLevel.value == null
                       ? const Value.absent()
                       : Value(riskLevel.value),
-                  currency: Value(autoCny
-                      ? 'CNY'
-                      : (currencyCtrl.text.trim().toUpperCase().isEmpty
-                          ? 'CNY'
-                          : currencyCtrl.text.trim().toUpperCase())),
+                  currency: Value(finalCurrency),
                 ));
               } catch (e) {
                 if (context.mounted) {
@@ -619,6 +677,7 @@ class _HoldingsPageState extends ConsumerState<HoldingsPage> {
     costPriceCtrl.dispose();
     latestPriceCtrl.dispose();
     currencyCtrl.dispose();
+    fxRateCtrl.dispose();
   }
 }
 
@@ -932,6 +991,9 @@ class _HoldingCard extends ConsumerWidget {
   Future<void> _showEditDialog(BuildContext context, WidgetRef ref) async {
     final accounts = await ref.read(accountsProvider.future);
     if (!context.mounted) return;
+    // Current FX rates for pre-filling the purchase-rate field.
+    final fxRates = await ref.read(cnyRatesProvider.future);
+    if (!context.mounted) return;
     final initialType = AssetType.fromStorage(holding.assetType);
     final typeNotifier = ValueNotifier<AssetType>(initialType);
     final accountIdNotifier = ValueNotifier<int>(holding.accountId);
@@ -944,6 +1006,11 @@ class _HoldingCard extends ConsumerWidget {
     final priceCtrl =
         TextEditingController(text: holding.latestPrice.toString());
     final currencyCtrl = TextEditingController(text: holding.currency);
+    final fxRateCtrl = TextEditingController(
+      text: holding.costFxRate == null
+          ? ''
+          : holding.costFxRate!.toString(),
+    );
     final noteCtrl = TextEditingController(text: holding.note ?? '');
     final purchaseDate = ValueNotifier<DateTime?>(
       holding.purchaseDate ?? holding.createdAt,
@@ -1086,9 +1153,40 @@ class _HoldingCard extends ConsumerWidget {
                       ),
                     )
                   else
-                    TextField(
-                      controller: currencyCtrl,
-                      decoration: const InputDecoration(labelText: '币种 (ISO 代码)'),
+                    Column(
+                      children: [
+                        TextField(
+                          controller: currencyCtrl,
+                          decoration: const InputDecoration(labelText: '币种 (ISO 代码)'),
+                          onChanged: (v) {
+                            final ccy = v.trim().toUpperCase();
+                            final rate = fxRates[ccy];
+                            fxRateCtrl.text = (rate == null || rate <= 0)
+                                ? ''
+                                : rate.toString();
+                          },
+                        ),
+                        ValueListenableBuilder<TextEditingValue>(
+                          valueListenable: currencyCtrl,
+                          builder: (context, value, _) {
+                            final ccy = value.text.trim().toUpperCase();
+                            if (ccy.isEmpty || ccy == 'CNY') {
+                              return const SizedBox.shrink();
+                            }
+                            return Padding(
+                              padding: const EdgeInsets.only(top: 12),
+                              child: TextField(
+                                controller: fxRateCtrl,
+                                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                                decoration: InputDecoration(
+                                  labelText: '买入时汇率（$ccy/CNY）',
+                                  hintText: '默认已填当前汇率，可改为真实买入汇率',
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      ],
                     ),
                   const SizedBox(height: 12),
                   TextField(
@@ -1172,6 +1270,7 @@ class _HoldingCard extends ConsumerWidget {
             : (currencyCtrl.text.trim().toUpperCase().isEmpty
                 ? holding.currency
                 : currencyCtrl.text.trim().toUpperCase()),
+        costFxRate: _editFxRateValue(fxRateCtrl, currencyCtrl, autoCny, holding),
         note: noteCtrl.text.trim().isEmpty ? const Value.absent() : Value(noteCtrl.text.trim()),
       );
       await ref.read(daoProvider).updateHolding(updated);
@@ -1185,6 +1284,7 @@ class _HoldingCard extends ConsumerWidget {
     costCtrl.dispose();
     priceCtrl.dispose();
     currencyCtrl.dispose();
+    fxRateCtrl.dispose();
     noteCtrl.dispose();
   }
 

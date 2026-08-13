@@ -7,6 +7,7 @@ import '../data/asset_dao.dart';
 import '../data/database.dart';
 import 'market/history_lookup.dart';
 import 'market/history_source.dart';
+import 'market/market_service.dart';
 import 'market/tencent_history_source.dart';
 
 /// Result of a history backfill run.
@@ -39,18 +40,24 @@ class BackfillResult {
 /// swapped in a single transaction. The UI therefore never shows a gap
 /// while the rebuild is running.
 class HistoryBackfillService {
-  HistoryBackfillService(this._dao, {Map<MarketSource, HistoryDataSource>? sources})
-      : _sources = sources ??
+  HistoryBackfillService(
+    this._dao, {
+    Map<MarketSource, HistoryDataSource>? sources,
+    MarketService? market,
+  }) : _sources = sources ??
             {
               MarketSource.eastmoney: EastmoneyHistorySource(),
               // Tencent qfq (adjusted) klines keep unit splits/ex-rights
               // continuous over time, so backfilled history has no jumps.
               MarketSource.sina: TencentHistorySource(),
               MarketSource.sge: AuGoldHistorySource(),
-            };
+            } {
+    _market = market;
+  }
 
   final AssetDao _dao;
   final Map<MarketSource, HistoryDataSource> _sources;
+  MarketService? _market;
 
   /// Marker for the weekend forward-fill fix + purchase-date filtering:
   /// triggers one atomic recompute of historical snapshots.
@@ -88,6 +95,20 @@ class HistoryBackfillService {
     }
     if (earliest == null) return const BackfillResult(ok: false, days: 0, holdings: 0);
     final windowStart = earliest;
+
+    // Current FX rates for converting foreign-currency holdings to CNY
+    // (market value uses the current rate; cost uses the recorded purchase
+    // rate when available). Historical daily rates are approximated with
+    // the current rate.
+    final currencies = holdings
+        .map((h) => h.currency)
+        .where((c) => c != 'CNY')
+        .toSet()
+        .toList();
+    final market = _market;
+    final cnyRates = market == null
+        ? const <String, double>{}
+        : await market.loadCnyRates(currencies);
 
     // Fetch history per holding (in parallel).
     final fillers = <int, HistoryPriceLookup>{};
@@ -145,16 +166,19 @@ class HistoryBackfillService {
         final filler = fillers[h.id];
         final price = filler?.priceOnOrBefore(key) ?? h.latestPrice;
         if (price > 0) hasPrice = true;
-        final value = h.quantity * price;
+        // Convert to CNY: market value at the current rate, cost at the
+        // recorded purchase rate (falling back to the current rate).
+        final value = h.quantity * price * valueRateOf(h, cnyRates);
         if (type == AssetType.liability) {
           liabilities += value;
         } else {
           assets += value;
           // Amount-based assets store the cumulative invested amount in
           // costPrice; unit-based assets store the per-unit cost.
-          cost += type.isAmountBased
-              ? (h.costPrice > 0 ? h.costPrice : h.quantity)
-              : h.quantity * h.costPrice;
+          cost += (type.isAmountBased
+                  ? (h.costPrice > 0 ? h.costPrice : h.quantity)
+                  : h.quantity * h.costPrice) *
+              costRateOf(h, cnyRates);
         }
       }
       if (hasPrice) {

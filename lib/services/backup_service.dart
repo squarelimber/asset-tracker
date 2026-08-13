@@ -98,6 +98,9 @@ class BackupService {
             quantity: Value((h['quantity'] as num?)?.toDouble() ?? 0),
             costPrice: Value((h['costPrice'] as num?)?.toDouble() ?? 0),
             latestPrice: Value((h['latestPrice'] as num?)?.toDouble() ?? 0),
+            costFxRate: h['costFxRate'] == null
+                ? const Value.absent()
+                : Value((h['costFxRate'] as num).toDouble()),
             purchaseDate: h['purchaseDate'] == null
                 ? const Value.absent()
                 : Value(_parseDate(h['purchaseDate']) ?? DateTime.now()),
@@ -207,6 +210,7 @@ class BackupService {
         'quantity': h.quantity,
         'costPrice': h.costPrice,
         'latestPrice': h.latestPrice,
+        'costFxRate': h.costFxRate,
         'purchaseDate': h.purchaseDate?.toIso8601String(),
         'riskLevel': h.riskLevel,
         'currency': h.currency,
