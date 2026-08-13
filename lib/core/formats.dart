@@ -28,6 +28,9 @@ class Formats {
 
   static String num(double v) => _num.format(v);
 
+  /// Privacy mask for hidden monetary amounts.
+  static String masked() => '¥•••••';
+
   /// Signed amount with explicit +/-, e.g. "+1,234.50".
   static String signedAmount(double v) => v >= 0 ? '+${_amount.format(v)}' : _amount.format(v);
 

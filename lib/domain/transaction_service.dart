@@ -82,7 +82,10 @@ class TransactionService {
               amount: amount,
             );
           case TransactionType.dividend:
-            await _applyCashMove(cashTargetId, amount, invested: false);
+            // Cost-basis method: a cash dividend reduces the holding's cost
+            // (a repayment of capital), so the ex-dividend price drop does
+            // not show up as a phantom loss in the return rate.
+            await _applyDividend(holdingId, amount, cashTargetId);
           case TransactionType.income:
             await _applyCashMove(cashTargetId, amount, invested: true);
           case TransactionType.expense:
@@ -210,6 +213,27 @@ class TransactionService {
     await _updateHolding(holding, quantity: holding.quantity + amount);
   }
 
+  /// Cash dividend on a share holding (cost-basis method):
+  /// - the cash target receives [amount] (invested untouched: it is a gain);
+  /// - the holding's unit cost is reduced by [amount] / quantity, so the
+  ///   ex-dividend price drop does not distort the return rate.
+  /// A negative [amount] reverses the effect (removal).
+  Future<void> _applyDividend(int? holdingId, double amount, int? cashTargetId) async {
+    await _applyCashMove(cashTargetId, amount, invested: false);
+    if (holdingId == null) return;
+    final holding = await _getHolding(holdingId);
+    final type = AssetType.fromStorage(holding.assetType);
+    if (type.isAmountBased || type == AssetType.liability) return;
+    if (holding.quantity <= 0) return;
+    final newCost = (holding.costPrice - amount / holding.quantity)
+        .clamp(0.0, double.infinity);
+    await _updateHolding(
+      holding,
+      quantity: holding.quantity,
+      costPrice: newCost,
+    );
+  }
+
   /// Moves [delta] on a cash holding (buy deduction, sell credit,
   /// dividend, income, expense). Liabilities are not allowed here —
   /// their flows go through transfers (repayment/borrowing).
@@ -275,7 +299,7 @@ class TransactionService {
               moveCost: txn.costMoved,
             );
           case TransactionType.dividend:
-            await _applyCashMove(txn.cashTargetId, -txn.amount, invested: false);
+            await _applyDividend(txn.holdingId, -txn.amount, txn.cashTargetId);
           case TransactionType.income:
             await _applyCashMove(txn.cashTargetId, -txn.amount, invested: true);
           case TransactionType.expense:
