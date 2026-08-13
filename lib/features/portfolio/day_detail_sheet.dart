@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/providers.dart';
+import '../../app/theme.dart';
 import '../../core/enums.dart';
 import '../../core/formats.dart';
 import '../../domain/holding_details.dart';
@@ -87,6 +88,9 @@ class _DetailRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final type = AssetType.fromStorage(item.holding.assetType);
     String money(double v) => hideAmounts ? Formats.masked() : Formats.money(v);
+    final change = item.dayChange;
+    final changeCny = change == null ? null : change * item.cnyRate;
+    final pct = item.dayChangePct;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6),
       child: Row(
@@ -106,30 +110,27 @@ class _DetailRow extends StatelessWidget {
                 ),
                 Text(
                   type == AssetType.liability
-                      ? '负债'
-                      : '单价 ${Formats.smartNum(item.price)} · 成本 ${money(item.costCny)}',
+                      ? '负债 · 市值 ${money(item.marketValueCny)}'
+                      : '单价 ${Formats.smartNum(item.price)} · 市值 ${money(item.marketValueCny)}',
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
               ],
             ),
           ),
-          Expanded(
-            flex: 1,
-            child: Text(
-              money(item.marketValueCny),
-              textAlign: TextAlign.end,
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    fontWeight: FontWeight.w600,
-                  ),
-            ),
-          ),
-          SizedBox(
-            width: 56,
-            child: Text(
-              '${(item.ratio * 100).toStringAsFixed(1)}%',
-              textAlign: TextAlign.end,
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
+          const SizedBox(width: 8),
+          Text(
+            changeCny == null
+                ? '--'
+                : '${changeCny >= 0 ? '+' : ''}${money(changeCny)}'
+                    '${pct == null ? '' : ' (${Formats.pct(pct)})'}',
+            textAlign: TextAlign.end,
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: changeCny == null
+                      ? Theme.of(context).colorScheme.outline
+                      : context.changeColor(changeCny),
+                  fontWeight: FontWeight.w600,
+                  fontFeatures: const [FontFeature.tabularFigures()],
+                ),
           ),
         ],
       ),
