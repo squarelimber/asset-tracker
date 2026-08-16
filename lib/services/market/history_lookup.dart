@@ -13,6 +13,9 @@ class HistoryPriceLookup {
   late final List<String> _dates;
   late final List<double> _prices;
 
+  /// The latest date in the history (yyyy-MM-dd), or null when empty.
+  String? get lastDate => _dates.isEmpty ? null : _dates.last;
+
   /// Price on [key] (yyyy-MM-dd) or the most recent date <= [key], else null.
   double? priceOnOrBefore(String key) {
     var lo = 0;

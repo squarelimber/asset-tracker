@@ -244,7 +244,8 @@ void main() {
     final detail = await service.compute(DateTime(2026, 7, 2));
 
     final names = detail!.items.map((i) => i.holding.name).toList();
-    expect(names, ['基金A', '基金B', '现金']); // +10%, -8.3%, no baseline
+    // 基金A +10%, 现金 0% (smooth accrual with no gain), 基金B -8.3%.
+    expect(names, ['基金A', '现金', '基金B']);
   });
 
   test('purchase day has no day change baseline', () async {
@@ -263,5 +264,40 @@ void main() {
     expect(item.prevPrice, isNull);
     expect(item.dayChange, isNull);
     expect(item.dayChangePct, isNull);
+  });
+
+  test('stale history falls back to the live latest price for today', () async {
+    await addHolding(
+      name: '基金', type: AssetType.mutualFund,
+      quantity: 100, costPrice: 2.0, latestPrice: 2.21, symbol: '110022',
+    );
+    final fake = _FakeHistorySource();
+    // History only reaches yesterday (2.2); the live price moved to 2.21.
+    final now = DateTime.now();
+    final yesterday = now.subtract(const Duration(days: 1));
+    fake.data['110022'] = {
+      _FakeHistorySource.key(yesterday): 2.2,
+    };
+    final service = HoldingDetailService(dao, sources: {MarketSource.eastmoney: fake});
+    final detail = await service.compute(now);
+    final item = detail!.items.single;
+    expect(item.price, closeTo(2.21, 1e-9));
+    expect(item.dayChange, closeTo(1.0, 1e-9)); // (2.21 - 2.2) x 100
+    expect(item.dayChangePct, closeTo(0.01 / 2.2, 1e-6));
+  });
+
+  test('smooth amount-based accrual appears in the day detail', () async {
+    final id = await addHolding(
+      name: '现金', type: AssetType.bankDeposit,
+      quantity: 1210, costPrice: 1000, latestPrice: 1,
+    );
+    // Smooth accrual 1000 -> 1210 over 10 days (2026-01-01 .. 2026-01-11).
+    final service = HoldingDetailService(dao, sources: {});
+    final detail = await service.compute(DateTime(2026, 1, 6));
+    final item = detail!.items.firstWhere((i) => i.holding.id == id);
+    expect(item.dayChange, isNotNull);
+    expect(item.dayChange, greaterThan(0));
+    expect(item.dayChangePct, isNotNull);
+    expect(item.dayChangePct, greaterThan(0));
   });
 }
