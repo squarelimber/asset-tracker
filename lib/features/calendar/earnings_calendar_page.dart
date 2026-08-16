@@ -9,8 +9,10 @@ import '../../domain/daily_earnings.dart';
 import '../portfolio/day_detail_sheet.dart';
 
 /// Daily earnings by date, computed from snapshots (cost-basis view).
+/// Watches the snapshot stream directly so backfill rebuilds and today's
+/// snapshot refresh immediately update the calendar.
 final _earningsProvider = FutureProvider<List<DailyEarning>>((ref) async {
-  final snapshots = await ref.watch(snapshotsProvider.future);
+  final snapshots = ref.watch(snapshotsProvider).value ?? const [];
   return const DailyEarningsCalculator().compute(snapshots);
 });
 
@@ -46,6 +48,9 @@ class _EarningsCalendarPageState extends ConsumerState<EarningsCalendarPage> {
 
   @override
   Widget build(BuildContext context) {
+    // Trigger the shared history sync so the calendar and the dashboard
+    // show the same snapshots (backfill + today's refresh).
+    ref.watch(historySyncProvider);
     final earnings = ref.watch(_earningsProvider);
     return Scaffold(
       appBar: AppBar(title: const Text('收益日历')),

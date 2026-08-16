@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../core/history_sync.dart';
 import '../core/symbols.dart';
 import '../data/asset_dao.dart';
 import '../data/database.dart';
@@ -7,6 +8,7 @@ import '../domain/holding_details.dart';
 import '../domain/transaction_service.dart';
 import '../services/history_backfill_service.dart';
 import '../services/market/market_service.dart';
+import '../services/snapshot_service.dart';
 
 /// App-wide database instance.
 final databaseProvider = Provider<AppDatabase>((ref) => AppDatabase());
@@ -51,6 +53,40 @@ final historyBackfillServiceProvider = Provider<HistoryBackfillService>(
     market: ref.watch(marketServiceProvider),
   ),
 );
+
+/// Records one net-worth snapshot per day.
+final snapshotServiceProvider = Provider<SnapshotService>(
+  (ref) => SnapshotService(
+    ref.watch(daoProvider),
+    market: ref.watch(marketServiceProvider),
+  ),
+);
+
+/// One-time per-session history sync marker (legacy rebuild trigger).
+const historySyncV5Key = 'history_sync_v5';
+
+/// Shared history sync: backfills historical snapshots when dirty (or on
+/// the legacy first run) and refreshes today's snapshot, so the portfolio
+/// page and the earnings calendar always agree. Runs once per session;
+/// both pages watch it to trigger/refresh.
+final historySyncProvider = FutureProvider<BackfillResult?>((ref) async {
+  final dao = ref.read(daoProvider);
+  final dirty = await dao.getSetting(historySyncDirtyKey);
+  final firstRun = await dao.getSetting(historySyncV5Key) == null;
+  final result = await ref.read(historyBackfillServiceProvider).backfill(
+        forceRebuild: dirty == historyDirtySet || firstRun,
+      );
+  if (dirty == historyDirtySet) {
+    await dao.setSetting(historySyncDirtyKey, historyDirtyClear);
+  }
+  if (firstRun) {
+    await dao.setSetting(historySyncV5Key, '1');
+  }
+  // Refresh today's snapshot so the calendar's today matches the
+  // dashboard's live summary.
+  await ref.read(snapshotServiceProvider).ensureTodaySnapshot(force: true);
+  return result;
+});
 
 // ---------------------------------------------------------------------------
 // Accounts
