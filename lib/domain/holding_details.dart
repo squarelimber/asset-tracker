@@ -188,7 +188,20 @@ class HoldingDetailService {
           value = h.quantity * price;
         }
       } else {
-        price = lookup?.priceOnOrBefore(key) ?? h.latestPrice;
+        final hist = lookup?.priceOnOrBefore(key);
+        final last = lookup?.lastDate;
+        // Prefer the live latest price for TODAY when the history endpoint
+        // lags behind (e.g. a NAV published after the history data
+        // updated), so the day detail matches the snapshot numbers.
+        // Historical days keep the forward-fill semantics.
+        if (hist == null ||
+            (last != null &&
+                last.compareTo(key) < 0 &&
+                _isSameDay(day, DateTime.now()))) {
+          price = h.latestPrice;
+        } else {
+          price = hist;
+        }
         value = h.quantity * price;
       }
       final rate = rateOf(h.currency);
@@ -217,6 +230,16 @@ class HoldingDetailService {
           prevPrice = prev;
           dayChange = (price - prev) * h.quantity;
           dayChangePct = (price - prev) / prev;
+        }
+      } else if (isSmoothedHolding(h) && type.isAmountBased) {
+        // Smooth amount-based accrual: today's interpolated value minus
+        // yesterday's, so the daily accrual shows up in the detail sheet.
+        final prevKey = todayKey(day.subtract(const Duration(days: 1)));
+        final prevValue = smoothValues[h.id]?[prevKey];
+        if (prevValue != null && prevValue > 0 && value > 0) {
+          dayChange = value - prevValue;
+          dayChangePct = (value - prevValue) / prevValue;
+          prevPrice = 1;
         }
       }
 
@@ -274,4 +297,7 @@ class HoldingDetailService {
     _cache[key] = detail;
     return detail;
   }
+
+  static bool _isSameDay(DateTime a, DateTime b) =>
+      a.year == b.year && a.month == b.month && a.day == b.day;
 }
