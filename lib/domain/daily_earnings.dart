@@ -45,6 +45,22 @@ class MonthlyEarnings {
   final int days;
 }
 
+/// Today's earning in the snapshot view: the last snapshot's profit
+/// (value - cost) minus the previous one — the same number the earnings
+/// calendar shows on today's cell. Null when snapshots are unavailable.
+({double profit, double? pct})? todayEarningOf(List<SnapshotRow> snapshots) {
+  if (snapshots.isEmpty) return null;
+  final today = snapshots.last;
+  if (snapshots.length < 2) return (profit: 0.0, pct: null);
+  final yesterday = snapshots[snapshots.length - 2];
+  final profitToday = today.totalValue - today.totalCost;
+  final profitYesterday = yesterday.totalValue - yesterday.totalCost;
+  final profit = profitToday - profitYesterday;
+  final pct =
+      yesterday.totalValue <= 0 ? null : profit / yesterday.totalValue;
+  return (profit: profit, pct: pct);
+}
+
 /// Computes per-day earnings from daily snapshots.
 ///
 /// Snapshots must be ordered by date ascending. The first available day

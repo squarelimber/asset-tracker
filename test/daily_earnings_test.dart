@@ -65,4 +65,37 @@ void main() {
     expect(month.total, 0);
     expect(month.rate, isNull);
   });
+
+  group('todayEarningOf', () {
+    test('last snapshot profit minus the previous one', () {
+      final earning = todayEarningOf([
+        _snap('2026-08-15', 2100000, 2030000), // profit 70000
+        _snap('2026-08-16', 2102400, 2030000), // profit 72400
+      ]);
+      expect(earning, isNotNull);
+      expect(earning!.profit, closeTo(2400, 1e-9));
+      expect(earning.pct, closeTo(2400 / 2100000, 1e-9));
+    });
+
+    test('single snapshot yields zero profit and null pct', () {
+      final earning = todayEarningOf([_snap('2026-08-16', 100000, 90000)]);
+      expect(earning, isNotNull);
+      expect(earning!.profit, 0);
+      expect(earning.pct, isNull);
+    });
+
+    test('empty list yields null', () {
+      expect(todayEarningOf(const []), isNull);
+    });
+
+    test('zero yesterday value yields null pct', () {
+      final earning = todayEarningOf([
+        _snap('2026-08-15', 0, 0),
+        _snap('2026-08-16', 100, 0),
+      ]);
+      expect(earning, isNotNull);
+      expect(earning!.profit, closeTo(100, 1e-9));
+      expect(earning.pct, isNull);
+    });
+  });
 }

@@ -186,7 +186,13 @@ class _SummaryHeader extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final netWorth = summary.netWorth;
     final hidden = ref.watch(hideAmountsProvider);
-    final changeColor = context.changeColor(summary.todayChange);
+    // Today's earning in the snapshot view (same as the earnings
+    // calendar's today cell): immune to symbol-key mismatches and
+    // correct on non-trading days.
+    final todayEarning = ref.watch(todayEarningProvider);
+    final todayProfit = todayEarning?.profit ?? 0.0;
+    final todayPct = todayEarning?.pct;
+    final changeColor = context.changeColor(todayProfit);
     String amount(double v) => hidden ? Formats.masked() : '¥${Formats.amount(v)}';
     return Card(
       child: Padding(
@@ -206,8 +212,8 @@ class _SummaryHeader extends ConsumerWidget {
               runSpacing: 8,
               children: [
                 _Chip(
-                  label: '今日 ${summary.todayChangePct == null ? '--' : Formats.pct(summary.todayChangePct!)}',
-                  value: '${summary.todayChange >= 0 ? '+' : ''}${amount(summary.todayChange)}',
+                  label: '今日 ${todayPct == null ? '--' : Formats.pct(todayPct)}',
+                  value: '${todayProfit >= 0 ? '+' : ''}${amount(todayProfit)}',
                   color: changeColor,
                 ),
                 _Chip(

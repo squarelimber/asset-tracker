@@ -884,10 +884,12 @@ class _HoldingCard extends ConsumerWidget {
                 const SizedBox(height: 6),
                 // Always rendered (placeholder when there is no quote data)
                 // so every card keeps the same height and grid rows align.
+                // "最新" = the latest trading day's change (not necessarily
+                // today, e.g. on weekends).
                 Row(
                   children: [
                     Text(
-                      '今日',
+                      '最新',
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
                             color: Theme.of(context).colorScheme.outline,
                           ),
@@ -1391,7 +1393,7 @@ class _HoldingDetailSheet extends ConsumerWidget {
                   _InfoRow(label: '持有时间', value: Formats.holdingDuration(buyDate)),
                 if (todayProfit != null)
                   _InfoRow(
-                    label: '今日收益',
+                    label: '最新收益',
                     value: todayPct == null
                         ? '${todayProfit >= 0 ? '+' : ''}${Formats.money(todayProfit, holding.currency)}'
                         : '${todayProfit >= 0 ? '+' : ''}${Formats.money(todayProfit, holding.currency)}'

@@ -4,6 +4,7 @@ import '../core/history_sync.dart';
 import '../core/symbols.dart';
 import '../data/asset_dao.dart';
 import '../data/database.dart';
+import '../domain/daily_earnings.dart';
 import '../domain/holding_details.dart';
 import '../domain/transaction_service.dart';
 import '../services/history_backfill_service.dart';
@@ -64,6 +65,16 @@ final snapshotServiceProvider = Provider<SnapshotService>(
 
 /// One-time per-session history sync marker (legacy rebuild trigger).
 const historySyncV5Key = 'history_sync_v5';
+
+/// Today's earning in the snapshot (calendar) view: today's snapshot
+/// profit (value - cost) minus yesterday's, matching the earnings
+/// calendar's today cell. Null when snapshots are unavailable.
+final todayEarningProvider =
+    Provider<({double profit, double? pct})?>((ref) {
+  final list = ref.watch(snapshotsProvider).value;
+  if (list == null) return null;
+  return todayEarningOf(list);
+});
 
 /// Shared history sync: backfills historical snapshots when dirty (or on
 /// the legacy first run) and refreshes today's snapshot, so the portfolio
