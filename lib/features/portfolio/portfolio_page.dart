@@ -5,18 +5,10 @@ import '../../app/providers.dart';
 import '../../app/theme.dart';
 import '../../core/enums.dart';
 import '../../core/formats.dart';
-import '../../core/history_sync.dart';
 import '../../core/responsive.dart';
 import '../../domain/portfolio_calculator.dart';
-import '../../services/snapshot_service.dart';
+import '../../services/history_backfill_service.dart';
 import 'portfolio_widgets.dart';
-
-final snapshotServiceProvider = Provider<SnapshotService>(
-  (ref) => SnapshotService(
-    ref.watch(daoProvider),
-    market: ref.watch(marketServiceProvider),
-  ),
-);
 
 final _summaryProvider = FutureProvider<PortfolioSummary>((ref) async {
   final dao = ref.watch(daoProvider);
@@ -54,14 +46,12 @@ class PortfolioPage extends ConsumerStatefulWidget {
 
 class _PortfolioPageState extends ConsumerState<PortfolioPage> {
   final _refreshing = ValueNotifier<bool>(false);
-  bool _backfillStarted = false;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _refreshPrices(showSnack: false);
-      _backfillHistory();
     });
   }
 
@@ -70,37 +60,6 @@ class _PortfolioPageState extends ConsumerState<PortfolioPage> {
     _refreshing.dispose();
     super.dispose();
   }
-
-  /// Backfills the net worth chart from the purchase dates.
-  /// A dirty marker (set when holdings/transactions change) triggers a full
-  /// force rebuild; the marker is cleared only after a successful run, so a
-  /// failed/interrupted sync retries on the next visit.
-  Future<void> _backfillHistory() async {
-    if (_backfillStarted) return;
-    _backfillStarted = true;
-    final dao = ref.read(daoProvider);
-    final dirty = await dao.getSetting(historySyncDirtyKey);
-    // One-time legacy fix: rebuild everything once after the sync-reliability
-    // update so pre-existing (unsynced) history gets corrected.
-    final firstRun = await dao.getSetting(_historySyncV5Marker) == null;
-    final result = await ref.read(historyBackfillServiceProvider).backfill(
-          forceRebuild: dirty == historyDirtySet || firstRun,
-        );
-    if (dirty == historyDirtySet) {
-      await dao.setSetting(historySyncDirtyKey, historyDirtyClear);
-    }
-    if (firstRun) {
-      await dao.setSetting(_historySyncV5Marker, '1');
-    }
-    if (!mounted) return;
-    if (result.ok) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(result.message ?? '历史净值已是最新')),
-      );
-    }
-  }
-
-  static const _historySyncV5Marker = 'history_sync_v5';
 
   Future<void> _refreshPrices({bool showSnack = true}) async {
     if (_refreshing.value) return;
@@ -126,6 +85,19 @@ class _PortfolioPageState extends ConsumerState<PortfolioPage> {
   Widget build(BuildContext context) {
     final summary = ref.watch(_summaryProvider);
     final holdings = ref.watch(holdingsProvider);
+    // Trigger the shared history sync (backfill + today's snapshot) and
+    // surface its message once, like the previous page-local backfill.
+    ref.watch(historySyncProvider);
+    ref.listen<AsyncValue<BackfillResult?>>(historySyncProvider, (prev, next) {
+      final result = next.value;
+      if (result == null || !result.ok) return;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(result.message ?? '历史净值已是最新')),
+        );
+      });
+    });
     return Scaffold(
       appBar: AppBar(
         title: const Text('总览'),
