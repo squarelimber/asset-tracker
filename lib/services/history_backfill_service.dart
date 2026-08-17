@@ -220,6 +220,7 @@ class HistoryBackfillService {
           currency: 'CNY',
           totalValue: assets - liabilities,
           totalCost: cost,
+          liabilities: liabilities,
           createdAt: current,
         ));
       }

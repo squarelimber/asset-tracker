@@ -89,6 +89,11 @@ class Snapshots extends Table {
   TextColumn get currency => text().withDefault(const Constant('CNY'))();
   RealColumn get totalValue => real()();
   RealColumn get totalCost => real()();
+
+  /// Outstanding liabilities on that day, so the earning view can exclude
+  /// principal repayments/borrowing from the return (cash-flow, not gain).
+  RealColumn get liabilities => real().withDefault(const Constant(0))();
+
   DateTimeColumn get createdAt => dateTime().withDefault(currentDateAndTime)();
 
   @override

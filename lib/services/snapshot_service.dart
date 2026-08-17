@@ -44,6 +44,7 @@ class SnapshotService {
       currency: const Value('CNY'),
       totalValue: summary.netWorth,
       totalCost: summary.totalCost,
+      liabilities: Value(summary.totalLiabilities),
     ));
   }
 }
