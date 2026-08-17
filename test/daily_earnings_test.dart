@@ -46,24 +46,21 @@ void main() {
     expect(earnings[1].profit, closeTo(0, 1e-9));
   });
 
-  test('repayment shows zero daily profit (liability change excluded)', () {
-    // Repay 3000: cash falls 3000 (value and cost together), liability
-    // falls 3000 (totalValue = assets - liabilities stays flat).
-    // Assets = totalValue + liabilities is unchanged on both days, so the
-    // earning is 0.
+  test('repayment shows zero daily profit (value and cost move together)', () {
+    // Repay 5514: cash falls 5514 (net worth) and the cost follows by the
+    // same amount, so the transfer is a cash flow, not a loss.
     final earnings = calc.compute([
-      _snap('2026-08-01', 97000, 90000, liabilities: 5000),
-      _snap('2026-08-02', 97000, 87000, liabilities: 2000),
+      _snap('2026-08-01', 97000, 90000),
+      _snap('2026-08-02', 91486, 84486),
     ]);
     expect(earnings[1].profit, closeTo(0, 1e-9));
   });
 
   test('borrowing shows zero daily profit', () {
     final earnings = calc.compute([
-      _snap('2026-08-01', 97000, 90000, liabilities: 5000),
-      // Borrow 2000: cash +2000 (value and cost together), liability
-      // +2000 -> totalValue unchanged, assets unchanged.
-      _snap('2026-08-02', 97000, 92000, liabilities: 7000),
+      _snap('2026-08-01', 97000, 90000),
+      // Borrow 2000: cash +2000 (net worth) and cost +2000.
+      _snap('2026-08-02', 99000, 92000),
     ]);
     expect(earnings[1].profit, closeTo(0, 1e-9));
   });
