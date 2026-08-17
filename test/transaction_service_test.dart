@@ -89,6 +89,25 @@ void main() {
     });
   });
 
+  test('allows two otherwise identical transaction records', () async {
+    final acc = await addAccount('A');
+    final first = TransactionsCompanion.insert(
+      accountId: acc,
+      type: 'income',
+      amount: 100,
+      occurredAt: DateTime(2026, 8, 1, 9),
+    );
+    final second = TransactionsCompanion.insert(
+      accountId: acc,
+      type: 'income',
+      amount: 100,
+      occurredAt: DateTime(2026, 8, 1, 9),
+    );
+    await dao.createTransaction(first);
+    await dao.createTransaction(second);
+    expect(await dao.getTransactions(), hasLength(2));
+  });
+
   group('sell', () {
     test('reduces quantity, cost unchanged, credits cash target', () async {
       final acc = await addAccount('A');
@@ -498,6 +517,40 @@ void main() {
       // The transfer referencing the deleted holding must not be orphaned.
       expect(await dao.getTransactions(), isEmpty);
       expect(await dao.getHolding(card), isNot(null));
+    });
+
+    test('deleting an account removes all transfer references to its holdings', () async {
+      final sourceAccount = await addAccount('源账户');
+      final targetAccount = await addAccount('目标账户');
+      final cash = await addHolding(
+        accountId: sourceAccount,
+        name: '现金',
+        type: AssetType.bankDeposit,
+        quantity: 5000,
+        costPrice: 5000,
+        latestPrice: 1,
+      );
+      final card = await addHolding(
+        accountId: targetAccount,
+        name: '信用卡',
+        type: AssetType.liability,
+        quantity: 1000,
+        costPrice: 1,
+        latestPrice: 1,
+      );
+      await service.record(
+        accountId: targetAccount,
+        type: TransactionType.transferOut,
+        amount: 300,
+        cashSourceId: cash,
+        cashTargetId: card,
+      );
+
+      await dao.deleteAccount(sourceAccount);
+
+      expect(await dao.getHolding(cash), isNull);
+      expect(await dao.getHolding(card), isNotNull);
+      expect(await dao.getTransactions(), isEmpty);
     });
   });
 

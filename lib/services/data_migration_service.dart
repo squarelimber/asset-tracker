@@ -52,6 +52,10 @@ class DataMigrationService {
 
   /// Runs all pending one-time migrations. Safe to call on every launch.
   Future<void> run() async {
+    // These columns were introduced as data migrations in older releases.
+    // Ensure they exist before any typed Drift query reads the full holdings
+    // row, and before the legacy table rebuild below.
+    await _ensureHoldingColumns();
     await _migrateAmountBased();
     await _migrateGoldSymbol();
     await _rebuildHoldingsTable();
@@ -62,6 +66,23 @@ class DataMigrationService {
     await _migrateCostFxRate();
   }
 
+  Future<void> _ensureHoldingColumns() async {
+    try {
+      await _db.customStatement(
+        'ALTER TABLE holdings ADD COLUMN cost_fx_rate REAL NULL;',
+      );
+    } catch (_) {
+      // The column already exists.
+    }
+    try {
+      await _db.customStatement(
+        'ALTER TABLE holdings ADD COLUMN risk_level TEXT NULL;',
+      );
+    } catch (_) {
+      // The column already exists.
+    }
+  }
+
   /// SQLite cannot drop a UNIQUE constraint without rebuilding the table.
   /// Recreate `holdings` identically but without UNIQUE(symbol) so the same
   /// market code can exist across multiple holdings/accounts.
@@ -69,9 +90,15 @@ class DataMigrationService {
     final marker = await _getSetting(_holdingsRebuilt);
     if (marker != null) return;
 
-    await _db.customStatement('ALTER TABLE holdings RENAME TO holdings_tmp;');
-    await _db.customStatement('''
-      CREATE TABLE holdings (
+    // Create a new table instead of renaming the old one. Renaming would
+    // rewrite Transactions' foreign-key targets to holdings_tmp.
+    await _db.customStatement('PRAGMA foreign_keys = OFF;');
+    try {
+      // A previous launch may have stopped after creating the staging table.
+      // Remove that incomplete copy before retrying the rebuild.
+      await _db.customStatement('DROP TABLE IF EXISTS holdings_new;');
+      await _db.customStatement('''
+      CREATE TABLE holdings_new (
         id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
         account_id INTEGER NOT NULL REFERENCES accounts (id),
         name TEXT NOT NULL,
@@ -82,22 +109,30 @@ class DataMigrationService {
         cost_price REAL NOT NULL DEFAULT 0.0,
         latest_price REAL NOT NULL DEFAULT 0.0,
         currency TEXT NOT NULL DEFAULT 'CNY',
+        cost_fx_rate REAL NULL,
+        purchase_date INTEGER NULL,
+        risk_level TEXT NULL,
         note TEXT NULL,
         created_at INTEGER NOT NULL DEFAULT (CAST(strftime('%s', CURRENT_TIMESTAMP) AS INTEGER)),
-        updated_at INTEGER NOT NULL DEFAULT (CAST(strftime('%s', CURRENT_TIMESTAMP) AS INTEGER)),
-        purchase_date INTEGER NULL
+        updated_at INTEGER NOT NULL DEFAULT (CAST(strftime('%s', CURRENT_TIMESTAMP) AS INTEGER))
       );
     ''');
-    await _db.customStatement('''
-      INSERT INTO holdings (id, account_id, name, asset_type, market_source, symbol,
-                            quantity, cost_price, latest_price, currency, note,
-                            created_at, updated_at, purchase_date)
+      await _db.customStatement('''
+      INSERT INTO holdings_new (id, account_id, name, asset_type, market_source, symbol,
+                            quantity, cost_price, latest_price, currency,
+                            cost_fx_rate, purchase_date, risk_level, note,
+                            created_at, updated_at)
       SELECT id, account_id, name, asset_type, market_source, symbol,
-             quantity, cost_price, latest_price, currency, note,
-             created_at, updated_at, purchase_date
-      FROM holdings_tmp;
+             quantity, cost_price, latest_price, currency,
+             cost_fx_rate, purchase_date, risk_level, note,
+             created_at, updated_at
+      FROM holdings;
     ''');
-    await _db.customStatement('DROP TABLE holdings_tmp;');
+      await _db.customStatement('DROP TABLE holdings;');
+      await _db.customStatement('ALTER TABLE holdings_new RENAME TO holdings;');
+    } finally {
+      await _db.customStatement('PRAGMA foreign_keys = ON;');
+    }
 
     await _setSetting(_holdingsRebuilt, '${DateTime.now().millisecondsSinceEpoch}');
   }

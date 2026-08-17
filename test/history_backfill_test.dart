@@ -268,4 +268,21 @@ void main() {
       expect(s.totalCost, closeTo(4000, 1e-6));
     }
   });
+
+  test('force rebuild clears snapshots after the last holding is removed', () async {
+    await dao.upsertSnapshot(SnapshotsCompanion.insert(
+      date: '2026-07-01',
+      currency: const Value('CNY'),
+      totalValue: 999,
+      totalCost: 999,
+    ));
+
+    final service = HistoryBackfillService(dao, sources: {});
+    await service.backfill(
+      now: DateTime(2026, 7, 3),
+      forceRebuild: true,
+    );
+
+    expect(await dao.getSnapshots(), isEmpty);
+  });
 }

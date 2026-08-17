@@ -24,7 +24,22 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
-$flutter = 'C:\flutter\flutter\bin\flutter.bat'
+$flutter = $null
+$flutterCommand = Get-Command flutter.bat -ErrorAction SilentlyContinue
+if ($flutterCommand) {
+    $flutter = $flutterCommand.Source
+} else {
+    $flutterCommand = Get-Command flutter -ErrorAction SilentlyContinue
+    if ($flutterCommand) {
+        $flutter = $flutterCommand.Source
+    }
+}
+if (-not $flutter -and (Test-Path 'C:\flutter\flutter\bin\flutter.bat')) {
+    $flutter = 'C:\flutter\flutter\bin\flutter.bat'
+}
+if (-not $flutter) {
+    throw 'Flutter SDK not found. Add flutter to PATH or set the expected C:\flutter\flutter\bin\flutter.bat path.'
+}
 
 function Invoke-Step {
     param([string]$Name, [scriptblock]$Body)

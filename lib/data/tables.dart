@@ -58,11 +58,6 @@ class Transactions extends Table {
   /// (costPrice) together with the balance. Legacy transfers recorded
   /// before the fix have this false, so removal must not roll the cost back.
   BoolColumn get costMoved => boolean().withDefault(const Constant(true))();
-
-  @override
-  List<Set<Column>> get uniqueKeys => [
-        {accountId, holdingId, type, occurredAt, amount},
-      ];
 }
 
 /// Latest market price cache written by the market data engine.

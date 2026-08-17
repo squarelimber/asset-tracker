@@ -57,10 +57,10 @@ class MarketService {
           MarketSource.coingecko: CoinGeckoSource(),
         };
 
-  /// Refresh prices for all market-linked holdings.
+  /// Refresh prices for all market-linked and explicitly FX-linked holdings.
   Future<MarketRefreshResult> refreshAll() async {
     final holdings = (await _dao.getHoldings())
-        .where((h) => AssetType.fromStorage(h.assetType).isMarketLinked)
+        .where(_isRefreshableHolding)
         .toList();
 
     if (holdings.isEmpty) {
@@ -81,6 +81,8 @@ class MarketService {
       // Bare 6-digit A-share/ETF codes need the exchange prefix for Sina.
       if (source == MarketSource.sina) {
         symbol = normalizeSinaSymbol(symbol);
+      } else if (source == MarketSource.forex) {
+        symbol = symbol.toUpperCase();
       }
       bySource.putIfAbsent(source, () => []).add(symbol);
       symbolOf[h.id] = symbol;
@@ -136,6 +138,17 @@ class MarketService {
     await loadCnyRates(currencies);
 
     return MarketRefreshResult(updated: updated, failed: failed, fetchedAt: DateTime.now());
+  }
+
+  bool _isRefreshableHolding(HoldingRow holding) {
+    final type = AssetType.fromStorage(holding.assetType);
+    if (type.isMarketLinked) return true;
+    // Bank wealth products can opt into a current FX quote by entering a
+    // currency symbol (for example USD). Empty symbols remain manual NAV.
+    return type == AssetType.bankWealth &&
+        MarketSource.fromStorage(holding.marketSource) == MarketSource.forex &&
+        holding.symbol != null &&
+        holding.symbol!.isNotEmpty;
   }
 
   Future<List<MarketQuote>> _fetchFromSource(MarketSource source, List<String> symbols) {
@@ -204,6 +217,8 @@ class MarketService {
     final source = MarketSource.fromStorage(holding.marketSource);
     if (source == MarketSource.sina) {
       rawSymbol = normalizeSinaSymbol(rawSymbol);
+    } else if (source == MarketSource.forex) {
+      rawSymbol = rawSymbol.toUpperCase();
     }
     final symbol = rawSymbol;
     final quotes = await _fetchFromSource(source, [symbol]);

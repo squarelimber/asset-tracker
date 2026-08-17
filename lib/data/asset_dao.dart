@@ -30,11 +30,20 @@ class AssetDao {
     return _db.transaction(() async {
       final holdings =
           await (_db.select(_db.holdings)..where((t) => t.accountId.equals(id))).get();
+      final holdingIds = holdings.map((h) => h.id).toList();
+      // Delete every transaction touching the account's holdings before
+      // deleting the holdings themselves. Cross-account transfers are
+      // included so no cashSource/cashTarget references are left dangling.
+      await (_db.delete(_db.transactions)
+            ..where((t) =>
+                t.accountId.equals(id) |
+                t.holdingId.isIn(holdingIds) |
+                t.cashSourceId.isIn(holdingIds) |
+                t.cashTargetId.isIn(holdingIds)))
+          .go();
       for (final h in holdings) {
         await (_db.delete(_db.holdings)..where((t) => t.id.equals(h.id))).go();
-        await (_db.delete(_db.transactions)..where((t) => t.holdingId.equals(h.id))).go();
       }
-      await (_db.delete(_db.transactions)..where((t) => t.accountId.equals(id))).go();
       return (_db.delete(_db.accounts)..where((t) => t.id.equals(id))).go();
     });
   }
@@ -78,7 +87,9 @@ class AssetDao {
         costPrice: Value(holding.costPrice),
         latestPrice: Value(holding.latestPrice),
         currency: Value(holding.currency),
+        costFxRate: Value(holding.costFxRate),
         purchaseDate: Value(holding.purchaseDate),
+        riskLevel: Value(holding.riskLevel),
         note: Value(holding.note),
         updatedAt: Value(now ?? DateTime.now()),
       ),
@@ -262,7 +273,10 @@ class AssetDao {
   Future<void> updateAlertRule(AlertRuleRow rule) => _db.update(_db.alertRules).replace(rule);
 
   Future<int> deleteAlertRule(int id) =>
-      (_db.delete(_db.alertRules)..where((t) => t.id.equals(id))).go();
+      _db.transaction(() async {
+        await (_db.delete(_db.alertEvents)..where((t) => t.ruleId.equals(id))).go();
+        return (_db.delete(_db.alertRules)..where((t) => t.id.equals(id))).go();
+      });
 
   // ---------------------------------------------------------------------------
   // Alert events
@@ -285,6 +299,8 @@ class AssetDao {
   Future<int> createAlertEvent(AlertEventsCompanion entry) =>
       _db.into(_db.alertEvents).insert(entry);
 
+  Future<List<AlertEventRow>> getAlertEvents() => _db.select(_db.alertEvents).get();
+
   // ---------------------------------------------------------------------------
   // Bulk access for backup/restore
   // ---------------------------------------------------------------------------
@@ -297,6 +313,7 @@ class AssetDao {
   Future<void> deleteAllAccounts() => _db.delete(_db.accounts).go();
   Future<void> deleteAllSnapshots() => _db.delete(_db.snapshots).go();
   Future<void> deleteAllAlertRules() => _db.delete(_db.alertRules).go();
+  Future<void> deleteAllAlertEvents() => _db.delete(_db.alertEvents).go();
 
   /// Runs [action] inside a transaction.
   Future<T> transaction<T>(Future<T> Function() action) => _db.transaction(action);

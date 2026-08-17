@@ -82,6 +82,17 @@ void main() {
     expect(after.single.costPrice, 300);
   });
 
+  test('holdings rebuild retains all current schema columns', () async {
+    await DataMigrationService(db).run();
+    final rows = await db.customSelect('PRAGMA table_info(holdings)').get();
+    final columns = rows.map((row) => row.data['name']).toSet();
+    expect(columns, containsAll(<String>{
+      'cost_fx_rate',
+      'purchase_date',
+      'risk_level',
+    }));
+  });
+
   test('non-legacy cash holdings are left alone', () async {
     final accountId = await dao.createAccount(AccountsCompanion.insert(
       name: '测试',

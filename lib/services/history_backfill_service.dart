@@ -85,6 +85,11 @@ class HistoryBackfillService {
 
     final holdings = await _dao.getHoldings();
     if (holdings.isEmpty) {
+      if (forceRebuild) {
+        // A full rebuild after deleting the last holding must remove the old
+        // curve, otherwise the dashboard continues to show stale net worth.
+        await _dao.deleteSnapshotsBefore(todayKey(current));
+      }
       return const BackfillResult(ok: false, days: 0, holdings: 0, message: '暂无持仓');
     }
 
@@ -227,12 +232,14 @@ class HistoryBackfillService {
     }
 
     // Swap atomically so the UI never sees an empty/mid-write state.
-    if (rows.isNotEmpty) {
+    if (rows.isNotEmpty || needFullRebuild) {
       await _dao.transaction(() async {
         if (needFullRebuild) {
           await _dao.deleteSnapshotsBefore(todayKey(current));
         }
-        await _dao.batchInsertSnapshots(rows);
+        if (rows.isNotEmpty) {
+          await _dao.batchInsertSnapshots(rows);
+        }
       });
     }
     // Mark the one-time rebuild done only after a successful swap.

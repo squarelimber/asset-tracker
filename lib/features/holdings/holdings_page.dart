@@ -90,10 +90,10 @@ Value<double?> _editFxRateValue(
   HoldingRow holding,
 ) {
   final ccy = autoCny ? 'CNY' : currencyCtrl.text.trim().toUpperCase();
-  if (ccy.isEmpty || ccy == 'CNY') return const Value<double?>.absent();
+  if (ccy.isEmpty || ccy == 'CNY') return const Value<double?>(null);
   final fx = double.tryParse(fxRateCtrl.text.trim());
   if (fx != null && fx > 0) return Value<double?>(fx);
-  return const Value<double?>.absent();
+  return const Value<double?>(null);
 }
 
 class HoldingsPage extends ConsumerStatefulWidget {
@@ -1263,17 +1263,19 @@ class _HoldingCard extends ConsumerWidget {
             : (cost ?? holding.costPrice),
         latestPrice: isAmount ? 1 : (price ?? holding.latestPrice),
         purchaseDate: Value(purchaseDate.value),
-        riskLevel: riskLevelNotifier.value == null
-            ? const Value.absent()
-            : Value(riskLevelNotifier.value),
-        symbol: !isAmount ? (symbol.isEmpty ? const Value.absent() : Value(symbol)) : const Value.absent(),
+        riskLevel: Value(riskLevelNotifier.value),
+        symbol: !isAmount
+            ? (symbol.isEmpty ? const Value<String?>(null) : Value(symbol))
+            : const Value<String?>(null),
         currency: autoCny
             ? 'CNY'
             : (currencyCtrl.text.trim().toUpperCase().isEmpty
                 ? holding.currency
                 : currencyCtrl.text.trim().toUpperCase()),
         costFxRate: _editFxRateValue(fxRateCtrl, currencyCtrl, autoCny, holding),
-        note: noteCtrl.text.trim().isEmpty ? const Value.absent() : Value(noteCtrl.text.trim()),
+        note: noteCtrl.text.trim().isEmpty
+            ? const Value<String?>(null)
+            : Value(noteCtrl.text.trim()),
       );
       await ref.read(daoProvider).updateHolding(updated);
       ref.read(daoProvider).setSetting(historySyncDirtyKey, historyDirtySet);

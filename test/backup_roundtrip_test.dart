@@ -140,4 +140,54 @@ void main() {
     expect(holdings.single.accountId, accounts.single.id); // auto-increment
     expect(await dao.getTransactions(), hasLength(1));
   });
+
+  test('round-trip preserves holding timestamps and alert history', () async {
+    final accountCreated = DateTime(2025, 1, 2, 3, 4);
+    final holdingCreated = DateTime(2025, 2, 3, 4, 5);
+    final holdingUpdated = DateTime(2026, 2, 3, 4, 5);
+    final triggered = DateTime(2026, 8, 10, 9);
+    final accountId = await dao.createAccount(AccountsCompanion.insert(
+      id: const Value(10),
+      name: '账户',
+      type: 'general',
+      createdAt: Value(accountCreated),
+    ));
+    await dao.createHolding(HoldingsCompanion.insert(
+      id: const Value(11),
+      accountId: accountId,
+      name: '持仓',
+      assetType: 'bank_wealth',
+      createdAt: Value(holdingCreated),
+      updatedAt: Value(holdingUpdated),
+    ));
+    await dao.createAlertRule(AlertRulesCompanion.insert(
+      id: const Value(12),
+      type: 'concentration',
+      name: '集中度',
+      createdAt: Value(accountCreated),
+    ));
+    await dao.createAlertEvent(AlertEventsCompanion.insert(
+      id: const Value(13),
+      ruleId: 12,
+      title: '提醒',
+      message: '测试',
+      triggeredAt: Value(triggered),
+    ));
+
+    final json = await service.exportJson();
+    final db2 = AppDatabase(NativeDatabase.memory());
+    addTearDown(db2.close);
+    final dao2 = AssetDao(db2);
+    final result = await BackupService(dao2).importJson(json);
+
+    expect(result.ok, isTrue, reason: result.message);
+    expect((await dao2.getAccount(accountId))!.createdAt, accountCreated);
+    final holding = (await dao2.getHolding(11))!;
+    expect(holding.createdAt, holdingCreated);
+    expect(holding.updatedAt, holdingUpdated);
+    final events = await dao2.getAlertEvents();
+    expect(events, hasLength(1));
+    expect(events.single.ruleId, 12);
+    expect(events.single.triggeredAt, triggered);
+  });
 }

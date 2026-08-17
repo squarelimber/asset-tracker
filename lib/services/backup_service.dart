@@ -32,6 +32,7 @@ class BackupService {
     final transactions = await _dao.getTransactions();
     final snapshots = await _dao.getSnapshots();
     final rules = await _dao.getAlertRules();
+    final events = await _dao.getAlertEvents();
 
     return jsonEncode({
       'app': 'asset_tracker',
@@ -42,6 +43,7 @@ class BackupService {
       'transactions': transactions.map((t) => _transactionToJson(t)).toList(),
       'snapshots': snapshots.map((s) => _snapshotToJson(s)).toList(),
       'alertRules': rules.map((r) => _ruleToJson(r)).toList(),
+      'alertEvents': events.map((e) => _eventToJson(e)).toList(),
     });
   }
 
@@ -62,6 +64,7 @@ class BackupService {
     final transactions = _parseList(decoded['transactions']);
     final snapshots = _parseList(decoded['snapshots']);
     final rules = _parseList(decoded['alertRules']);
+    final events = _parseList(decoded['alertEvents']);
 
     try {
       await _dao.transaction(() async {
@@ -70,6 +73,7 @@ class BackupService {
           _dao.deleteAllHoldings,
           _dao.deleteAllAccounts,
           _dao.deleteAllSnapshots,
+          _dao.deleteAllAlertEvents,
           _dao.deleteAllAlertRules,
         ]) {
           await table();
@@ -83,6 +87,9 @@ class BackupService {
             note: a['note'] == null
                 ? const Value.absent()
                 : Value(a['note'].toString()),
+            createdAt: a['createdAt'] == null
+                ? const Value.absent()
+                : Value(_parseDate(a['createdAt']) ?? DateTime.now()),
           ));
         }
         for (final h in holdings) {
@@ -111,6 +118,12 @@ class BackupService {
             note: h['note'] == null
                 ? const Value.absent()
                 : Value(h['note'].toString()),
+            createdAt: h['createdAt'] == null
+                ? const Value.absent()
+                : Value(_parseDate(h['createdAt']) ?? DateTime.now()),
+            updatedAt: h['updatedAt'] == null
+                ? const Value.absent()
+                : Value(_parseDate(h['updatedAt']) ?? DateTime.now()),
           ));
         }
         for (final t in transactions) {
@@ -154,10 +167,25 @@ class BackupService {
         }
         for (final r in rules) {
           await _dao.createAlertRule(AlertRulesCompanion.insert(
+            id: _intOrAbsent(r['id']),
             type: r['type']?.toString() ?? 'concentration',
             name: r['name']?.toString() ?? '',
             params: Value(r['params']?.toString() ?? '{}'),
             enabled: Value(r['enabled'] == true),
+            createdAt: r['createdAt'] == null
+                ? const Value.absent()
+                : Value(_parseDate(r['createdAt']) ?? DateTime.now()),
+          ));
+        }
+        for (final e in events) {
+          await _dao.createAlertEvent(AlertEventsCompanion.insert(
+            id: _intOrAbsent(e['id']),
+            ruleId: (e['ruleId'] as num?)?.toInt() ?? 0,
+            title: e['title']?.toString() ?? '',
+            message: e['message']?.toString() ?? '',
+            triggeredAt: e['triggeredAt'] == null
+                ? const Value.absent()
+                : Value(_parseDate(e['triggeredAt']) ?? DateTime.now()),
           ));
         }
       });
@@ -215,6 +243,8 @@ class BackupService {
         'riskLevel': h.riskLevel,
         'currency': h.currency,
         'note': h.note,
+        'createdAt': h.createdAt.toIso8601String(),
+        'updatedAt': h.updatedAt.toIso8601String(),
       };
 
   static Map<String, dynamic> _transactionToJson(TransactionRow t) => {
@@ -241,10 +271,20 @@ class BackupService {
       };
 
   static Map<String, dynamic> _ruleToJson(AlertRuleRow r) => {
+        'id': r.id,
         'type': r.type,
         'name': r.name,
         'params': r.params,
         'enabled': r.enabled,
+        'createdAt': r.createdAt.toIso8601String(),
+      };
+
+  static Map<String, dynamic> _eventToJson(AlertEventRow e) => {
+        'id': e.id,
+        'ruleId': e.ruleId,
+        'title': e.title,
+        'message': e.message,
+        'triggeredAt': e.triggeredAt.toIso8601String(),
       };
 }
 

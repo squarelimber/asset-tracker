@@ -42,14 +42,32 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
-      - name: Build web
-        run: flutter build web
+      - name: Build web (Wasm)
+        run: flutter build web --wasm --release --base-href=/asset-tracker/
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: web-build
           path: build/web
+
+  build-android:
+    name: Build Android
+    runs-on: ubuntu-latest
+    needs: analyze-test
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build Android debug APK
+        run: flutter build apk --debug
 
   build-windows:
     name: Build Windows
