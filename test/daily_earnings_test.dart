@@ -1,14 +1,15 @@
-import 'package:flutter_test/flutter_test.dart';
+﻿import 'package:flutter_test/flutter_test.dart';
 
 import 'package:asset_tracker/data/database.dart';
 import 'package:asset_tracker/domain/daily_earnings.dart';
 
-SnapshotRow _snap(String date, double value, double cost) {
+SnapshotRow _snap(String date, double value, double cost, {double liabilities = 0}) {
   return SnapshotRow(
     date: date,
     currency: 'CNY',
     totalValue: value,
     totalCost: cost,
+    liabilities: liabilities,
     createdAt: DateTime(2026, 1, 1),
   );
 }
@@ -43,6 +44,50 @@ void main() {
       _snap('2026-08-02', 1000, 1000),
     ]);
     expect(earnings[1].profit, closeTo(0, 1e-9));
+  });
+
+  test('repayment shows zero daily profit (liability change excluded)', () {
+    // Repay 3000: cash falls 3000 (value and cost together), liability
+    // falls 3000 (totalValue = assets - liabilities stays flat).
+    // Assets = totalValue + liabilities is unchanged on both days, so the
+    // earning is 0.
+    final earnings = calc.compute([
+      _snap('2026-08-01', 97000, 90000, liabilities: 5000),
+      _snap('2026-08-02', 97000, 87000, liabilities: 2000),
+    ]);
+    expect(earnings[1].profit, closeTo(0, 1e-9));
+  });
+
+  test('borrowing shows zero daily profit', () {
+    final earnings = calc.compute([
+      _snap('2026-08-01', 97000, 90000, liabilities: 5000),
+      // Borrow 2000: cash +2000 (value and cost together), liability
+      // +2000 -> totalValue unchanged, assets unchanged.
+      _snap('2026-08-02', 97000, 92000, liabilities: 7000),
+    ]);
+    expect(earnings[1].profit, closeTo(0, 1e-9));
+  });
+
+  test('yearOf aggregates months with the start-of-year base', () {
+    final earnings = calc.compute([
+      _snap('2025-12-31', 100000, 90000),
+      _snap('2026-01-01', 100000, 90000),
+      _snap('2026-01-31', 105000, 90000), // Jan +5000
+      _snap('2026-02-01', 105000, 90000),
+      _snap('2026-02-28', 108000, 90000), // Feb +3000
+      _snap('2026-03-01', 108000, 90000), // Mar 0
+    ]);
+    final year = calc.yearOf(earnings, 2026);
+    expect(year.months, hasLength(3)); // Jan, Feb, Mar
+    expect(year.total, closeTo(8000, 1e-9));
+    expect(year.rate, closeTo(8000 / 100000, 1e-9));
+  });
+
+  test('yearOf with no data returns zero with a null rate', () {
+    final year = calc.yearOf(const [], 2026);
+    expect(year.months, isEmpty);
+    expect(year.total, 0);
+    expect(year.rate, isNull);
   });
 
   test('monthOf aggregates the month with the start-value base', () {
@@ -99,3 +144,4 @@ void main() {
     });
   });
 }
+

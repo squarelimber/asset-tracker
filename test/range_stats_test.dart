@@ -1,4 +1,4 @@
-import 'package:flutter_test/flutter_test.dart';
+﻿import 'package:flutter_test/flutter_test.dart';
 
 import 'package:asset_tracker/data/database.dart';
 import 'package:asset_tracker/domain/range_stats.dart';
@@ -9,6 +9,7 @@ SnapshotRow _snap(String date, double value, double cost) {
     currency: 'CNY',
     totalValue: value,
     totalCost: cost,
+    liabilities: 0,
     createdAt: DateTime(2026, 1, 1),
   );
 }
@@ -97,3 +98,4 @@ void main() {
     expect(stats.annualized, isNull);
   });
 }
+

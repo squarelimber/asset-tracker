@@ -1,4 +1,4 @@
-import 'package:flutter_test/flutter_test.dart';
+﻿import 'package:flutter_test/flutter_test.dart';
 
 import 'package:asset_tracker/data/database.dart';
 import 'package:asset_tracker/domain/rate_series.dart';
@@ -9,6 +9,7 @@ SnapshotRow _snap(String date, double value, double cost) {
     currency: 'CNY',
     totalValue: value,
     totalCost: cost,
+    liabilities: 0,
     createdAt: DateTime(2026, 1, 1),
   );
 }
@@ -70,3 +71,4 @@ void main() {
     expect(calc.rangeRatePct([_snap('2026-01-01', 100, 100)]), isNull);
   });
 }
+

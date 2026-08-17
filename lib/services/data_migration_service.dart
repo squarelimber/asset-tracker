@@ -50,6 +50,10 @@ class DataMigrationService {
   /// (汇利日盈6号A, bought at 6.95).
   static const _costFxRateAdded = 'cost_fx_rate_v10';
 
+  /// Adds the liabilities column to snapshots so the earning view can
+  /// exclude principal repayments/borrowing from the return.
+  static const _snapshotLiabilitiesAdded = 'snapshot_liabilities_v11';
+
   /// Runs all pending one-time migrations. Safe to call on every launch.
   Future<void> run() async {
     await _migrateAmountBased();
@@ -60,6 +64,7 @@ class DataMigrationService {
     await _migrateEtfSplit512480();
     await _rollbackEtfSplit512480();
     await _migrateCostFxRate();
+    await _migrateSnapshotLiabilities();
   }
 
   /// SQLite cannot drop a UNIQUE constraint without rebuilding the table.
@@ -305,6 +310,29 @@ class DataMigrationService {
     );
 
     await _setSetting(_costFxRateAdded, '${DateTime.now().millisecondsSinceEpoch}');
+    await _db.into(_db.settings).insertOnConflictUpdate(
+      SettingsCompanion.insert(key: 'history_sync_dirty', value: const Value('1')),
+    );
+  }
+
+  /// Adds the snapshots.liabilities column and marks history dirty so the
+  /// rebuild stores the per-day liability amounts.
+  Future<void> _migrateSnapshotLiabilities() async {
+    final marker = await _getSetting(_snapshotLiabilitiesAdded);
+    if (marker != null) return;
+
+    try {
+      await _db.customStatement(
+        'ALTER TABLE snapshots ADD COLUMN liabilities REAL NOT NULL DEFAULT 0;',
+      );
+    } catch (_) {
+      // Column already present.
+    }
+
+    await _setSetting(
+      _snapshotLiabilitiesAdded,
+      '${DateTime.now().millisecondsSinceEpoch}',
+    );
     await _db.into(_db.settings).insertOnConflictUpdate(
       SettingsCompanion.insert(key: 'history_sync_dirty', value: const Value('1')),
     );

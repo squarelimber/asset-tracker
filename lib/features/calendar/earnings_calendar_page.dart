@@ -26,9 +26,12 @@ class EarningsCalendarPage extends ConsumerStatefulWidget {
       _EarningsCalendarPageState();
 }
 
+enum _CalView { month, year }
+
 class _EarningsCalendarPageState extends ConsumerState<EarningsCalendarPage> {
   late int _year;
   late int _month;
+  _CalView _view = _CalView.month;
 
   @override
   void initState() {
@@ -46,6 +49,21 @@ class _EarningsCalendarPageState extends ConsumerState<EarningsCalendarPage> {
     });
   }
 
+  void _shiftYear(int delta) {
+    setState(() => _year += delta);
+  }
+
+  void _openMonth(int month) {
+    setState(() {
+      _month = month;
+      _view = _CalView.month;
+    });
+  }
+
+  void _setView(_CalView view) {
+    setState(() => _view = view);
+  }
+
   @override
   Widget build(BuildContext context) {
     // Trigger the shared history sync so the calendar and the dashboard
@@ -59,7 +77,11 @@ class _EarningsCalendarPageState extends ConsumerState<EarningsCalendarPage> {
           earnings: list,
           year: _year,
           month: _month,
+          view: _view,
           onShiftMonth: _shiftMonth,
+          onShiftYear: _shiftYear,
+          onOpenMonth: _openMonth,
+          onViewChanged: _setView,
         ),
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, _) => Center(child: Text('加载失败: $e')),
@@ -73,72 +95,131 @@ class _CalendarBody extends StatelessWidget {
     required this.earnings,
     required this.year,
     required this.month,
+    required this.view,
     required this.onShiftMonth,
+    required this.onShiftYear,
+    required this.onOpenMonth,
+    required this.onViewChanged,
   });
 
   final List<DailyEarning> earnings;
   final int year;
   final int month;
+  final _CalView view;
   final ValueChanged<int> onShiftMonth;
+  final ValueChanged<int> onShiftYear;
+  final ValueChanged<int> onOpenMonth;
+  final ValueChanged<_CalView> onViewChanged;
 
   @override
   Widget build(BuildContext context) {
+    final calc = const DailyEarningsCalculator();
     final byDate = {for (final e in earnings) e.date: e};
-    final month = const DailyEarningsCalculator().monthOf(earnings, year, this.month);
+    final month = calc.monthOf(earnings, year, this.month);
 
     final firstDay = DateTime(year, this.month, 1);
     final daysInMonth = DateTime(year, this.month + 1, 0).day;
     // Monday-first offset (1 = Monday .. 7 = Sunday).
     final leadingBlanks = (firstDay.weekday - 1);
 
+    final isYearView = view == _CalView.year;
+    final yearSummary = isYearView ? calc.yearOf(earnings, year) : null;
+
     return ResponsiveShell(
       child: ListView(
         children: [
-          _MonthSummary(month: month),
-          const SizedBox(height: 16),
-          Row(
-            children: [
-              IconButton(
-                tooltip: '上一月',
-                icon: const Icon(Icons.chevron_left),
-                onPressed: () => onShiftMonth(-1),
+          Center(
+            child: SegmentedButton<_CalView>(
+              segments: const [
+                ButtonSegment(value: _CalView.month, label: Text('月')),
+                ButtonSegment(value: _CalView.year, label: Text('年')),
+              ],
+              selected: {view},
+              showSelectedIcon: false,
+              style: const ButtonStyle(
+                visualDensity: VisualDensity.compact,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
               ),
-              Expanded(
-                child: Center(
-                  child: Text(
-                    '$year年${this.month}月',
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.w600,
-                        ),
-                  ),
-                ),
-              ),
-              IconButton(
-                tooltip: '下一月',
-                icon: const Icon(Icons.chevron_right),
-                onPressed: () => onShiftMonth(1),
-              ),
-            ],
+              onSelectionChanged: (s) => onViewChanged(s.first),
+            ),
           ),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              for (final label in ['一', '二', '三', '四', '五', '六', '日'])
+          const SizedBox(height: 12),
+          if (isYearView) ...[
+            _YearSummary(year: yearSummary!),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                IconButton(
+                  tooltip: '上一年',
+                  icon: const Icon(Icons.chevron_left),
+                  onPressed: () => onShiftYear(-1),
+                ),
                 Expanded(
                   child: Center(
                     child: Text(
-                      label,
-                      style: Theme.of(context).textTheme.bodyMedium,
+                      '$year年',
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.w600,
+                          ),
                     ),
                   ),
                 ),
-            ],
-          ),
-          const SizedBox(height: 4),
-          _buildGrid(context, leadingBlanks, daysInMonth, byDate),
+                IconButton(
+                  tooltip: '下一年',
+                  icon: const Icon(Icons.chevron_right),
+                  onPressed: () => onShiftYear(1),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            _YearGrid(year: year, earnings: earnings, onTapMonth: onOpenMonth),
+          ] else ...[
+            _MonthSummary(month: month),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                IconButton(
+                  tooltip: '上一月',
+                  icon: const Icon(Icons.chevron_left),
+                  onPressed: () => onShiftMonth(-1),
+                ),
+                Expanded(
+                  child: Center(
+                    child: Text(
+                      '$year年${this.month}月',
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.w600,
+                          ),
+                    ),
+                  ),
+                ),
+                IconButton(
+                  tooltip: '下一月',
+                  icon: const Icon(Icons.chevron_right),
+                  onPressed: () => onShiftMonth(1),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                for (final label in ['一', '二', '三', '四', '五', '六', '日'])
+                  Expanded(
+                    child: Center(
+                      child: Text(
+                        label,
+                        style: Theme.of(context).textTheme.bodyMedium,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            _buildGrid(context, leadingBlanks, daysInMonth, byDate),
+          ],
           const SizedBox(height: 12),
           Text(
-            '收益为成本法口径：已剔除转入转出等资金进出影响；点击日期查看当天持仓明细。',
+            '收益为成本法口径：已剔除转入转出、还款借款等资金进出影响；点击日期查看当天持仓明细。',
             style: Theme.of(context).textTheme.bodySmall,
           ),
         ],
@@ -180,6 +261,154 @@ class _CalendarBody extends StatelessWidget {
       defaultVerticalAlignment: TableCellVerticalAlignment.middle,
       columnWidths: {for (var i = 0; i < 7; i++) i: const FlexColumnWidth()},
       children: rows,
+    );
+  }
+}
+
+class _YearSummary extends StatelessWidget {
+  const _YearSummary({required this.year});
+
+  final YearlyEarnings year;
+
+  @override
+  Widget build(BuildContext context) {
+    final rate = year.rate;
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('本年收益', style: Theme.of(context).textTheme.bodyMedium),
+                  const SizedBox(height: 4),
+                  Text(
+                    '${year.total >= 0 ? '+' : ''}¥${Formats.amount(year.total)}',
+                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                          color: context.changeColor(year.total),
+                          fontWeight: FontWeight.w700,
+                        ),
+                  ),
+                ],
+              ),
+            ),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Text('年收益率', style: Theme.of(context).textTheme.bodyMedium),
+                const SizedBox(height: 4),
+                Text(
+                  rate == null ? '--' : Formats.pct(rate),
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        color: rate == null
+                            ? Theme.of(context).colorScheme.outline
+                            : context.changeColor(rate),
+                        fontWeight: FontWeight.w700,
+                      ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _YearGrid extends StatelessWidget {
+  const _YearGrid({
+    required this.year,
+    required this.earnings,
+    required this.onTapMonth,
+  });
+
+  final int year;
+  final List<DailyEarning> earnings;
+  final ValueChanged<int> onTapMonth;
+
+  static const _monthNames = [
+    '1月', '2月', '3月', '4月', '5月', '6月',
+    '7月', '8月', '9月', '10月', '11月', '12月',
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    final calc = const DailyEarningsCalculator();
+    final byMonth = {
+      for (var m = 1; m <= 12; m++) m: calc.monthOf(earnings, year, m),
+    };
+    final rows = <TableRow>[];
+    for (var r = 0; r < 4; r++) {
+      final cells = <Widget>[];
+      for (var c = 0; c < 3; c++) {
+        final m = r * 3 + c + 1;
+        cells.add(_MonthCell(
+          label: _monthNames[m - 1],
+          month: byMonth[m]!,
+          onTap: byMonth[m]!.days > 0 ? () => onTapMonth(m) : null,
+        ));
+      }
+      rows.add(TableRow(children: cells));
+    }
+    return Table(
+      defaultVerticalAlignment: TableCellVerticalAlignment.middle,
+      columnWidths: {for (var i = 0; i < 3; i++) i: const FlexColumnWidth()},
+      children: rows,
+    );
+  }
+}
+
+class _MonthCell extends StatelessWidget {
+  const _MonthCell({
+    required this.label,
+    required this.month,
+    required this.onTap,
+  });
+
+  final String label;
+  final MonthlyEarnings month;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final hasData = month.days > 0;
+    final hasEarning = hasData && month.total != 0;
+    return InkWell(
+      borderRadius: BorderRadius.circular(12),
+      onTap: onTap,
+      child: Container(
+        margin: const EdgeInsets.all(4),
+        padding: const EdgeInsets.symmetric(vertical: 14),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(12),
+          color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.4),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(label, style: Theme.of(context).textTheme.bodyMedium),
+            const SizedBox(height: 4),
+            Text(
+              !hasData
+                  ? '--'
+                  : hasEarning
+                      ? '${month.total >= 0 ? '+' : ''}${Formats.amountCompact(month.total)}'
+                      : '0',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w600,
+                color: hasEarning
+                    ? context.changeColor(month.total)
+                    : Theme.of(context).colorScheme.outline,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
