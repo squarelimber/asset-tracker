@@ -60,9 +60,11 @@ class HistoryBackfillService {
   final Map<MarketSource, HistoryDataSource> _sources;
   MarketService? _market;
 
-  /// Marker for the weekend forward-fill fix + purchase-date filtering:
-  /// triggers one atomic recompute of historical snapshots.
-  static const _backfillV3Marker = 'backfill_v4_cost_fix';
+  /// Marker for the cost-replay fix (historical snapshots now carry the
+  /// replayed principal as cost): triggers one atomic recompute so days
+  /// before a repayment/borrowing no longer leak the transfer into the
+  /// daily return.
+  static const _backfillV3Marker = 'backfill_v5_cost_replay';
 
   /// Backfills snapshots for dates before today.
   ///
@@ -116,6 +118,7 @@ class HistoryBackfillService {
     // history instead of a fetched price series.
     final smoothCalc = const SmoothHistoryCalculator();
     final smoothValues = <int, Map<String, double>>{};
+    final smoothPrincipals = <int, Map<String, double>>{};
     final fillers = <int, HistoryPriceLookup>{};
     final futures = <Future<void>>[];
     for (final h in holdings) {
@@ -123,6 +126,12 @@ class HistoryBackfillService {
         if (AssetType.fromStorage(h.assetType).isAmountBased) {
           final flows = await _dao.getTransactionsForHolding(h.id);
           smoothValues[h.id] = smoothCalc.amountHistory(
+            h,
+            flows,
+            from: windowStart,
+            to: current,
+          );
+          smoothPrincipals[h.id] = smoothCalc.amountPrincipal(
             h,
             flows,
             from: windowStart,
@@ -192,10 +201,15 @@ class HistoryBackfillService {
           }
           if (value > 0) hasPrice = true;
           assets += value * valueRateOf(h, cnyRates);
-          cost += (type.isAmountBased
-                  ? (h.costPrice > 0 ? h.costPrice : h.quantity)
-                  : h.quantity * h.costPrice) *
-              costRateOf(h, cnyRates);
+          // The historical cost is the replayed principal (not the current
+          // costPrice), so days before a repayment/borrowing keep their
+          // pre-transfer invested amount — the value/cost pair then changes
+          // together and transfers never leak into the daily return.
+          final principal = type.isAmountBased
+              ? (smoothPrincipals[h.id]?[key] ??
+                  (h.costPrice > 0 ? h.costPrice : h.quantity))
+              : h.quantity * h.costPrice;
+          cost += principal * costRateOf(h, cnyRates);
           continue;
         }
         final filler = fillers[h.id];

@@ -126,7 +126,7 @@ void main() {
     final h = HoldingRow(
       id: 3,
       accountId: 1,
-      name: '月月宝',
+      name: '月月盈',
       assetType: 'bank_wealth',
       marketSource: 'manual',
       symbol: null,
@@ -146,5 +146,75 @@ void main() {
     expect(calc.sharePrice(h, DateTime(2026, 1, 1), from, to), closeTo(1.0, 1e-9));
     expect(calc.sharePrice(h, DateTime(2026, 1, 11), from, to), closeTo(1.21, 1e-9));
     expect(calc.sharePrice(h, DateTime(2026, 1, 6), from, to), closeTo(1.10, 1e-6));
+  });
+
+  test('amountPrincipal without flows is the current cost every day', () {
+    final h = _amountHolding(quantity: 90558, cost: 90558);
+    final map = calc.amountPrincipal(
+      h,
+      const [],
+      from: DateTime(2026, 1, 1),
+      to: DateTime(2026, 1, 11),
+    );
+    expect(map['2026-01-01'], closeTo(90558, 1e-6));
+    expect(map['2026-01-11'], closeTo(90558, 1e-6));
+  });
+
+  test('amountPrincipal keeps the pre-repayment principal before the flow', () {
+    final h = _amountHolding(quantity: 90558, cost: 90558);
+    // 1/5 repay 5514: principal 96072 -> 90558.
+    final repay = TransactionRow(
+      id: 4,
+      accountId: 1,
+      holdingId: null,
+      cashSourceId: 1,
+      cashTargetId: 2,
+      type: 'transfer_out',
+      quantity: null,
+      price: null,
+      amount: 5514,
+      currency: 'CNY',
+      occurredAt: DateTime(2026, 1, 5),
+      note: null,
+      costMoved: true,
+    );
+    final map = calc.amountPrincipal(
+      h,
+      [repay],
+      from: DateTime(2026, 1, 1),
+      to: DateTime(2026, 1, 11),
+    );
+    expect(map['2026-01-01'], closeTo(96072, 1e-6));
+    expect(map['2026-01-04'], closeTo(96072, 1e-6));
+    expect(map['2026-01-05'], closeTo(90558, 1e-6));
+    expect(map['2026-01-11'], closeTo(90558, 1e-6));
+  });
+
+  test('amountPrincipal ignores transfers that did not move the cost', () {
+    final h = _amountHolding(quantity: 1050, cost: 1000);
+    final legacy = TransactionRow(
+      id: 5,
+      accountId: 1,
+      holdingId: null,
+      cashSourceId: 1,
+      cashTargetId: 2,
+      type: 'transfer_out',
+      quantity: null,
+      price: null,
+      amount: 300,
+      currency: 'CNY',
+      occurredAt: DateTime(2026, 1, 5),
+      note: null,
+      costMoved: false,
+    );
+    final map = calc.amountPrincipal(
+      h,
+      [legacy],
+      from: DateTime(2026, 1, 1),
+      to: DateTime(2026, 1, 11),
+    );
+    expect(map['2026-01-01'], closeTo(1000, 1e-6));
+    expect(map['2026-01-05'], closeTo(1000, 1e-6));
+    expect(map['2026-01-11'], closeTo(1000, 1e-6));
   });
 }

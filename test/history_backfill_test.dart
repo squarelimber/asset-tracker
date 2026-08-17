@@ -7,6 +7,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:asset_tracker/core/enums.dart';
 import 'package:asset_tracker/data/asset_dao.dart';
 import 'package:asset_tracker/data/database.dart';
+import 'package:asset_tracker/domain/daily_earnings.dart';
 import 'package:asset_tracker/services/history_backfill_service.dart';
 import 'package:asset_tracker/services/market/history_source.dart';
 
@@ -267,5 +268,66 @@ void main() {
       // Cost must be 4000 (invested), NOT 5000 * 4000.
       expect(s.totalCost, closeTo(4000, 1e-6));
     }
+  });
+
+  test('repayment backfills the replayed cost so the transfer day earns zero',
+      () async {
+    final accountId = await dao.createAccount(AccountsCompanion.insert(
+      name: '测试账户',
+      type: 'general',
+    ));
+    // Repayment on 7/2: cash balance AND cost fell by 5514 together.
+    final cashId = await dao.createHolding(HoldingsCompanion.insert(
+      accountId: accountId,
+      name: '现金',
+      assetType: AssetType.bankDeposit.storageName,
+      marketSource: const Value('manual'),
+      quantity: const Value(44486),
+      costPrice: const Value(44486),
+      latestPrice: const Value(1),
+      purchaseDate: Value(DateTime(2026, 7, 1)),
+    ));
+    await dao.createHolding(HoldingsCompanion.insert(
+      accountId: accountId,
+      name: '信用卡',
+      assetType: AssetType.liability.storageName,
+      marketSource: const Value('manual'),
+      quantity: const Value(0),
+      costPrice: const Value(1),
+      latestPrice: const Value(1),
+      purchaseDate: Value(DateTime(2026, 7, 1)),
+    ));
+    await dao.createTransaction(TransactionsCompanion.insert(
+      accountId: accountId,
+      holdingId: const Value.absent(),
+      cashSourceId: Value(cashId),
+      cashTargetId: Value(cashId + 1),
+      type: 'transfer_out',
+      amount: 5514,
+      currency: const Value('CNY'),
+      occurredAt: DateTime(2026, 7, 2, 12),
+      costMoved: const Value(true),
+    ));
+
+    final service = HistoryBackfillService(dao, sources: {});
+    await service.backfill(now: DateTime(2026, 7, 3));
+
+    final snapshots = await dao.getSnapshots();
+    final byDate = {for (final s in snapshots) s.date: s};
+    // 7/1 (before the repayment): value and cost both carry the
+    // pre-repayment principal (50000), so the transfer is not attributed
+    // a phantom gain/loss on any day. 7/3 is "today" (handled by the daily
+    // snapshot), so the backfill window ends at 7/2.
+    expect(snapshots, hasLength(2));
+    expect(byDate['2026-07-01']!.totalValue, closeTo(50000, 1e-6));
+    expect(byDate['2026-07-01']!.totalCost, closeTo(50000, 1e-6));
+    expect(byDate['2026-07-02']!.totalValue, closeTo(44486, 1e-6));
+    expect(byDate['2026-07-02']!.totalCost, closeTo(44486, 1e-6));
+
+    // The repayment day reports zero profit.
+    final earning = const DailyEarningsCalculator()
+        .compute(snapshots)
+        .firstWhere((e) => e.date == '2026-07-02');
+    expect(earning.profit, closeTo(0, 1e-9));
   });
 }

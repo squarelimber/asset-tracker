@@ -13,10 +13,10 @@ class DailyEarning {
   /// Snapshot date (yyyy-MM-dd).
   final String date;
 
-  /// Daily asset return = (assets - cost) today minus yesterday, where
-  /// assets = totalValue + liabilities. Liabilities changes (principal
-  /// repayments / borrowing) are cash flows, not gains, so they are
-  /// excluded.
+  /// Daily asset return = (net worth - cost) today minus yesterday. The
+  /// snapshot's totalValue already excludes liabilities, and historical
+  /// snapshots replay the cost alongside the balance, so principal
+  /// repayments / borrowing are cash flows, not gains.
   final double profit;
 
   final double totalValue;
@@ -81,13 +81,12 @@ class YearlyEarnings {
   final profitToday = _assetProfit(today);
   final profitYesterday = _assetProfit(yesterday);
   final profit = profitToday - profitYesterday;
-  final base = yesterday.totalValue + yesterday.liabilities;
+  final base = yesterday.totalValue;
   final pct = base <= 0 ? null : profit / base;
   return (profit: profit, pct: pct);
 }
 
-double _assetProfit(SnapshotRow s) =>
-    s.totalValue + s.liabilities - s.totalCost;
+double _assetProfit(SnapshotRow s) => s.totalValue - s.totalCost;
 
 /// Computes per-day earnings from daily snapshots.
 ///
@@ -130,7 +129,7 @@ class DailyEarningsCalculator {
     for (final d in days) {
       total += d.profit;
     }
-    final base = days.first.totalValue + days.first.liabilities;
+    final base = days.first.totalValue;
     return MonthlyEarnings(
       year: year,
       month: month,
@@ -151,17 +150,14 @@ class DailyEarningsCalculator {
       return YearlyEarnings(year: year, total: 0, rate: null, months: const []);
     }
     final total = months.fold(0.0, (sum, m) => sum + m.total);
-    // Base = the first month's starting asset value (assets - liabilities
-    // converted back: totalValue + liabilities).
+    // Base = the year's first month's starting net worth.
     final firstPrefix =
         '$year-${months.first.month.toString().padLeft(2, '0')}-';
     final firstDays = earnings
         .where((e) => e.date.startsWith(firstPrefix))
         .toList()
       ..sort((a, b) => a.date.compareTo(b.date));
-    final startBase = firstDays.isEmpty
-        ? 0.0
-        : firstDays.first.totalValue + firstDays.first.liabilities;
+    final startBase = firstDays.isEmpty ? 0.0 : firstDays.first.totalValue;
     return YearlyEarnings(
       year: year,
       total: total,
