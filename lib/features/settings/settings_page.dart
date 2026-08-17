@@ -140,8 +140,10 @@ class SettingsPage extends ConsumerWidget {
       final dir = await getTemporaryDirectory();
       final file = File('${dir.path}/$fileName');
       await file.writeAsBytes(bytes);
-      await Share.shareXFiles(
-        [XFile(file.path, mimeType: mime, name: fileName)],
+      await SharePlus.instance.share(
+        ShareParams(
+          files: [XFile(file.path, mimeType: mime, name: fileName)],
+        ),
       );
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
