@@ -70,12 +70,23 @@ class AppDatabase extends _$AppDatabase {
           }
           // v6 -> v7: multi-device sync support — updatedAt on every synced
           // table (backfilled from createdAt) and the tombstone table.
+          //
+          // NOTE: drift's addColumn() emits `DEFAULT CAST(strftime(...))`
+          // for dateTime().withDefault(currentDateAndTime) columns, which
+          // SQLite rejects for ALTER TABLE ADD COLUMN (non-constant
+          // default). Add the column manually with a constant default and
+          // backfill real timestamps.
           if (from < 7) {
             final db = m.database as AppDatabase;
-            await m.addColumn(db.accounts, db.accounts.updatedAt);
-            await m.addColumn(db.transactions, db.transactions.updatedAt);
-            await m.addColumn(db.alertRules, db.alertRules.updatedAt);
-            await m.createTable(db.syncTombstones);
+            await customStatement(
+              'ALTER TABLE accounts ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0;',
+            );
+            await customStatement(
+              'ALTER TABLE transactions ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0;',
+            );
+            await customStatement(
+              'ALTER TABLE alert_rules ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0;',
+            );
             await customStatement(
               'UPDATE accounts SET updated_at = created_at;',
             );
@@ -85,6 +96,7 @@ class AppDatabase extends _$AppDatabase {
             await customStatement(
               'UPDATE alert_rules SET updated_at = created_at;',
             );
+            await m.createTable(db.syncTombstones);
           }
         },
       );
