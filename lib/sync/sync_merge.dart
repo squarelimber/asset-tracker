@@ -231,7 +231,13 @@ class SyncMerger {
 
   static DateTime _updatedAt(Map<String, dynamic> row) {
     final v = parseIso(row['updatedAt']);
-    return v ?? DateTime.fromMillisecondsSinceEpoch(0);
+    if (v != null && v.year >= 2000) return v;
+    // Rows inserted without an explicit updatedAt (migration fallback,
+    // legacy writes) carry the epoch default — fall back to createdAt so
+    // last-write-wins still behaves sensibly.
+    final created = parseIso(row['createdAt']);
+    if (created != null) return created;
+    return DateTime.fromMillisecondsSinceEpoch(0);
   }
 
   static Map<String, dynamic>? _newerOf(
