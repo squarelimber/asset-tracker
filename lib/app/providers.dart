@@ -63,8 +63,10 @@ final snapshotServiceProvider = Provider<SnapshotService>(
   ),
 );
 
-/// One-time per-session history sync marker (legacy rebuild trigger).
-const historySyncV5Key = 'history_sync_v5';
+/// One-time per-session history sync marker. Bumped to v6 to force a full
+/// snapshot rebuild once after the sync-repayment bug fix, so already
+/// corrupted devices regenerate their derived snapshots.
+const historySyncV6Key = 'history_sync_v6';
 
 /// Today's earning in the snapshot (calendar) view: today's snapshot
 /// profit (value - cost) minus yesterday's, matching the earnings
@@ -83,7 +85,7 @@ final todayEarningProvider =
 final historySyncProvider = FutureProvider<BackfillResult?>((ref) async {
   final dao = ref.read(daoProvider);
   final dirty = await dao.getSetting(historySyncDirtyKey);
-  final firstRun = await dao.getSetting(historySyncV5Key) == null;
+  final firstRun = await dao.getSetting(historySyncV6Key) == null;
   final result = await ref.read(historyBackfillServiceProvider).backfill(
         forceRebuild: dirty == historyDirtySet || firstRun,
       );
@@ -91,7 +93,7 @@ final historySyncProvider = FutureProvider<BackfillResult?>((ref) async {
     await dao.setSetting(historySyncDirtyKey, historyDirtyClear);
   }
   if (firstRun) {
-    await dao.setSetting(historySyncV5Key, '1');
+    await dao.setSetting(historySyncV6Key, '1');
   }
   // Refresh today's snapshot so the calendar's today matches the
   // dashboard's live summary.
@@ -162,7 +164,10 @@ final transactionsByHoldingProvider = StreamProvider.family<List<TransactionRow>
 // ---------------------------------------------------------------------------
 
 final snapshotsProvider = StreamProvider<List<SnapshotRow>>(
-  (ref) => ref.watch(daoProvider).watchSnapshots(),
+  // Snapshots are always recorded in CNY (values are CNY-converted); filter
+  // to a single currency so today's earning and the calendar never see a
+  // stray foreign-currency row that would shift the last/last-1 baseline.
+  (ref) => ref.watch(daoProvider).watchSnapshots(currency: 'CNY'),
 );
 
 // ---------------------------------------------------------------------------
