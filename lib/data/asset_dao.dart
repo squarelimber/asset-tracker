@@ -22,20 +22,41 @@ class AssetDao {
 
   Future<int> createAccount(AccountsCompanion entry) => _db.into(_db.accounts).insert(entry);
 
-  Future<bool> updateAccount(AccountRow account) async {
-    return _db.update(_db.accounts).replace(account);
+  Future<int> updateAccount(AccountRow account, {DateTime? now}) async {
+    final stmt = _db.update(_db.accounts)..where((t) => t.id.equals(account.id));
+    return stmt.write(
+      AccountsCompanion(
+        name: Value(account.name),
+        type: Value(account.type),
+        currency: Value(account.currency),
+        note: Value(account.note),
+        updatedAt: Value(now ?? DateTime.now()),
+      ),
+    );
   }
 
   Future<int> deleteAccount(int id) async {
     return _db.transaction(() async {
       final holdings =
           await (_db.select(_db.holdings)..where((t) => t.accountId.equals(id))).get();
+      final cascadeTransactions = await (_db.select(_db.transactions)
+            ..where((t) => t.accountId.equals(id)))
+          .get();
       for (final h in holdings) {
+        final hTransactions = await (_db.select(_db.transactions)
+              ..where((t) => t.holdingId.equals(h.id)))
+            .get();
+        cascadeTransactions.addAll(hTransactions);
         await (_db.delete(_db.holdings)..where((t) => t.id.equals(h.id))).go();
-        await (_db.delete(_db.transactions)..where((t) => t.holdingId.equals(h.id))).go();
+        await upsertTombstone('holdings', '${h.id}');
+      }
+      for (final t in cascadeTransactions) {
+        await upsertTombstone('transactions', '${t.id}');
       }
       await (_db.delete(_db.transactions)..where((t) => t.accountId.equals(id))).go();
-      return (_db.delete(_db.accounts)..where((t) => t.id.equals(id))).go();
+      await (_db.delete(_db.accounts)..where((t) => t.id.equals(id))).go();
+      await upsertTombstone('accounts', '$id');
+      return id;
     });
   }
 
@@ -90,10 +111,20 @@ class AssetDao {
   /// cashTargetId), so no orphan flows are left behind.
   Future<int> deleteHolding(int id) async {
     return _db.transaction(() async {
+      final deleted = <TransactionRow>[
+        ...await (_db.select(_db.transactions)..where((t) => t.holdingId.equals(id))).get(),
+        ...await (_db.select(_db.transactions)..where((t) => t.cashSourceId.equals(id))).get(),
+        ...await (_db.select(_db.transactions)..where((t) => t.cashTargetId.equals(id))).get(),
+      ];
       await (_db.delete(_db.transactions)..where((t) => t.holdingId.equals(id))).go();
       await (_db.delete(_db.transactions)..where((t) => t.cashSourceId.equals(id))).go();
       await (_db.delete(_db.transactions)..where((t) => t.cashTargetId.equals(id))).go();
-      return (_db.delete(_db.holdings)..where((t) => t.id.equals(id))).go();
+      for (final t in deleted) {
+        await upsertTombstone('transactions', '${t.id}');
+      }
+      await (_db.delete(_db.holdings)..where((t) => t.id.equals(id))).go();
+      await upsertTombstone('holdings', '$id');
+      return id;
     });
   }
 
@@ -167,8 +198,36 @@ class AssetDao {
     return rows.isNotEmpty;
   }
 
-  Future<int> deleteTransaction(int id) =>
-      (_db.delete(_db.transactions)..where((t) => t.id.equals(id))).go();
+  Future<int> deleteTransaction(int id) async {
+    return _db.transaction(() async {
+      await (_db.delete(_db.transactions)..where((t) => t.id.equals(id))).go();
+      await upsertTombstone('transactions', '$id');
+      return id;
+    });
+  }
+
+  /// Writes a transaction row as-is (used by sync to apply merged rows
+  /// without re-running the buy/sell/transfer linkage logic).
+  Future<void> updateTransaction(TransactionRow t, {DateTime? now}) async {
+    final stmt = _db.update(_db.transactions)..where((c) => c.id.equals(t.id));
+    await stmt.write(
+      TransactionsCompanion(
+        accountId: Value(t.accountId),
+        holdingId: Value(t.holdingId),
+        cashSourceId: Value(t.cashSourceId),
+        cashTargetId: Value(t.cashTargetId),
+        type: Value(t.type),
+        quantity: Value(t.quantity),
+        price: Value(t.price),
+        amount: Value(t.amount),
+        currency: Value(t.currency),
+        occurredAt: Value(t.occurredAt),
+        note: Value(t.note),
+        costMoved: Value(t.costMoved),
+        updatedAt: Value(now ?? DateTime.now()),
+      ),
+    );
+  }
 
   // ---------------------------------------------------------------------------
   // Price cache
@@ -219,6 +278,13 @@ class AssetDao {
     return (_db.delete(_db.snapshots)..where((t) => t.date.isSmallerThanValue(date))).go();
   }
 
+  /// Deletes one snapshot row by its composite key.
+  Future<void> deleteSnapshot(String date, String currency) {
+    return (_db.delete(_db.snapshots)
+          ..where((t) => t.date.equals(date) & t.currency.equals(currency)))
+        .go();
+  }
+
   /// Bulk-inserts snapshots in one transaction (much faster than per-row).
   Future<void> batchInsertSnapshots(List<SnapshotRow> rows, {bool orReplace = true}) async {
     await _db.batch((b) {
@@ -256,13 +322,34 @@ class AssetDao {
 
   Future<List<AlertRuleRow>> getAlertRules() => _db.select(_db.alertRules).get();
 
+  Future<AlertRuleRow?> getAlertRule(int id) {
+    return (_db.select(_db.alertRules)..where((t) => t.id.equals(id)))
+        .getSingleOrNull();
+  }
+
   Future<int> createAlertRule(AlertRulesCompanion entry) =>
       _db.into(_db.alertRules).insert(entry);
 
-  Future<void> updateAlertRule(AlertRuleRow rule) => _db.update(_db.alertRules).replace(rule);
+  Future<void> updateAlertRule(AlertRuleRow rule, {DateTime? now}) async {
+    final stmt = _db.update(_db.alertRules)..where((t) => t.id.equals(rule.id));
+    await stmt.write(
+      AlertRulesCompanion(
+        type: Value(rule.type),
+        name: Value(rule.name),
+        params: Value(rule.params),
+        enabled: Value(rule.enabled),
+        updatedAt: Value(now ?? DateTime.now()),
+      ),
+    );
+  }
 
-  Future<int> deleteAlertRule(int id) =>
-      (_db.delete(_db.alertRules)..where((t) => t.id.equals(id))).go();
+  Future<int> deleteAlertRule(int id) async {
+    return _db.transaction(() async {
+      await (_db.delete(_db.alertRules)..where((t) => t.id.equals(id))).go();
+      await upsertTombstone('alertRules', '$id');
+      return id;
+    });
+  }
 
   // ---------------------------------------------------------------------------
   // Alert events
@@ -284,6 +371,41 @@ class AssetDao {
 
   Future<int> createAlertEvent(AlertEventsCompanion entry) =>
       _db.into(_db.alertEvents).insert(entry);
+
+  // ---------------------------------------------------------------------------
+  // Sync tombstones
+  // ---------------------------------------------------------------------------
+
+  Stream<List<SyncTombstoneRow>> watchTombstones() =>
+      _db.select(_db.syncTombstones).watch();
+
+  Future<List<SyncTombstoneRow>> getTombstones() =>
+      _db.select(_db.syncTombstones).get();
+
+  Future<void> upsertTombstone(
+    String table,
+    String rowKey, {
+    DateTime? deletedAt,
+  }) =>
+      _db.into(_db.syncTombstones).insertOnConflictUpdate(
+            SyncTombstonesCompanion.insert(
+              table: table,
+              rowKey: rowKey,
+              deletedAt: Value(deletedAt ?? DateTime.now()),
+            ),
+          );
+
+  Future<int> removeTombstone(String table, String rowKey) =>
+      (_db.delete(_db.syncTombstones)
+            ..where((t) => t.table.equals(table) & t.rowKey.equals(rowKey)))
+          .go();
+
+  /// Deletes a tombstone row entirely (used after a tombstone is pushed to
+  /// the server so it does not re-apply locally).
+  Future<void> deleteTombstoneRow(SyncTombstoneRow row) =>
+      _db.delete(_db.syncTombstones).delete(row);
+
+  Future<void> deleteAllTombstones() => _db.delete(_db.syncTombstones).go();
 
   // ---------------------------------------------------------------------------
   // Bulk access for backup/restore

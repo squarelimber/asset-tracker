@@ -27,6 +27,7 @@ TransactionRow _txn({
     occurredAt: at ?? DateTime(2026, 8, 1),
     note: null,
     costMoved: true,
+    updatedAt: at ?? DateTime(2026, 8, 1),
   );
 }
 

@@ -15,13 +15,14 @@ part 'database.g.dart';
     AlertRules,
     AlertEvents,
     Settings,
+    SyncTombstones,
   ],
 )
 class AppDatabase extends _$AppDatabase {
   AppDatabase([QueryExecutor? executor]) : super(executor ?? _openConnection());
 
   @override
-  int get schemaVersion => 6;
+  int get schemaVersion => 7;
 
   static QueryExecutor _openConnection() {
     // Web requires explicit web options: sqlite3.wasm and drift_worker.js
@@ -66,6 +67,24 @@ class AppDatabase extends _$AppDatabase {
           if (from < 6) {
             final db = m.database as AppDatabase;
             await m.addColumn(db.holdings, db.holdings.riskLevel);
+          }
+          // v6 -> v7: multi-device sync support — updatedAt on every synced
+          // table (backfilled from createdAt) and the tombstone table.
+          if (from < 7) {
+            final db = m.database as AppDatabase;
+            await m.addColumn(db.accounts, db.accounts.updatedAt);
+            await m.addColumn(db.transactions, db.transactions.updatedAt);
+            await m.addColumn(db.alertRules, db.alertRules.updatedAt);
+            await m.createTable(db.syncTombstones);
+            await customStatement(
+              'UPDATE accounts SET updated_at = created_at;',
+            );
+            await customStatement(
+              'UPDATE transactions SET updated_at = occurred_at;',
+            );
+            await customStatement(
+              'UPDATE alert_rules SET updated_at = created_at;',
+            );
           }
         },
       );

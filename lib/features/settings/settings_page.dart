@@ -15,6 +15,7 @@ import '../../core/formats.dart';
 import '../../core/responsive.dart';
 import '../../services/backup_service.dart';
 import '../../services/csv_export.dart';
+import 'sync_settings_page.dart';
 
 /// Whether the platform has a native save dialog. Android/iOS do not, so
 /// exports go through the system share sheet instead.
@@ -91,6 +92,29 @@ class SettingsPage extends ConsumerWidget {
                     onTap: () => _exportCsv(context, ref, csv: true, holdings: false),
                   ),
                 ],
+              ),
+            ),
+            const SizedBox(height: 24),
+            const Divider(),
+            const SizedBox(height: 8),
+            Text('数据同步', style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 8),
+            const Text(
+              '在自建服务器（如 NAS）间同步多台设备的数据。',
+              style: TextStyle(fontSize: 13),
+            ),
+            const SizedBox(height: 16),
+            Card(
+              child: ListTile(
+                leading: const Icon(Icons.sync),
+                title: const Text('同步设置'),
+                subtitle: const Text('服务器地址、访问令牌、立即同步'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => const SyncSettingsPage(),
+                  ),
+                ),
               ),
             ),
             const SizedBox(height: 24),

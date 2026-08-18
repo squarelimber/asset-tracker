@@ -77,6 +77,18 @@ class $AccountsTable extends Accounts
     requiredDuringInsert: false,
     defaultValue: currentDateAndTime,
   );
+  static const VerificationMeta _updatedAtMeta = const VerificationMeta(
+    'updatedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> updatedAt = GeneratedColumn<DateTime>(
+    'updated_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: false,
+    defaultValue: currentDateAndTime,
+  );
   @override
   List<GeneratedColumn> get $columns => [
     id,
@@ -85,6 +97,7 @@ class $AccountsTable extends Accounts
     currency,
     note,
     createdAt,
+    updatedAt,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -135,6 +148,12 @@ class $AccountsTable extends Accounts
         createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta),
       );
     }
+    if (data.containsKey('updated_at')) {
+      context.handle(
+        _updatedAtMeta,
+        updatedAt.isAcceptableOrUnknown(data['updated_at']!, _updatedAtMeta),
+      );
+    }
     return context;
   }
 
@@ -168,6 +187,10 @@ class $AccountsTable extends Accounts
         DriftSqlType.dateTime,
         data['${effectivePrefix}created_at'],
       )!,
+      updatedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}updated_at'],
+      )!,
     );
   }
 
@@ -184,6 +207,7 @@ class AccountRow extends DataClass implements Insertable<AccountRow> {
   final String currency;
   final String? note;
   final DateTime createdAt;
+  final DateTime updatedAt;
   const AccountRow({
     required this.id,
     required this.name,
@@ -191,6 +215,7 @@ class AccountRow extends DataClass implements Insertable<AccountRow> {
     required this.currency,
     this.note,
     required this.createdAt,
+    required this.updatedAt,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -203,6 +228,7 @@ class AccountRow extends DataClass implements Insertable<AccountRow> {
       map['note'] = Variable<String>(note);
     }
     map['created_at'] = Variable<DateTime>(createdAt);
+    map['updated_at'] = Variable<DateTime>(updatedAt);
     return map;
   }
 
@@ -214,6 +240,7 @@ class AccountRow extends DataClass implements Insertable<AccountRow> {
       currency: Value(currency),
       note: note == null && nullToAbsent ? const Value.absent() : Value(note),
       createdAt: Value(createdAt),
+      updatedAt: Value(updatedAt),
     );
   }
 
@@ -229,6 +256,7 @@ class AccountRow extends DataClass implements Insertable<AccountRow> {
       currency: serializer.fromJson<String>(json['currency']),
       note: serializer.fromJson<String?>(json['note']),
       createdAt: serializer.fromJson<DateTime>(json['createdAt']),
+      updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
     );
   }
   @override
@@ -241,6 +269,7 @@ class AccountRow extends DataClass implements Insertable<AccountRow> {
       'currency': serializer.toJson<String>(currency),
       'note': serializer.toJson<String?>(note),
       'createdAt': serializer.toJson<DateTime>(createdAt),
+      'updatedAt': serializer.toJson<DateTime>(updatedAt),
     };
   }
 
@@ -251,6 +280,7 @@ class AccountRow extends DataClass implements Insertable<AccountRow> {
     String? currency,
     Value<String?> note = const Value.absent(),
     DateTime? createdAt,
+    DateTime? updatedAt,
   }) => AccountRow(
     id: id ?? this.id,
     name: name ?? this.name,
@@ -258,6 +288,7 @@ class AccountRow extends DataClass implements Insertable<AccountRow> {
     currency: currency ?? this.currency,
     note: note.present ? note.value : this.note,
     createdAt: createdAt ?? this.createdAt,
+    updatedAt: updatedAt ?? this.updatedAt,
   );
   AccountRow copyWithCompanion(AccountsCompanion data) {
     return AccountRow(
@@ -267,6 +298,7 @@ class AccountRow extends DataClass implements Insertable<AccountRow> {
       currency: data.currency.present ? data.currency.value : this.currency,
       note: data.note.present ? data.note.value : this.note,
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+      updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
     );
   }
 
@@ -278,13 +310,15 @@ class AccountRow extends DataClass implements Insertable<AccountRow> {
           ..write('type: $type, ')
           ..write('currency: $currency, ')
           ..write('note: $note, ')
-          ..write('createdAt: $createdAt')
+          ..write('createdAt: $createdAt, ')
+          ..write('updatedAt: $updatedAt')
           ..write(')'))
         .toString();
   }
 
   @override
-  int get hashCode => Object.hash(id, name, type, currency, note, createdAt);
+  int get hashCode =>
+      Object.hash(id, name, type, currency, note, createdAt, updatedAt);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -294,7 +328,8 @@ class AccountRow extends DataClass implements Insertable<AccountRow> {
           other.type == this.type &&
           other.currency == this.currency &&
           other.note == this.note &&
-          other.createdAt == this.createdAt);
+          other.createdAt == this.createdAt &&
+          other.updatedAt == this.updatedAt);
 }
 
 class AccountsCompanion extends UpdateCompanion<AccountRow> {
@@ -304,6 +339,7 @@ class AccountsCompanion extends UpdateCompanion<AccountRow> {
   final Value<String> currency;
   final Value<String?> note;
   final Value<DateTime> createdAt;
+  final Value<DateTime> updatedAt;
   const AccountsCompanion({
     this.id = const Value.absent(),
     this.name = const Value.absent(),
@@ -311,6 +347,7 @@ class AccountsCompanion extends UpdateCompanion<AccountRow> {
     this.currency = const Value.absent(),
     this.note = const Value.absent(),
     this.createdAt = const Value.absent(),
+    this.updatedAt = const Value.absent(),
   });
   AccountsCompanion.insert({
     this.id = const Value.absent(),
@@ -319,6 +356,7 @@ class AccountsCompanion extends UpdateCompanion<AccountRow> {
     this.currency = const Value.absent(),
     this.note = const Value.absent(),
     this.createdAt = const Value.absent(),
+    this.updatedAt = const Value.absent(),
   }) : name = Value(name),
        type = Value(type);
   static Insertable<AccountRow> custom({
@@ -328,6 +366,7 @@ class AccountsCompanion extends UpdateCompanion<AccountRow> {
     Expression<String>? currency,
     Expression<String>? note,
     Expression<DateTime>? createdAt,
+    Expression<DateTime>? updatedAt,
   }) {
     return RawValuesInsertable({
       if (id != null) 'id': id,
@@ -336,6 +375,7 @@ class AccountsCompanion extends UpdateCompanion<AccountRow> {
       if (currency != null) 'currency': currency,
       if (note != null) 'note': note,
       if (createdAt != null) 'created_at': createdAt,
+      if (updatedAt != null) 'updated_at': updatedAt,
     });
   }
 
@@ -346,6 +386,7 @@ class AccountsCompanion extends UpdateCompanion<AccountRow> {
     Value<String>? currency,
     Value<String?>? note,
     Value<DateTime>? createdAt,
+    Value<DateTime>? updatedAt,
   }) {
     return AccountsCompanion(
       id: id ?? this.id,
@@ -354,6 +395,7 @@ class AccountsCompanion extends UpdateCompanion<AccountRow> {
       currency: currency ?? this.currency,
       note: note ?? this.note,
       createdAt: createdAt ?? this.createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
     );
   }
 
@@ -378,6 +420,9 @@ class AccountsCompanion extends UpdateCompanion<AccountRow> {
     if (createdAt.present) {
       map['created_at'] = Variable<DateTime>(createdAt.value);
     }
+    if (updatedAt.present) {
+      map['updated_at'] = Variable<DateTime>(updatedAt.value);
+    }
     return map;
   }
 
@@ -389,7 +434,8 @@ class AccountsCompanion extends UpdateCompanion<AccountRow> {
           ..write('type: $type, ')
           ..write('currency: $currency, ')
           ..write('note: $note, ')
-          ..write('createdAt: $createdAt')
+          ..write('createdAt: $createdAt, ')
+          ..write('updatedAt: $updatedAt')
           ..write(')'))
         .toString();
   }
@@ -1454,6 +1500,18 @@ class $TransactionsTable extends Transactions
     ),
     defaultValue: const Constant(true),
   );
+  static const VerificationMeta _updatedAtMeta = const VerificationMeta(
+    'updatedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> updatedAt = GeneratedColumn<DateTime>(
+    'updated_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: false,
+    defaultValue: currentDateAndTime,
+  );
   @override
   List<GeneratedColumn> get $columns => [
     id,
@@ -1469,6 +1527,7 @@ class $TransactionsTable extends Transactions
     occurredAt,
     note,
     costMoved,
+    updatedAt,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -1571,6 +1630,12 @@ class $TransactionsTable extends Transactions
         costMoved.isAcceptableOrUnknown(data['cost_moved']!, _costMovedMeta),
       );
     }
+    if (data.containsKey('updated_at')) {
+      context.handle(
+        _updatedAtMeta,
+        updatedAt.isAcceptableOrUnknown(data['updated_at']!, _updatedAtMeta),
+      );
+    }
     return context;
   }
 
@@ -1636,6 +1701,10 @@ class $TransactionsTable extends Transactions
         DriftSqlType.bool,
         data['${effectivePrefix}cost_moved'],
       )!,
+      updatedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}updated_at'],
+      )!,
     );
   }
 
@@ -1663,6 +1732,7 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
   /// (costPrice) together with the balance. Legacy transfers recorded
   /// before the fix have this false, so removal must not roll the cost back.
   final bool costMoved;
+  final DateTime updatedAt;
   const TransactionRow({
     required this.id,
     required this.accountId,
@@ -1677,6 +1747,7 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
     required this.occurredAt,
     this.note,
     required this.costMoved,
+    required this.updatedAt,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -1706,6 +1777,7 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
       map['note'] = Variable<String>(note);
     }
     map['cost_moved'] = Variable<bool>(costMoved);
+    map['updated_at'] = Variable<DateTime>(updatedAt);
     return map;
   }
 
@@ -1734,6 +1806,7 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
       occurredAt: Value(occurredAt),
       note: note == null && nullToAbsent ? const Value.absent() : Value(note),
       costMoved: Value(costMoved),
+      updatedAt: Value(updatedAt),
     );
   }
 
@@ -1756,6 +1829,7 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
       occurredAt: serializer.fromJson<DateTime>(json['occurredAt']),
       note: serializer.fromJson<String?>(json['note']),
       costMoved: serializer.fromJson<bool>(json['costMoved']),
+      updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
     );
   }
   @override
@@ -1775,6 +1849,7 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
       'occurredAt': serializer.toJson<DateTime>(occurredAt),
       'note': serializer.toJson<String?>(note),
       'costMoved': serializer.toJson<bool>(costMoved),
+      'updatedAt': serializer.toJson<DateTime>(updatedAt),
     };
   }
 
@@ -1792,6 +1867,7 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
     DateTime? occurredAt,
     Value<String?> note = const Value.absent(),
     bool? costMoved,
+    DateTime? updatedAt,
   }) => TransactionRow(
     id: id ?? this.id,
     accountId: accountId ?? this.accountId,
@@ -1806,6 +1882,7 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
     occurredAt: occurredAt ?? this.occurredAt,
     note: note.present ? note.value : this.note,
     costMoved: costMoved ?? this.costMoved,
+    updatedAt: updatedAt ?? this.updatedAt,
   );
   TransactionRow copyWithCompanion(TransactionsCompanion data) {
     return TransactionRow(
@@ -1828,6 +1905,7 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
           : this.occurredAt,
       note: data.note.present ? data.note.value : this.note,
       costMoved: data.costMoved.present ? data.costMoved.value : this.costMoved,
+      updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
     );
   }
 
@@ -1846,7 +1924,8 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
           ..write('currency: $currency, ')
           ..write('occurredAt: $occurredAt, ')
           ..write('note: $note, ')
-          ..write('costMoved: $costMoved')
+          ..write('costMoved: $costMoved, ')
+          ..write('updatedAt: $updatedAt')
           ..write(')'))
         .toString();
   }
@@ -1866,6 +1945,7 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
     occurredAt,
     note,
     costMoved,
+    updatedAt,
   );
   @override
   bool operator ==(Object other) =>
@@ -1883,7 +1963,8 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
           other.currency == this.currency &&
           other.occurredAt == this.occurredAt &&
           other.note == this.note &&
-          other.costMoved == this.costMoved);
+          other.costMoved == this.costMoved &&
+          other.updatedAt == this.updatedAt);
 }
 
 class TransactionsCompanion extends UpdateCompanion<TransactionRow> {
@@ -1900,6 +1981,7 @@ class TransactionsCompanion extends UpdateCompanion<TransactionRow> {
   final Value<DateTime> occurredAt;
   final Value<String?> note;
   final Value<bool> costMoved;
+  final Value<DateTime> updatedAt;
   const TransactionsCompanion({
     this.id = const Value.absent(),
     this.accountId = const Value.absent(),
@@ -1914,6 +1996,7 @@ class TransactionsCompanion extends UpdateCompanion<TransactionRow> {
     this.occurredAt = const Value.absent(),
     this.note = const Value.absent(),
     this.costMoved = const Value.absent(),
+    this.updatedAt = const Value.absent(),
   });
   TransactionsCompanion.insert({
     this.id = const Value.absent(),
@@ -1929,6 +2012,7 @@ class TransactionsCompanion extends UpdateCompanion<TransactionRow> {
     required DateTime occurredAt,
     this.note = const Value.absent(),
     this.costMoved = const Value.absent(),
+    this.updatedAt = const Value.absent(),
   }) : accountId = Value(accountId),
        type = Value(type),
        amount = Value(amount),
@@ -1947,6 +2031,7 @@ class TransactionsCompanion extends UpdateCompanion<TransactionRow> {
     Expression<DateTime>? occurredAt,
     Expression<String>? note,
     Expression<bool>? costMoved,
+    Expression<DateTime>? updatedAt,
   }) {
     return RawValuesInsertable({
       if (id != null) 'id': id,
@@ -1962,6 +2047,7 @@ class TransactionsCompanion extends UpdateCompanion<TransactionRow> {
       if (occurredAt != null) 'occurred_at': occurredAt,
       if (note != null) 'note': note,
       if (costMoved != null) 'cost_moved': costMoved,
+      if (updatedAt != null) 'updated_at': updatedAt,
     });
   }
 
@@ -1979,6 +2065,7 @@ class TransactionsCompanion extends UpdateCompanion<TransactionRow> {
     Value<DateTime>? occurredAt,
     Value<String?>? note,
     Value<bool>? costMoved,
+    Value<DateTime>? updatedAt,
   }) {
     return TransactionsCompanion(
       id: id ?? this.id,
@@ -1994,6 +2081,7 @@ class TransactionsCompanion extends UpdateCompanion<TransactionRow> {
       occurredAt: occurredAt ?? this.occurredAt,
       note: note ?? this.note,
       costMoved: costMoved ?? this.costMoved,
+      updatedAt: updatedAt ?? this.updatedAt,
     );
   }
 
@@ -2039,6 +2127,9 @@ class TransactionsCompanion extends UpdateCompanion<TransactionRow> {
     if (costMoved.present) {
       map['cost_moved'] = Variable<bool>(costMoved.value);
     }
+    if (updatedAt.present) {
+      map['updated_at'] = Variable<DateTime>(updatedAt.value);
+    }
     return map;
   }
 
@@ -2057,7 +2148,8 @@ class TransactionsCompanion extends UpdateCompanion<TransactionRow> {
           ..write('currency: $currency, ')
           ..write('occurredAt: $occurredAt, ')
           ..write('note: $note, ')
-          ..write('costMoved: $costMoved')
+          ..write('costMoved: $costMoved, ')
+          ..write('updatedAt: $updatedAt')
           ..write(')'))
         .toString();
   }
@@ -3112,6 +3204,18 @@ class $AlertRulesTable extends AlertRules
     requiredDuringInsert: false,
     defaultValue: currentDateAndTime,
   );
+  static const VerificationMeta _updatedAtMeta = const VerificationMeta(
+    'updatedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> updatedAt = GeneratedColumn<DateTime>(
+    'updated_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: false,
+    defaultValue: currentDateAndTime,
+  );
   @override
   List<GeneratedColumn> get $columns => [
     id,
@@ -3120,6 +3224,7 @@ class $AlertRulesTable extends AlertRules
     params,
     enabled,
     createdAt,
+    updatedAt,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -3170,6 +3275,12 @@ class $AlertRulesTable extends AlertRules
         createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta),
       );
     }
+    if (data.containsKey('updated_at')) {
+      context.handle(
+        _updatedAtMeta,
+        updatedAt.isAcceptableOrUnknown(data['updated_at']!, _updatedAtMeta),
+      );
+    }
     return context;
   }
 
@@ -3203,6 +3314,10 @@ class $AlertRulesTable extends AlertRules
         DriftSqlType.dateTime,
         data['${effectivePrefix}created_at'],
       )!,
+      updatedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}updated_at'],
+      )!,
     );
   }
 
@@ -3219,6 +3334,7 @@ class AlertRuleRow extends DataClass implements Insertable<AlertRuleRow> {
   final String params;
   final bool enabled;
   final DateTime createdAt;
+  final DateTime updatedAt;
   const AlertRuleRow({
     required this.id,
     required this.type,
@@ -3226,6 +3342,7 @@ class AlertRuleRow extends DataClass implements Insertable<AlertRuleRow> {
     required this.params,
     required this.enabled,
     required this.createdAt,
+    required this.updatedAt,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -3236,6 +3353,7 @@ class AlertRuleRow extends DataClass implements Insertable<AlertRuleRow> {
     map['params'] = Variable<String>(params);
     map['enabled'] = Variable<bool>(enabled);
     map['created_at'] = Variable<DateTime>(createdAt);
+    map['updated_at'] = Variable<DateTime>(updatedAt);
     return map;
   }
 
@@ -3247,6 +3365,7 @@ class AlertRuleRow extends DataClass implements Insertable<AlertRuleRow> {
       params: Value(params),
       enabled: Value(enabled),
       createdAt: Value(createdAt),
+      updatedAt: Value(updatedAt),
     );
   }
 
@@ -3262,6 +3381,7 @@ class AlertRuleRow extends DataClass implements Insertable<AlertRuleRow> {
       params: serializer.fromJson<String>(json['params']),
       enabled: serializer.fromJson<bool>(json['enabled']),
       createdAt: serializer.fromJson<DateTime>(json['createdAt']),
+      updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
     );
   }
   @override
@@ -3274,6 +3394,7 @@ class AlertRuleRow extends DataClass implements Insertable<AlertRuleRow> {
       'params': serializer.toJson<String>(params),
       'enabled': serializer.toJson<bool>(enabled),
       'createdAt': serializer.toJson<DateTime>(createdAt),
+      'updatedAt': serializer.toJson<DateTime>(updatedAt),
     };
   }
 
@@ -3284,6 +3405,7 @@ class AlertRuleRow extends DataClass implements Insertable<AlertRuleRow> {
     String? params,
     bool? enabled,
     DateTime? createdAt,
+    DateTime? updatedAt,
   }) => AlertRuleRow(
     id: id ?? this.id,
     type: type ?? this.type,
@@ -3291,6 +3413,7 @@ class AlertRuleRow extends DataClass implements Insertable<AlertRuleRow> {
     params: params ?? this.params,
     enabled: enabled ?? this.enabled,
     createdAt: createdAt ?? this.createdAt,
+    updatedAt: updatedAt ?? this.updatedAt,
   );
   AlertRuleRow copyWithCompanion(AlertRulesCompanion data) {
     return AlertRuleRow(
@@ -3300,6 +3423,7 @@ class AlertRuleRow extends DataClass implements Insertable<AlertRuleRow> {
       params: data.params.present ? data.params.value : this.params,
       enabled: data.enabled.present ? data.enabled.value : this.enabled,
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+      updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
     );
   }
 
@@ -3311,13 +3435,15 @@ class AlertRuleRow extends DataClass implements Insertable<AlertRuleRow> {
           ..write('name: $name, ')
           ..write('params: $params, ')
           ..write('enabled: $enabled, ')
-          ..write('createdAt: $createdAt')
+          ..write('createdAt: $createdAt, ')
+          ..write('updatedAt: $updatedAt')
           ..write(')'))
         .toString();
   }
 
   @override
-  int get hashCode => Object.hash(id, type, name, params, enabled, createdAt);
+  int get hashCode =>
+      Object.hash(id, type, name, params, enabled, createdAt, updatedAt);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -3327,7 +3453,8 @@ class AlertRuleRow extends DataClass implements Insertable<AlertRuleRow> {
           other.name == this.name &&
           other.params == this.params &&
           other.enabled == this.enabled &&
-          other.createdAt == this.createdAt);
+          other.createdAt == this.createdAt &&
+          other.updatedAt == this.updatedAt);
 }
 
 class AlertRulesCompanion extends UpdateCompanion<AlertRuleRow> {
@@ -3337,6 +3464,7 @@ class AlertRulesCompanion extends UpdateCompanion<AlertRuleRow> {
   final Value<String> params;
   final Value<bool> enabled;
   final Value<DateTime> createdAt;
+  final Value<DateTime> updatedAt;
   const AlertRulesCompanion({
     this.id = const Value.absent(),
     this.type = const Value.absent(),
@@ -3344,6 +3472,7 @@ class AlertRulesCompanion extends UpdateCompanion<AlertRuleRow> {
     this.params = const Value.absent(),
     this.enabled = const Value.absent(),
     this.createdAt = const Value.absent(),
+    this.updatedAt = const Value.absent(),
   });
   AlertRulesCompanion.insert({
     this.id = const Value.absent(),
@@ -3352,6 +3481,7 @@ class AlertRulesCompanion extends UpdateCompanion<AlertRuleRow> {
     this.params = const Value.absent(),
     this.enabled = const Value.absent(),
     this.createdAt = const Value.absent(),
+    this.updatedAt = const Value.absent(),
   }) : type = Value(type),
        name = Value(name);
   static Insertable<AlertRuleRow> custom({
@@ -3361,6 +3491,7 @@ class AlertRulesCompanion extends UpdateCompanion<AlertRuleRow> {
     Expression<String>? params,
     Expression<bool>? enabled,
     Expression<DateTime>? createdAt,
+    Expression<DateTime>? updatedAt,
   }) {
     return RawValuesInsertable({
       if (id != null) 'id': id,
@@ -3369,6 +3500,7 @@ class AlertRulesCompanion extends UpdateCompanion<AlertRuleRow> {
       if (params != null) 'params': params,
       if (enabled != null) 'enabled': enabled,
       if (createdAt != null) 'created_at': createdAt,
+      if (updatedAt != null) 'updated_at': updatedAt,
     });
   }
 
@@ -3379,6 +3511,7 @@ class AlertRulesCompanion extends UpdateCompanion<AlertRuleRow> {
     Value<String>? params,
     Value<bool>? enabled,
     Value<DateTime>? createdAt,
+    Value<DateTime>? updatedAt,
   }) {
     return AlertRulesCompanion(
       id: id ?? this.id,
@@ -3387,6 +3520,7 @@ class AlertRulesCompanion extends UpdateCompanion<AlertRuleRow> {
       params: params ?? this.params,
       enabled: enabled ?? this.enabled,
       createdAt: createdAt ?? this.createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
     );
   }
 
@@ -3411,6 +3545,9 @@ class AlertRulesCompanion extends UpdateCompanion<AlertRuleRow> {
     if (createdAt.present) {
       map['created_at'] = Variable<DateTime>(createdAt.value);
     }
+    if (updatedAt.present) {
+      map['updated_at'] = Variable<DateTime>(updatedAt.value);
+    }
     return map;
   }
 
@@ -3422,7 +3559,8 @@ class AlertRulesCompanion extends UpdateCompanion<AlertRuleRow> {
           ..write('name: $name, ')
           ..write('params: $params, ')
           ..write('enabled: $enabled, ')
-          ..write('createdAt: $createdAt')
+          ..write('createdAt: $createdAt, ')
+          ..write('updatedAt: $updatedAt')
           ..write(')'))
         .toString();
   }
@@ -3988,6 +4126,274 @@ class SettingsCompanion extends UpdateCompanion<SettingRow> {
   }
 }
 
+class $SyncTombstonesTable extends SyncTombstones
+    with TableInfo<$SyncTombstonesTable, SyncTombstoneRow> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $SyncTombstonesTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _tableMeta = const VerificationMeta('table');
+  @override
+  late final GeneratedColumn<String> table = GeneratedColumn<String>(
+    'table',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _rowKeyMeta = const VerificationMeta('rowKey');
+  @override
+  late final GeneratedColumn<String> rowKey = GeneratedColumn<String>(
+    'row_key',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _deletedAtMeta = const VerificationMeta(
+    'deletedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> deletedAt = GeneratedColumn<DateTime>(
+    'deleted_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: false,
+    defaultValue: currentDateAndTime,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [table, rowKey, deletedAt];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'sync_tombstones';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<SyncTombstoneRow> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('table')) {
+      context.handle(
+        _tableMeta,
+        table.isAcceptableOrUnknown(data['table']!, _tableMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_tableMeta);
+    }
+    if (data.containsKey('row_key')) {
+      context.handle(
+        _rowKeyMeta,
+        rowKey.isAcceptableOrUnknown(data['row_key']!, _rowKeyMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_rowKeyMeta);
+    }
+    if (data.containsKey('deleted_at')) {
+      context.handle(
+        _deletedAtMeta,
+        deletedAt.isAcceptableOrUnknown(data['deleted_at']!, _deletedAtMeta),
+      );
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {table, rowKey};
+  @override
+  SyncTombstoneRow map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return SyncTombstoneRow(
+      table: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}table'],
+      )!,
+      rowKey: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}row_key'],
+      )!,
+      deletedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}deleted_at'],
+      )!,
+    );
+  }
+
+  @override
+  $SyncTombstonesTable createAlias(String alias) {
+    return $SyncTombstonesTable(attachedDatabase, alias);
+  }
+}
+
+class SyncTombstoneRow extends DataClass
+    implements Insertable<SyncTombstoneRow> {
+  /// Table name this tombstone belongs to (e.g. 'holdings').
+  final String table;
+
+  /// Row key as a string: the integer row id for id-keyed tables, or the
+  /// composite key (e.g. 'date|currency') for keyed tables.
+  final String rowKey;
+  final DateTime deletedAt;
+  const SyncTombstoneRow({
+    required this.table,
+    required this.rowKey,
+    required this.deletedAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['table'] = Variable<String>(table);
+    map['row_key'] = Variable<String>(rowKey);
+    map['deleted_at'] = Variable<DateTime>(deletedAt);
+    return map;
+  }
+
+  SyncTombstonesCompanion toCompanion(bool nullToAbsent) {
+    return SyncTombstonesCompanion(
+      table: Value(table),
+      rowKey: Value(rowKey),
+      deletedAt: Value(deletedAt),
+    );
+  }
+
+  factory SyncTombstoneRow.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return SyncTombstoneRow(
+      table: serializer.fromJson<String>(json['table']),
+      rowKey: serializer.fromJson<String>(json['rowKey']),
+      deletedAt: serializer.fromJson<DateTime>(json['deletedAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'table': serializer.toJson<String>(table),
+      'rowKey': serializer.toJson<String>(rowKey),
+      'deletedAt': serializer.toJson<DateTime>(deletedAt),
+    };
+  }
+
+  SyncTombstoneRow copyWith({
+    String? table,
+    String? rowKey,
+    DateTime? deletedAt,
+  }) => SyncTombstoneRow(
+    table: table ?? this.table,
+    rowKey: rowKey ?? this.rowKey,
+    deletedAt: deletedAt ?? this.deletedAt,
+  );
+  SyncTombstoneRow copyWithCompanion(SyncTombstonesCompanion data) {
+    return SyncTombstoneRow(
+      table: data.table.present ? data.table.value : this.table,
+      rowKey: data.rowKey.present ? data.rowKey.value : this.rowKey,
+      deletedAt: data.deletedAt.present ? data.deletedAt.value : this.deletedAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('SyncTombstoneRow(')
+          ..write('table: $table, ')
+          ..write('rowKey: $rowKey, ')
+          ..write('deletedAt: $deletedAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(table, rowKey, deletedAt);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is SyncTombstoneRow &&
+          other.table == this.table &&
+          other.rowKey == this.rowKey &&
+          other.deletedAt == this.deletedAt);
+}
+
+class SyncTombstonesCompanion extends UpdateCompanion<SyncTombstoneRow> {
+  final Value<String> table;
+  final Value<String> rowKey;
+  final Value<DateTime> deletedAt;
+  final Value<int> rowid;
+  const SyncTombstonesCompanion({
+    this.table = const Value.absent(),
+    this.rowKey = const Value.absent(),
+    this.deletedAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  SyncTombstonesCompanion.insert({
+    required String table,
+    required String rowKey,
+    this.deletedAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  }) : table = Value(table),
+       rowKey = Value(rowKey);
+  static Insertable<SyncTombstoneRow> custom({
+    Expression<String>? table,
+    Expression<String>? rowKey,
+    Expression<DateTime>? deletedAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (table != null) 'table': table,
+      if (rowKey != null) 'row_key': rowKey,
+      if (deletedAt != null) 'deleted_at': deletedAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  SyncTombstonesCompanion copyWith({
+    Value<String>? table,
+    Value<String>? rowKey,
+    Value<DateTime>? deletedAt,
+    Value<int>? rowid,
+  }) {
+    return SyncTombstonesCompanion(
+      table: table ?? this.table,
+      rowKey: rowKey ?? this.rowKey,
+      deletedAt: deletedAt ?? this.deletedAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (table.present) {
+      map['table'] = Variable<String>(table.value);
+    }
+    if (rowKey.present) {
+      map['row_key'] = Variable<String>(rowKey.value);
+    }
+    if (deletedAt.present) {
+      map['deleted_at'] = Variable<DateTime>(deletedAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('SyncTombstonesCompanion(')
+          ..write('table: $table, ')
+          ..write('rowKey: $rowKey, ')
+          ..write('deletedAt: $deletedAt, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
@@ -3999,6 +4405,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   late final $AlertRulesTable alertRules = $AlertRulesTable(this);
   late final $AlertEventsTable alertEvents = $AlertEventsTable(this);
   late final $SettingsTable settings = $SettingsTable(this);
+  late final $SyncTombstonesTable syncTombstones = $SyncTombstonesTable(this);
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
@@ -4012,6 +4419,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     alertRules,
     alertEvents,
     settings,
+    syncTombstones,
   ];
 }
 
@@ -4023,6 +4431,7 @@ typedef $$AccountsTableCreateCompanionBuilder =
       Value<String> currency,
       Value<String?> note,
       Value<DateTime> createdAt,
+      Value<DateTime> updatedAt,
     });
 typedef $$AccountsTableUpdateCompanionBuilder =
     AccountsCompanion Function({
@@ -4032,6 +4441,7 @@ typedef $$AccountsTableUpdateCompanionBuilder =
       Value<String> currency,
       Value<String?> note,
       Value<DateTime> createdAt,
+      Value<DateTime> updatedAt,
     });
 
 final class $$AccountsTableReferences
@@ -4111,6 +4521,11 @@ class $$AccountsTableFilterComposer
 
   ColumnFilters<DateTime> get createdAt => $composableBuilder(
     column: $table.createdAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -4203,6 +4618,11 @@ class $$AccountsTableOrderingComposer
     column: $table.createdAt,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<DateTime> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
 class $$AccountsTableAnnotationComposer
@@ -4231,6 +4651,9 @@ class $$AccountsTableAnnotationComposer
 
   GeneratedColumn<DateTime> get createdAt =>
       $composableBuilder(column: $table.createdAt, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get updatedAt =>
+      $composableBuilder(column: $table.updatedAt, builder: (column) => column);
 
   Expression<T> holdingsRefs<T extends Object>(
     Expression<T> Function($$HoldingsTableAnnotationComposer a) f,
@@ -4317,6 +4740,7 @@ class $$AccountsTableTableManager
                 Value<String> currency = const Value.absent(),
                 Value<String?> note = const Value.absent(),
                 Value<DateTime> createdAt = const Value.absent(),
+                Value<DateTime> updatedAt = const Value.absent(),
               }) => AccountsCompanion(
                 id: id,
                 name: name,
@@ -4324,6 +4748,7 @@ class $$AccountsTableTableManager
                 currency: currency,
                 note: note,
                 createdAt: createdAt,
+                updatedAt: updatedAt,
               ),
           createCompanionCallback:
               ({
@@ -4333,6 +4758,7 @@ class $$AccountsTableTableManager
                 Value<String> currency = const Value.absent(),
                 Value<String?> note = const Value.absent(),
                 Value<DateTime> createdAt = const Value.absent(),
+                Value<DateTime> updatedAt = const Value.absent(),
               }) => AccountsCompanion.insert(
                 id: id,
                 name: name,
@@ -4340,6 +4766,7 @@ class $$AccountsTableTableManager
                 currency: currency,
                 note: note,
                 createdAt: createdAt,
+                updatedAt: updatedAt,
               ),
           withReferenceMapper: (p0) => p0
               .map(
@@ -4967,6 +5394,7 @@ typedef $$TransactionsTableCreateCompanionBuilder =
       required DateTime occurredAt,
       Value<String?> note,
       Value<bool> costMoved,
+      Value<DateTime> updatedAt,
     });
 typedef $$TransactionsTableUpdateCompanionBuilder =
     TransactionsCompanion Function({
@@ -4983,6 +5411,7 @@ typedef $$TransactionsTableUpdateCompanionBuilder =
       Value<DateTime> occurredAt,
       Value<String?> note,
       Value<bool> costMoved,
+      Value<DateTime> updatedAt,
     });
 
 final class $$TransactionsTableReferences
@@ -5109,6 +5538,11 @@ class $$TransactionsTableFilterComposer
 
   ColumnFilters<bool> get costMoved => $composableBuilder(
     column: $table.costMoved,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -5259,6 +5693,11 @@ class $$TransactionsTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<DateTime> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   $$AccountsTableOrderingComposer get accountId {
     final $$AccountsTableOrderingComposer composer = $composerBuilder(
       composer: this,
@@ -5389,6 +5828,9 @@ class $$TransactionsTableAnnotationComposer
 
   GeneratedColumn<bool> get costMoved =>
       $composableBuilder(column: $table.costMoved, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get updatedAt =>
+      $composableBuilder(column: $table.updatedAt, builder: (column) => column);
 
   $$AccountsTableAnnotationComposer get accountId {
     final $$AccountsTableAnnotationComposer composer = $composerBuilder(
@@ -5529,6 +5971,7 @@ class $$TransactionsTableTableManager
                 Value<DateTime> occurredAt = const Value.absent(),
                 Value<String?> note = const Value.absent(),
                 Value<bool> costMoved = const Value.absent(),
+                Value<DateTime> updatedAt = const Value.absent(),
               }) => TransactionsCompanion(
                 id: id,
                 accountId: accountId,
@@ -5543,6 +5986,7 @@ class $$TransactionsTableTableManager
                 occurredAt: occurredAt,
                 note: note,
                 costMoved: costMoved,
+                updatedAt: updatedAt,
               ),
           createCompanionCallback:
               ({
@@ -5559,6 +6003,7 @@ class $$TransactionsTableTableManager
                 required DateTime occurredAt,
                 Value<String?> note = const Value.absent(),
                 Value<bool> costMoved = const Value.absent(),
+                Value<DateTime> updatedAt = const Value.absent(),
               }) => TransactionsCompanion.insert(
                 id: id,
                 accountId: accountId,
@@ -5573,6 +6018,7 @@ class $$TransactionsTableTableManager
                 occurredAt: occurredAt,
                 note: note,
                 costMoved: costMoved,
+                updatedAt: updatedAt,
               ),
           withReferenceMapper: (p0) => p0
               .map(
@@ -6206,6 +6652,7 @@ typedef $$AlertRulesTableCreateCompanionBuilder =
       Value<String> params,
       Value<bool> enabled,
       Value<DateTime> createdAt,
+      Value<DateTime> updatedAt,
     });
 typedef $$AlertRulesTableUpdateCompanionBuilder =
     AlertRulesCompanion Function({
@@ -6215,6 +6662,7 @@ typedef $$AlertRulesTableUpdateCompanionBuilder =
       Value<String> params,
       Value<bool> enabled,
       Value<DateTime> createdAt,
+      Value<DateTime> updatedAt,
     });
 
 final class $$AlertRulesTableReferences
@@ -6276,6 +6724,11 @@ class $$AlertRulesTableFilterComposer
 
   ColumnFilters<DateTime> get createdAt => $composableBuilder(
     column: $table.createdAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -6343,6 +6796,11 @@ class $$AlertRulesTableOrderingComposer
     column: $table.createdAt,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<DateTime> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
 class $$AlertRulesTableAnnotationComposer
@@ -6371,6 +6829,9 @@ class $$AlertRulesTableAnnotationComposer
 
   GeneratedColumn<DateTime> get createdAt =>
       $composableBuilder(column: $table.createdAt, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get updatedAt =>
+      $composableBuilder(column: $table.updatedAt, builder: (column) => column);
 
   Expression<T> alertEventsRefs<T extends Object>(
     Expression<T> Function($$AlertEventsTableAnnotationComposer a) f,
@@ -6432,6 +6893,7 @@ class $$AlertRulesTableTableManager
                 Value<String> params = const Value.absent(),
                 Value<bool> enabled = const Value.absent(),
                 Value<DateTime> createdAt = const Value.absent(),
+                Value<DateTime> updatedAt = const Value.absent(),
               }) => AlertRulesCompanion(
                 id: id,
                 type: type,
@@ -6439,6 +6901,7 @@ class $$AlertRulesTableTableManager
                 params: params,
                 enabled: enabled,
                 createdAt: createdAt,
+                updatedAt: updatedAt,
               ),
           createCompanionCallback:
               ({
@@ -6448,6 +6911,7 @@ class $$AlertRulesTableTableManager
                 Value<String> params = const Value.absent(),
                 Value<bool> enabled = const Value.absent(),
                 Value<DateTime> createdAt = const Value.absent(),
+                Value<DateTime> updatedAt = const Value.absent(),
               }) => AlertRulesCompanion.insert(
                 id: id,
                 type: type,
@@ -6455,6 +6919,7 @@ class $$AlertRulesTableTableManager
                 params: params,
                 enabled: enabled,
                 createdAt: createdAt,
+                updatedAt: updatedAt,
               ),
           withReferenceMapper: (p0) => p0
               .map(
@@ -6961,6 +7426,174 @@ typedef $$SettingsTableProcessedTableManager =
       SettingRow,
       PrefetchHooks Function()
     >;
+typedef $$SyncTombstonesTableCreateCompanionBuilder =
+    SyncTombstonesCompanion Function({
+      required String table,
+      required String rowKey,
+      Value<DateTime> deletedAt,
+      Value<int> rowid,
+    });
+typedef $$SyncTombstonesTableUpdateCompanionBuilder =
+    SyncTombstonesCompanion Function({
+      Value<String> table,
+      Value<String> rowKey,
+      Value<DateTime> deletedAt,
+      Value<int> rowid,
+    });
+
+class $$SyncTombstonesTableFilterComposer
+    extends Composer<_$AppDatabase, $SyncTombstonesTable> {
+  $$SyncTombstonesTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get table => $composableBuilder(
+    column: $table.table,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get rowKey => $composableBuilder(
+    column: $table.rowKey,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get deletedAt => $composableBuilder(
+    column: $table.deletedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$SyncTombstonesTableOrderingComposer
+    extends Composer<_$AppDatabase, $SyncTombstonesTable> {
+  $$SyncTombstonesTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get table => $composableBuilder(
+    column: $table.table,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get rowKey => $composableBuilder(
+    column: $table.rowKey,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get deletedAt => $composableBuilder(
+    column: $table.deletedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$SyncTombstonesTableAnnotationComposer
+    extends Composer<_$AppDatabase, $SyncTombstonesTable> {
+  $$SyncTombstonesTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get table =>
+      $composableBuilder(column: $table.table, builder: (column) => column);
+
+  GeneratedColumn<String> get rowKey =>
+      $composableBuilder(column: $table.rowKey, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get deletedAt =>
+      $composableBuilder(column: $table.deletedAt, builder: (column) => column);
+}
+
+class $$SyncTombstonesTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $SyncTombstonesTable,
+          SyncTombstoneRow,
+          $$SyncTombstonesTableFilterComposer,
+          $$SyncTombstonesTableOrderingComposer,
+          $$SyncTombstonesTableAnnotationComposer,
+          $$SyncTombstonesTableCreateCompanionBuilder,
+          $$SyncTombstonesTableUpdateCompanionBuilder,
+          (
+            SyncTombstoneRow,
+            BaseReferences<
+              _$AppDatabase,
+              $SyncTombstonesTable,
+              SyncTombstoneRow
+            >,
+          ),
+          SyncTombstoneRow,
+          PrefetchHooks Function()
+        > {
+  $$SyncTombstonesTableTableManager(
+    _$AppDatabase db,
+    $SyncTombstonesTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$SyncTombstonesTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$SyncTombstonesTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$SyncTombstonesTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> table = const Value.absent(),
+                Value<String> rowKey = const Value.absent(),
+                Value<DateTime> deletedAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => SyncTombstonesCompanion(
+                table: table,
+                rowKey: rowKey,
+                deletedAt: deletedAt,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String table,
+                required String rowKey,
+                Value<DateTime> deletedAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => SyncTombstonesCompanion.insert(
+                table: table,
+                rowKey: rowKey,
+                deletedAt: deletedAt,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$SyncTombstonesTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $SyncTombstonesTable,
+      SyncTombstoneRow,
+      $$SyncTombstonesTableFilterComposer,
+      $$SyncTombstonesTableOrderingComposer,
+      $$SyncTombstonesTableAnnotationComposer,
+      $$SyncTombstonesTableCreateCompanionBuilder,
+      $$SyncTombstonesTableUpdateCompanionBuilder,
+      (
+        SyncTombstoneRow,
+        BaseReferences<_$AppDatabase, $SyncTombstonesTable, SyncTombstoneRow>,
+      ),
+      SyncTombstoneRow,
+      PrefetchHooks Function()
+    >;
 
 class $AppDatabaseManager {
   final _$AppDatabase _db;
@@ -6981,4 +7614,6 @@ class $AppDatabaseManager {
       $$AlertEventsTableTableManager(_db, _db.alertEvents);
   $$SettingsTableTableManager get settings =>
       $$SettingsTableTableManager(_db, _db.settings);
+  $$SyncTombstonesTableTableManager get syncTombstones =>
+      $$SyncTombstonesTableTableManager(_db, _db.syncTombstones);
 }

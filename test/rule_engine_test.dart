@@ -19,6 +19,7 @@ AlertRuleRow _rule({
     params: jsonEncode(params ?? {}),
     enabled: true,
     createdAt: DateTime(2026, 1, 1),
+    updatedAt: DateTime(2026, 1, 1),
   );
 }
 
