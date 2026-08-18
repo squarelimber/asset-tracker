@@ -1,9 +1,11 @@
 import 'dart:convert';
+import 'dart:ffi';
 import 'dart:io';
 
 import 'package:shelf/shelf.dart';
 import 'package:shelf/shelf_io.dart' as shelf_io;
 import 'package:shelf_router/shelf_router.dart';
+import 'package:sqlite3/open.dart' show OperatingSystem, open;
 
 import 'package:asset_sync_server/sync_store.dart';
 
@@ -17,6 +19,14 @@ import 'package:asset_sync_server/sync_store.dart';
 /// ASSET_SYNC_TOKEN environment variable. When the variable is not set,
 /// authentication is skipped (personal deployments on a trusted LAN).
 Future<void> main(List<String> args) async {
+  // Debian's libsqlite3-0 runtime package ships only the versioned
+  // libsqlite3.so.0; the sqlite3 package's default 'libsqlite3.so' lookup
+  // fails in a container, so load the versioned library explicitly.
+  open.overrideFor(
+    OperatingSystem.linux,
+    () => DynamicLibrary.open('libsqlite3.so.0'),
+  );
+
   final port = int.tryParse(Platform.environment['PORT'] ?? '') ?? 8787;
   final dbPath =
       Platform.environment['SYNC_DB_PATH'] ?? 'sync_state.sqlite';
