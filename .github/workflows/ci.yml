@@ -33,10 +33,22 @@ jobs:
         run: flutter pub get
 
       - name: Analyze
-        run: flutter analyze
+        run: flutter analyze lib test
 
       - name: Test
         run: flutter test
+
+      - name: Server dependencies
+        working-directory: server
+        run: dart pub get
+
+      - name: Server analyze
+        working-directory: server
+        run: dart analyze
+
+      - name: Server test
+        working-directory: server
+        run: dart test
 
   build-web:
     name: Build Web
