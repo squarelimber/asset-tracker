@@ -1,5 +1,6 @@
 import 'package:drift/drift.dart';
 
+import '../core/history_sync.dart';
 import '../data/asset_dao.dart';
 import '../data/database.dart';
 import 'sync_api.dart';
@@ -14,6 +15,7 @@ class SyncResult {
     required this.conflicts,
     required this.changed,
     this.message,
+    this.dataChanged = false,
   });
 
   final bool ok;
@@ -24,6 +26,10 @@ class SyncResult {
 
   /// Local rows added/updated/deleted by this sync.
   final int changed;
+
+  /// Whether source-of-truth rows (not derived snapshots) changed locally,
+  /// meaning the historical snapshots must be rebuilt.
+  final bool dataChanged;
 
   final String? message;
 
@@ -98,7 +104,20 @@ class SyncService {
       SyncSettingsKeys.lastSyncAt,
       DateTime.now().toIso8601String(),
     );
-    return SyncResult(ok: true, rev: rev, conflicts: outcome.conflicts, changed: outcome.changed);
+    // Derived snapshots must be regenerated from the now-merged source rows,
+    // otherwise a freshly-arrived transaction (e.g. a repayment) changes the
+    // holdings but leaves stale snapshots, leaking the cash-flow into daily
+    // returns. Flag it so the history sync rebuilds the backfill + today.
+    if (outcome.dataChanged) {
+      await _dao.setSetting(historySyncDirtyKey, historyDirtySet);
+    }
+    return SyncResult(
+      ok: true,
+      rev: rev,
+      conflicts: outcome.conflicts,
+      changed: outcome.changed,
+      dataChanged: outcome.dataChanged,
+    );
   }
 
   Future<Map<String, dynamic>> _exportLocal() async {

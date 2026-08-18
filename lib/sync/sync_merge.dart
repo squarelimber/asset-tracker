@@ -67,6 +67,7 @@ class MergeOutcome {
     required this.tombstones,
     required this.conflicts,
     required this.changed,
+    required this.dataChanged,
   });
 
   /// Merged rows per synced table.
@@ -80,6 +81,12 @@ class MergeOutcome {
 
   final int conflicts;
   final int changed;
+
+  /// Whether any source-of-truth row (accounts/holdings/transactions/rules)
+  /// changed locally — i.e. excluding the derived snapshots table, whose
+  /// `createdAt` differences make it "change" on every merge even when the
+  /// values are identical. Used to trigger a local history rebuild.
+  final bool dataChanged;
 }
 
 /// Last-write-wins merge of a local snapshot against a remote one.
@@ -105,6 +112,7 @@ class SyncMerger {
     final deletedKeys = <String, List<String>>{};
     var conflicts = 0;
     var changed = 0;
+    var dataChanged = false;
 
     for (final table in SyncTables.all) {
       final merged = mergeTable(
@@ -117,6 +125,9 @@ class SyncMerger {
       deletedKeys[table] = merged.deleteKeys;
       conflicts += merged.conflicts;
       changed += merged.changed;
+      if (table != SyncTables.snapshots && merged.changed > 0) {
+        dataChanged = true;
+      }
     }
 
     // Tombstone union: keep the newer deletion time per key; drop a
@@ -147,6 +158,7 @@ class SyncMerger {
       tombstones: tombstoneMap.values.toList(),
       conflicts: conflicts,
       changed: changed,
+      dataChanged: dataChanged,
     );
   }
 

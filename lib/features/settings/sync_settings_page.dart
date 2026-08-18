@@ -99,6 +99,11 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
     });
     final result = await ref.read(syncServiceProvider).sync();
     if (!mounted) return;
+    if (result.ok && result.dataChanged) {
+      // Source rows changed: rebuild the derived history snapshots right
+      // away so today's earnings reflects the merged holdings/transactions.
+      ref.invalidate(historySyncProvider);
+    }
     setState(() {
       _syncing = false;
       if (result.ok) {
