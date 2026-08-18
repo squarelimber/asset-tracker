@@ -3,7 +3,8 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:file_selector/file_selector.dart';
-import 'package:flutter/foundation.dart' show defaultTargetPlatform, kIsWeb, TargetPlatform;
+import 'package:flutter/foundation.dart'
+    show defaultTargetPlatform, kIsWeb, TargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
@@ -36,104 +37,109 @@ class SettingsPage extends ConsumerWidget {
     return Scaffold(
       appBar: AppBar(title: const Text('设置')),
       body: ResponsiveShell(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('数据备份', style: Theme.of(context).textTheme.titleMedium),
-            const SizedBox(height: 8),
-            const Text(
-              '所有数据仅保存在本机。建议定期导出备份，可在其他设备导入恢复。',
-              style: TextStyle(fontSize: 13),
-            ),
-            const SizedBox(height: 16),
-            Card(
-              child: Column(
-                children: [
-                  ListTile(
-                    leading: const Icon(Icons.upload_file),
-                    title: const Text('导出备份'),
-                    subtitle: const Text('将全部数据保存为 JSON 文件'),
-                    onTap: () => _export(context, ref),
-                  ),
-                  const Divider(height: 1),
-                  ListTile(
-                    leading: const Icon(Icons.download, color: AppColors.warning),
-                    title: const Text('导入备份'),
-                    subtitle: const Text('从 JSON 文件恢复（将覆盖当前全部数据）'),
-                    onTap: () => _import(context, ref),
-                  ),
-                ],
+        child: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('数据备份', style: Theme.of(context).textTheme.titleMedium),
+              const SizedBox(height: 8),
+              const Text(
+                '所有数据仅保存在本机。建议定期导出备份，可在其他设备导入恢复。',
+                style: TextStyle(fontSize: 13),
               ),
-            ),
-            const SizedBox(height: 24),
-            const Divider(),
-            const SizedBox(height: 8),
-            Text('导出数据', style: Theme.of(context).textTheme.titleMedium),
-            const SizedBox(height: 8),
-            const Text(
-              '导出为 Excel 可打开的 CSV（UTF-8）。',
-              style: TextStyle(fontSize: 13),
-            ),
-            const SizedBox(height: 16),
-            Card(
-              child: Column(
-                children: [
-                  ListTile(
-                    leading: const Icon(Icons.table_chart_outlined),
-                    title: const Text('导出持仓 CSV'),
-                    subtitle: const Text('账户、持仓明细、市值与收益'),
-                    onTap: () => _exportCsv(context, ref, csv: true, holdings: true),
-                  ),
-                  const Divider(height: 1),
-                  ListTile(
-                    leading: const Icon(Icons.receipt_long_outlined),
-                    title: const Text('导出流水 CSV'),
-                    subtitle: const Text('全部交易记录'),
-                    onTap: () => _exportCsv(context, ref, csv: true, holdings: false),
-                  ),
-                ],
+              const SizedBox(height: 16),
+              Card(
+                child: Column(
+                  children: [
+                    ListTile(
+                      leading: const Icon(Icons.upload_file),
+                      title: const Text('导出备份'),
+                      subtitle: const Text('将全部数据保存为 JSON 文件'),
+                      onTap: () => _export(context, ref),
+                    ),
+                    const Divider(height: 1),
+                    ListTile(
+                      leading: const Icon(
+                        Icons.download,
+                        color: AppColors.warning,
+                      ),
+                      title: const Text('导入备份'),
+                      subtitle: const Text('从 JSON 文件恢复（将覆盖当前全部数据）'),
+                      onTap: () => _import(context, ref),
+                    ),
+                  ],
+                ),
               ),
-            ),
-            const SizedBox(height: 24),
-            const Divider(),
-            const SizedBox(height: 8),
-            Text('数据同步', style: Theme.of(context).textTheme.titleMedium),
-            const SizedBox(height: 8),
-            const Text(
-              '在自建服务器（如 NAS）间同步多台设备的数据。',
-              style: TextStyle(fontSize: 13),
-            ),
-            const SizedBox(height: 16),
-            Card(
-              child: ListTile(
-                leading: const Icon(Icons.sync),
-                title: const Text('同步设置'),
-                subtitle: const Text('服务器地址、访问令牌、立即同步'),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () => Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (_) => const SyncSettingsPage(),
+              const SizedBox(height: 24),
+              const Divider(),
+              const SizedBox(height: 8),
+              Text('导出数据', style: Theme.of(context).textTheme.titleMedium),
+              const SizedBox(height: 8),
+              const Text(
+                '导出为 Excel 可打开的 CSV（UTF-8）。',
+                style: TextStyle(fontSize: 13),
+              ),
+              const SizedBox(height: 16),
+              Card(
+                child: Column(
+                  children: [
+                    ListTile(
+                      leading: const Icon(Icons.table_chart_outlined),
+                      title: const Text('导出持仓 CSV'),
+                      subtitle: const Text('账户、持仓明细、市值与收益'),
+                      onTap: () =>
+                          _exportCsv(context, ref, csv: true, holdings: true),
+                    ),
+                    const Divider(height: 1),
+                    ListTile(
+                      leading: const Icon(Icons.receipt_long_outlined),
+                      title: const Text('导出流水 CSV'),
+                      subtitle: const Text('全部交易记录'),
+                      onTap: () =>
+                          _exportCsv(context, ref, csv: true, holdings: false),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 24),
+              const Divider(),
+              const SizedBox(height: 8),
+              Text('数据同步', style: Theme.of(context).textTheme.titleMedium),
+              const SizedBox(height: 8),
+              const Text(
+                '在自建服务器（如 NAS）间同步多台设备的数据。',
+                style: TextStyle(fontSize: 13),
+              ),
+              const SizedBox(height: 16),
+              Card(
+                child: ListTile(
+                  leading: const Icon(Icons.sync),
+                  title: const Text('同步设置'),
+                  subtitle: const Text('服务器地址、访问令牌、立即同步'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const SyncSettingsPage()),
                   ),
                 ),
               ),
-            ),
-            const SizedBox(height: 24),
-            const Divider(),
-            const SizedBox(height: 8),
-            Text('关于', style: Theme.of(context).textTheme.titleMedium),
-            const SizedBox(height: 8),
-            const ListTile(
-              dense: true,
-              leading: Icon(Icons.info_outline, size: 20),
-              title: Text('Asset Tracker'),
-              subtitle: Text(
-                '本地优先的开源资产追踪工具\n'
-                'MIT License · github.com/squarelimber/asset-tracker\n'
-                '本应用仅供参考，不构成投资建议',
+              const SizedBox(height: 24),
+              const Divider(),
+              const SizedBox(height: 8),
+              Text('关于', style: Theme.of(context).textTheme.titleMedium),
+              const SizedBox(height: 8),
+              const ListTile(
+                dense: true,
+                leading: Icon(Icons.info_outline, size: 20),
+                title: Text('Asset Tracker'),
+                subtitle: Text(
+                  '本地优先的开源资产追踪工具\n'
+                  'MIT License · github.com/squarelimber/asset-tracker\n'
+                  '本应用仅供参考，不构成投资建议',
+                ),
+                isThreeLine: true,
               ),
-              isThreeLine: true,
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -170,9 +176,9 @@ class SettingsPage extends ConsumerWidget {
         ),
       );
       if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('已发起分享')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('已发起分享')));
       return;
     }
     final location = await getSaveLocation(
@@ -188,9 +194,9 @@ class SettingsPage extends ConsumerWidget {
       name: fileName,
     ).saveTo(location.path);
     if (!context.mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('已导出')),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('已导出')));
   }
 
   Future<void> _import(BuildContext context, WidgetRef ref) async {
@@ -205,7 +211,10 @@ class SettingsPage extends ConsumerWidget {
         title: const Text('导入备份'),
         content: const Text('导入将覆盖当前全部数据，且无法撤销。确定继续吗？'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('取消')),
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('取消'),
+          ),
           FilledButton(
             style: FilledButton.styleFrom(backgroundColor: AppColors.up),
             onPressed: () => Navigator.pop(context, true),
