@@ -48,6 +48,10 @@ app.*.map.json
 *.db
 *.db-shm
 *.db-wal
+*.sqlite
+*.sqlite3
+*.sqlite-shm
+*.sqlite-wal
 /backups/
 
 dist/
