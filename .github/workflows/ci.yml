@@ -50,6 +50,28 @@ jobs:
         working-directory: server
         run: dart test
 
+  server-docker:
+    name: Sync server container
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Build image
+        working-directory: server
+        run: docker build -t asset-sync-server .
+
+      # Verifies the container boots (sqlite3 loads via libsqlite3.so.0),
+      # serves /health and round-trips the sync protocol.
+      - name: Smoke test container
+        run: |
+          docker run -d --name sync-test -p 8787:8787 asset-sync-server
+          sleep 5
+          curl -sf http://127.0.0.1:8787/health
+          curl -sf -X PUT -H 'Content-Type: application/json' \
+            -d '{"snapshot":{"accounts":[{"id":1,"name":"ci"}]},"tombstones":[]}' \
+            http://127.0.0.1:8787/api/sync
+          curl -sf http://127.0.0.1:8787/api/sync
+
   build-web:
     name: Build Web
     runs-on: ubuntu-latest
