@@ -1,0 +1,12 @@
+services:
+  asset-sync-server:
+    build: .
+    container_name: asset-sync-server
+    restart: unless-stopped
+    ports:
+      - "8787:8787"
+    environment:
+      # Optional bearer token; clients send it in Authorization: Bearer <token>.
+      ASSET_SYNC_TOKEN: "${ASSET_SYNC_TOKEN:-}"
+    volumes:
+      - ./data:/data

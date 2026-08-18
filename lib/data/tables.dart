@@ -10,6 +10,7 @@ class Accounts extends Table {
   TextColumn get currency => text().withDefault(const Constant('CNY'))();
   TextColumn get note => text().nullable()();
   DateTimeColumn get createdAt => dateTime().withDefault(currentDateAndTime)();
+  DateTimeColumn get updatedAt => dateTime().withDefault(currentDateAndTime)();
 }
 
 /// A single holding position within an account.
@@ -58,6 +59,8 @@ class Transactions extends Table {
   /// (costPrice) together with the balance. Legacy transfers recorded
   /// before the fix have this false, so removal must not roll the cost back.
   BoolColumn get costMoved => boolean().withDefault(const Constant(true))();
+
+  DateTimeColumn get updatedAt => dateTime().withDefault(currentDateAndTime)();
 
   @override
   List<Set<Column>> get uniqueKeys => [
@@ -109,6 +112,25 @@ class AlertRules extends Table {
   TextColumn get params => text().withDefault(const Constant('{}'))();
   BoolColumn get enabled => boolean().withDefault(const Constant(true))();
   DateTimeColumn get createdAt => dateTime().withDefault(currentDateAndTime)();
+  DateTimeColumn get updatedAt => dateTime().withDefault(currentDateAndTime)();
+}
+
+/// Deleted-row markers for multi-device sync (last-write-wins merge): a
+/// tombstone wins over any live row with the same key, so deletions made
+/// on one device never resurrect on another device.
+@DataClassName('SyncTombstoneRow')
+class SyncTombstones extends Table {
+  /// Table name this tombstone belongs to (e.g. 'holdings').
+  TextColumn get table => text()();
+
+  /// Row key as a string: the integer row id for id-keyed tables, or the
+  /// composite key (e.g. 'date|currency') for keyed tables.
+  TextColumn get rowKey => text()();
+
+  DateTimeColumn get deletedAt => dateTime().withDefault(currentDateAndTime)();
+
+  @override
+  Set<Column> get primaryKey => {table, rowKey};
 }
 
 /// Fired alert events, used for dedup and history.
