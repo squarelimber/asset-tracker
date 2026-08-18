@@ -49,3 +49,5 @@ app.*.map.json
 *.db-shm
 *.db-wal
 /backups/
+
+dist/
