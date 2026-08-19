@@ -7,6 +7,7 @@ import 'package:go_router/go_router.dart';
 import '../../app/providers.dart';
 import '../../app/theme.dart';
 import '../../core/formats.dart';
+import '../../core/responsive.dart';
 import '../../data/database.dart';
 import '../../domain/portfolio_calculator.dart';
 import '../../domain/range_stats.dart';
@@ -423,72 +424,103 @@ class _NetWorthChartState extends ConsumerState<NetWorthChart> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // Toolbar: title + view toggle + benchmark chip + calendar.
-            Row(
-              children: [
-                Expanded(
-                  child: Text('资产走势', style: Theme.of(context).textTheme.titleMedium),
-                ),
-                IconButton(
-                  tooltip: '收益日历',
-                  icon: const Icon(Icons.event_note_outlined, size: 22),
-                  onPressed: () => context.push('/earnings-calendar'),
-                ),
-                SegmentedButton<_TrendView>(
-                  segments: const [
-                    ButtonSegment(value: _TrendView.returnRate, label: Text('收益率')),
-                    ButtonSegment(value: _TrendView.netValue, label: Text('净值')),
-                  ],
-                  selected: {_view},
-                  showSelectedIcon: false,
-                  style: const ButtonStyle(
-                    visualDensity: VisualDensity.compact,
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  ),
-                  onSelectionChanged: (s) =>
-                      setState(() => _view = s.first),
-                ),
-                const SizedBox(width: 8),
-                FilterChip(
-                  label: Text(
-                    _benchSelected.isEmpty
-                        ? '指数对比'
-                        : '指数对比(${_benchSelected.length})',
-                  ),
-                  selected: _benchSelected.isNotEmpty,
-                  showCheckmark: false,
-                  visualDensity: VisualDensity.compact,
-                  onSelected: (_) => _showBenchmarkPanel(),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            // Range presets + all/custom menu.
-            Row(
-              children: [
-                Expanded(
-                  child: SegmentedButton<RangeOption>(
-                    segments: [
-                      for (final opt in _rangeOptions)
-                        ButtonSegment(value: opt, label: Text(opt.label)),
+            // On phones the trailing controls wrap onto a second line so the
+            // title never gets squeezed into vertical single-char columns.
+            _NetWorthToolbar(
+              title: Text('资产走势', style: Theme.of(context).textTheme.titleMedium),
+              calendar: IconButton(
+                tooltip: '收益日历',
+                icon: const Icon(Icons.event_note_outlined, size: 22),
+                onPressed: () => context.push('/earnings-calendar'),
+              ),
+              trailing: Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  SegmentedButton<_TrendView>(
+                    segments: const [
+                      ButtonSegment(value: _TrendView.returnRate, label: Text('收益率')),
+                      ButtonSegment(value: _TrendView.netValue, label: Text('净值')),
                     ],
-                    selected: {_range},
+                    selected: {_view},
                     showSelectedIcon: false,
                     style: const ButtonStyle(
                       visualDensity: VisualDensity.compact,
                       tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                     ),
-                    onSelectionChanged: (s) => setState(() => _range = s.first),
+                    onSelectionChanged: (s) =>
+                        setState(() => _view = s.first),
                   ),
-                ),
-                const SizedBox(width: 4),
-                IconButton(
-                  tooltip: '全部 / 自定义日期',
-                  icon: const Icon(Icons.calendar_month_outlined, size: 20),
-                  visualDensity: VisualDensity.compact,
-                  onPressed: _showRangeMenu,
-                ),
-              ],
+                  FilterChip(
+                    label: Text(
+                      _benchSelected.isEmpty
+                          ? '指数对比'
+                          : '指数对比(${_benchSelected.length})',
+                    ),
+                    selected: _benchSelected.isNotEmpty,
+                    showCheckmark: false,
+                    visualDensity: VisualDensity.compact,
+                    onSelected: (_) => _showBenchmarkPanel(),
+                  ),
+                ],
+              ),
             ),
+            const SizedBox(height: 12),
+            // Range presets + all/custom menu. On phones the presets are
+            // content-sized ChoiceChips that wrap instead of a full-width
+            // stretched segmented button.
+            if (Responsive.isPhone(context))
+              Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  for (final opt in _rangeOptions)
+                    ChoiceChip(
+                      label: Text(opt.label),
+                      selected: _range == opt,
+                      showCheckmark: false,
+                      visualDensity: VisualDensity.compact,
+                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      onSelected: (_) => setState(() => _range = opt),
+                    ),
+                  IconButton(
+                    tooltip: '全部 / 自定义日期',
+                    icon: const Icon(Icons.calendar_month_outlined, size: 20),
+                    visualDensity: VisualDensity.compact,
+                    onPressed: _showRangeMenu,
+                  ),
+                ],
+              )
+            else
+              Row(
+                children: [
+                  Expanded(
+                    child: SegmentedButton<RangeOption>(
+                      segments: [
+                        for (final opt in _rangeOptions)
+                          ButtonSegment(value: opt, label: Text(opt.label)),
+                      ],
+                      selected: {_range},
+                      showSelectedIcon: false,
+                      style: const ButtonStyle(
+                        visualDensity: VisualDensity.compact,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                      onSelectionChanged: (s) =>
+                          setState(() => _range = s.first),
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  IconButton(
+                    tooltip: '全部 / 自定义日期',
+                    icon: const Icon(Icons.calendar_month_outlined, size: 20),
+                    visualDensity: VisualDensity.compact,
+                    onPressed: _showRangeMenu,
+                  ),
+                ],
+              ),
             if (_range == RangeOption.custom && _customFrom != null)
               Padding(
                 padding: const EdgeInsets.only(top: 8),
@@ -654,6 +686,48 @@ class _NetWorthChartState extends ConsumerState<NetWorthChart> {
 }
 
 enum _TrendView { returnRate, netValue }
+
+/// Toolbar for the net worth chart. On phones the title keeps its own line
+/// so narrow screens never squeeze it into vertical single-char columns;
+/// desktop retains the classic single-row layout.
+class _NetWorthToolbar extends StatelessWidget {
+  const _NetWorthToolbar({
+    required this.title,
+    required this.calendar,
+    required this.trailing,
+  });
+
+  final Widget title;
+  final Widget calendar;
+  final Widget trailing;
+
+  @override
+  Widget build(BuildContext context) {
+    if (Responsive.isPhone(context)) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(child: title),
+              calendar,
+            ],
+          ),
+          const SizedBox(height: 4),
+          trailing,
+        ],
+      );
+    }
+    return Row(
+      children: [
+        Expanded(child: title),
+        calendar,
+        const SizedBox(width: 8),
+        trailing,
+      ],
+    );
+  }
+}
 
 /// One benchmark index overlay series.
 class _BenchSeries {
