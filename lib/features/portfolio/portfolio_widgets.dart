@@ -9,6 +9,8 @@ import '../../app/theme.dart';
 import '../../core/formats.dart';
 import '../../core/responsive.dart';
 import '../../data/database.dart';
+import '../../domain/chart_downsample.dart';
+import '../../domain/nice_ticks.dart';
 import '../../domain/portfolio_calculator.dart';
 import '../../domain/range_stats.dart';
 import '../../domain/rate_series.dart';
@@ -269,6 +271,9 @@ class _NetWorthChartState extends ConsumerState<NetWorthChart> {
     (code: 'sz399006', label: '创业板指', color: Color(0xFFFFB74D)),
   ];
 
+  /// Max overlaid index lines: more than this is unreadable on a phone.
+  static const _maxBenchmarks = 3;
+
   Set<String> _benchSelected = {};
   Map<String, HistoryPriceLookup> _benchData = {};
 
@@ -304,13 +309,20 @@ class _NetWorthChartState extends ConsumerState<NetWorthChart> {
                     label: Text(b.label),
                     selected: _benchSelected.contains(b.code),
                     visualDensity: VisualDensity.compact,
-                    onSelected: (sel) => setSheetState(() {
+                    onSelected: (sel) {
                       if (sel) {
-                        _benchSelected.add(b.code);
+                        if (_benchSelected.length >= _maxBenchmarks) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                                content: Text('最多同时对比 3 个指数')),
+                          );
+                          return;
+                        }
+                        setSheetState(() => _benchSelected.add(b.code));
                       } else {
-                        _benchSelected.remove(b.code);
+                        setSheetState(() => _benchSelected.remove(b.code));
                       }
-                    }),
+                    },
                   ),
                   const SizedBox(height: 6),
                 ],
@@ -765,6 +777,9 @@ class _TrendChart extends StatelessWidget {
   /// Called with the tapped snapshot date (yyyy-MM-dd).
   final ValueChanged<String>? onDayTap;
 
+  /// Point count beyond which the series is downsampled for phone screens.
+  static const _denseThreshold = 240;
+
   @override
   Widget build(BuildContext context) {
     // Fixed red brand color for a positive, energetic feel; the line does
@@ -776,18 +791,14 @@ class _TrendChart extends StatelessWidget {
     // series compare the return over the selected range.
     final rateBase = isRate && rates.isNotEmpty ? rates.first : 0.0;
 
-    final points = <FlSpot>[];
-    var minV = double.infinity;
-    var maxV = 0.0;
+    final rawPoints = <FlSpot>[];
     for (var i = 0; i < list.length; i++) {
       final v = isRate ? rates[i] - rateBase : list[i].totalValue;
-      points.add(FlSpot(i.toDouble(), v));
-      if (v < minV) minV = v;
-      if (v > maxV) maxV = v;
+      rawPoints.add(FlSpot(i.toDouble(), v));
     }
     // Benchmarks: normalized return rates (%), same start point as the
     // portfolio return-rate view: (price / base - 1) * 100.
-    final benchSeries = <_BenchSeries, List<FlSpot>>{};
+    final benchRaw = <_BenchSeries, List<FlSpot>>{};
     if (isRate) {
       for (final entry in benchmarks.entries) {
         final series = entry.value;
@@ -799,149 +810,196 @@ class _TrendChart extends StatelessWidget {
           if (base == 0) base = idx;
           spots.add(FlSpot(i.toDouble(), (idx / base - 1) * 100));
         }
-        if (spots.isNotEmpty) benchSeries[series] = spots;
+        if (spots.isNotEmpty) benchRaw[series] = spots;
       }
     }
 
-    // Include benchmark values in the Y range so lines never overflow the
-    // chart when an index moves far beyond the portfolio series.
-    for (final spots in benchSeries.values) {
+    // Y range from the full (pre-downsampled) data so the plot never clips.
+    var minV = double.infinity;
+    var maxV = double.negativeInfinity;
+    for (final p in rawPoints) {
+      if (p.y < minV) minV = p.y;
+      if (p.y > maxV) maxV = p.y;
+    }
+    for (final spots in benchRaw.values) {
       for (final s in spots) {
         if (s.y < minV) minV = s.y;
         if (s.y > maxV) maxV = s.y;
       }
     }
+    if (rawPoints.isEmpty) minV = 0;
+    if (rawPoints.isEmpty) maxV = 0;
     final span = maxV - minV;
     final pad = span == 0 ? maxV.abs() * 0.05 : span * 0.12;
+    // "Nice" axis: a 1/2/5×10ⁿ step with labels aligned to it, so ticks are
+    // always evenly spaced human-friendly values (3.0/3.1/3.2) instead of the
+    // raw min/max fl_chart force-includes — which overlap on small ranges.
+    final ticks = NiceAxis.ticks(minV - pad, maxV + pad);
+    final axisMin = ticks.ticks.first;
+    final axisMax = ticks.ticks.last;
     final longRange = list.length > 250;
+    final dense = list.length > _denseThreshold;
+    // Axis labels use the step's precision; the tooltip keeps 2 decimals.
+    String pctLabel(double pctPoints, int decimals) {
+      final rounded = double.parse(pctPoints.toStringAsFixed(decimals));
+      final sign = rounded < 0 ? '-' : (rounded > 0 ? '+' : '');
+      return '$sign${rounded.abs().toStringAsFixed(decimals)}%';
+    }
+
     String valueText(double v) => isRate
-        ? '${v >= 0 ? '+' : ''}${Formats.pct(v / 100)}'
+        ? pctLabel(v, ticks.decimals)
         : hideAmounts
             ? Formats.masked()
             : Formats.amountCompact(v);
     String tooltipText(double v) => isRate
-        ? valueText(v)
+        ? '${v >= 0 ? '+' : ''}${Formats.pct(v / 100)}'
         : hideAmounts
             ? Formats.masked()
             : Formats.money(v);
 
-    return SizedBox(
-      height: 240,
-      child: LineChart(
-        LineChartData(
-          minY: (minV - pad).clamp(double.negativeInfinity, double.infinity),
-          maxY: maxV + pad,
-          gridData: FlGridData(
-            show: true,
-            drawVerticalLine: false,
-            horizontalInterval: span == 0 ? 1 : span / 4,
-            getDrawingHorizontalLine: (v) => FlLine(
-              color: Theme.of(context).colorScheme.outlineVariant.withValues(alpha: 0.18),
-              strokeWidth: 1,
-            ),
-          ),
-          borderData: FlBorderData(show: false),
-          titlesData: FlTitlesData(
-            leftTitles: AxisTitles(
-              sideTitles: SideTitles(
-                showTitles: true,
-                reservedSize: 56,
-                getTitlesWidget: (v, meta) => Text(
-                  valueText(v),
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: Theme.of(context).colorScheme.outline,
-                      ),
+    const ds = ChartDownsample();
+    List<FlSpot> toSpots(List<ChartPoint> pts) =>
+        [for (final p in pts) FlSpot(p.x, p.y)];
+    final points = toSpots(ds.downsample(
+      [for (final p in rawPoints) (x: p.x, y: p.y)],
+    ));
+    final benchSeries = <_BenchSeries, List<FlSpot>>{
+      for (final entry in benchRaw.entries)
+        entry.key: toSpots(ds.downsample(
+          [for (final p in entry.value) (x: p.x, y: p.y)],
+        )),
+    };
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // Date ticks: roughly one per 80px of plot width, at least 3.
+        final plotWidth = (constraints.maxWidth - 48).clamp(0.0, double.infinity);
+        final labelCount =
+            (plotWidth / 80).floor().clamp(3, list.length.clamp(3, 12));
+        final xInterval = (list.length / labelCount).ceilToDouble();
+        return SizedBox(
+          height: Responsive.isPhone(context) ? 280 : 240,
+          child: LineChart(
+            LineChartData(
+              minY: axisMin,
+              maxY: axisMax,
+              gridData: FlGridData(
+                show: true,
+                drawVerticalLine: false,
+                horizontalInterval: ticks.step,
+                getDrawingHorizontalLine: (v) => FlLine(
+                  color: Theme.of(context).colorScheme.outlineVariant.withValues(alpha: 0.18),
+                  strokeWidth: 1,
                 ),
               ),
-            ),
-            bottomTitles: AxisTitles(
-              sideTitles: SideTitles(
-                showTitles: true,
-                interval: (list.length / 4).ceilToDouble(),
-                reservedSize: 28,
-                getTitlesWidget: (v, meta) {
-                  final i = v.toInt();
-                  if (i < 0 || i >= list.length) return const SizedBox.shrink();
-                  final d = DateTime.tryParse(list[i].date);
-                  if (d == null) return const SizedBox.shrink();
-                  final label = longRange ? '${d.year % 100}-${d.month}' : '${d.month}-${d.day}';
-                  return Text(
-                    label,
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: Theme.of(context).colorScheme.outline,
+              borderData: FlBorderData(show: false),
+              titlesData: FlTitlesData(
+                leftTitles: AxisTitles(
+                  sideTitles: SideTitles(
+                    showTitles: true,
+                    reservedSize: 48,
+                    interval: ticks.step,
+                    getTitlesWidget: (v, meta) => Text(
+                      valueText(v),
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: Theme.of(context).colorScheme.outline,
+                          ),
+                    ),
+                  ),
+                ),
+                bottomTitles: AxisTitles(
+                  sideTitles: SideTitles(
+                    showTitles: true,
+                    interval: xInterval,
+                    reservedSize: 28,
+                    getTitlesWidget: (v, meta) {
+                      final i = v.toInt();
+                      if (i < 0 || i >= list.length) return const SizedBox.shrink();
+                      final d = DateTime.tryParse(list[i].date);
+                      if (d == null) return const SizedBox.shrink();
+                      final label = longRange ? '${d.year % 100}-${d.month}' : '${d.month}-${d.day}';
+                      return Text(
+                        label,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: Theme.of(context).colorScheme.outline,
+                            ),
+                      );
+                    },
+                  ),
+                ),
+                topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+              ),
+              lineTouchData: LineTouchData(
+                touchTooltipData: LineTouchTooltipData(
+                  getTooltipColor: (_) => Theme.of(context).colorScheme.surface,
+                  tooltipBorder: BorderSide(
+                    color: Theme.of(context).colorScheme.outlineVariant,
+                  ),
+                  tooltipBorderRadius: BorderRadius.circular(8),
+                  getTooltipItems: (spots) => [
+                    for (final spot in spots)
+                      LineTooltipItem(
+                        '${Formats.date(DateTime.parse(list[spot.x.toInt()].date))}\n'
+                        '${tooltipText(spot.y)}',
+                        TextStyle(
+                          color: Theme.of(context).colorScheme.onSurface,
+                          fontWeight: FontWeight.w600,
+                          fontFeatures: const [FontFeature.tabularFigures()],
                         ),
-                  );
+                      ),
+                  ],
+                ),
+                touchCallback: (event, response) {
+                  // Single tap on a spot opens the day detail panel.
+                  if (event is FlTapUpEvent && response != null) {
+                    final spots = response.lineBarSpots;
+                    if (spots != null && spots.isNotEmpty) {
+                      final idx = spots.first.x.toInt();
+                      if (idx >= 0 && idx < list.length) {
+                        onDayTap?.call(list[idx].date);
+                      }
+                    }
+                  }
                 },
               ),
-            ),
-            topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-            rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-          ),
-          lineTouchData: LineTouchData(
-            touchTooltipData: LineTouchTooltipData(
-              getTooltipColor: (_) => Theme.of(context).colorScheme.surface,
-              tooltipBorder: BorderSide(
-                color: Theme.of(context).colorScheme.outlineVariant,
-              ),
-              tooltipBorderRadius: BorderRadius.circular(8),
-              getTooltipItems: (spots) => [
-                for (final spot in spots)
-                  LineTooltipItem(
-                    '${Formats.date(DateTime.parse(list[spot.x.toInt()].date))}\n'
-                    '${tooltipText(spot.y)}',
-                    TextStyle(
-                      color: Theme.of(context).colorScheme.onSurface,
-                      fontWeight: FontWeight.w600,
-                      fontFeatures: const [FontFeature.tabularFigures()],
+              lineBarsData: [
+                LineChartBarData(
+                  spots: points,
+                  // Dense series (downsampled) are drawn as straight segments;
+                  // smoothing hundreds of points into a narrow plot creates
+                  // loops and false detail. Short ranges keep the smooth curve.
+                  isCurved: !dense,
+                  curveSmoothness: 0.25,
+                  color: color,
+                  barWidth: dense ? 2 : 2.5,
+                  dotData: const FlDotData(show: false),
+                  belowBarData: BarAreaData(
+                    show: true,
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [
+                        color.withValues(alpha: 0.22),
+                        color.withValues(alpha: 0.02),
+                      ],
                     ),
+                  ),
+                ),
+                for (final entry in benchSeries.entries)
+                  LineChartBarData(
+                    spots: entry.value,
+                    isCurved: !dense,
+                    curveSmoothness: 0.25,
+                    color: entry.key.color.withValues(alpha: 0.8),
+                    barWidth: 1.5,
+                    dotData: const FlDotData(show: false),
                   ),
               ],
             ),
-            touchCallback: (event, response) {
-              // Single tap on a spot opens the day detail panel.
-              if (event is FlTapUpEvent && response != null) {
-                final spots = response.lineBarSpots;
-                if (spots != null && spots.isNotEmpty) {
-                  final idx = spots.first.x.toInt();
-                  if (idx >= 0 && idx < list.length) {
-                    onDayTap?.call(list[idx].date);
-                  }
-                }
-              }
-            },
           ),
-          lineBarsData: [
-            LineChartBarData(
-              spots: points,
-              isCurved: true,
-              curveSmoothness: 0.25,
-              color: color,
-              barWidth: 2.5,
-              dotData: const FlDotData(show: false),
-              belowBarData: BarAreaData(
-                show: true,
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [
-                    color.withValues(alpha: 0.22),
-                    color.withValues(alpha: 0.02),
-                  ],
-                ),
-              ),
-            ),
-            for (final entry in benchSeries.entries)
-              LineChartBarData(
-                spots: entry.value,
-                isCurved: true,
-                curveSmoothness: 0.25,
-                color: entry.key.color.withValues(alpha: 0.8),
-                barWidth: 1.5,
-                dotData: const FlDotData(show: false),
-              ),
-          ],
-        ),
-      ),
+        );
+      },
     );
   }
 }
