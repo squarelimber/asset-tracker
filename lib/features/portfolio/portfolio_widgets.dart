@@ -440,10 +440,20 @@ class _NetWorthChartState extends ConsumerState<NetWorthChart> {
             // title never gets squeezed into vertical single-char columns.
             _NetWorthToolbar(
               title: Text('资产走势', style: Theme.of(context).textTheme.titleMedium),
-              calendar: IconButton(
-                tooltip: '收益日历',
-                icon: const Icon(Icons.event_note_outlined, size: 22),
-                onPressed: () => context.push('/earnings-calendar'),
+              calendar: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  IconButton(
+                    tooltip: '收益日历',
+                    icon: const Icon(Icons.event_note_outlined, size: 22),
+                    onPressed: () => context.push('/earnings-calendar'),
+                  ),
+                  IconButton(
+                    tooltip: '产品收益日历',
+                    icon: const Icon(Icons.table_chart_outlined, size: 22),
+                    onPressed: () => context.push('/product-earnings'),
+                  ),
+                ],
               ),
               trailing: Wrap(
                 spacing: 8,

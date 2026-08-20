@@ -6,9 +6,11 @@ import '../data/asset_dao.dart';
 import '../data/database.dart';
 import '../domain/daily_earnings.dart';
 import '../domain/holding_details.dart';
+import '../domain/product_monthly_earnings.dart';
 import '../domain/transaction_service.dart';
 import '../services/history_backfill_service.dart';
 import '../services/market/market_service.dart';
+import '../services/product_earnings_service.dart';
 import '../services/snapshot_service.dart';
 
 /// App-wide database instance.
@@ -99,6 +101,30 @@ final historySyncProvider = FutureProvider<BackfillResult?>((ref) async {
   // dashboard's live summary.
   await ref.read(snapshotServiceProvider).ensureTodaySnapshot(force: true);
   return result;
+});
+
+/// Per-product monthly earnings engine (sold-out products included via
+/// flow replay).
+final productEarningsServiceProvider = Provider<ProductEarningsService>(
+  (ref) => ProductEarningsService(
+    ref.watch(daoProvider),
+    market: ref.watch(marketServiceProvider),
+  ),
+);
+
+/// Per-product earnings for [year]: window from the first day of the
+/// previous month of (year-1) to the end of [year] (or today for the
+/// current year), so every month of [year] has a baseline day. Month and
+/// year navigation on the page is client-side over this result.
+final productEarningsProvider = FutureProvider.autoDispose
+    .family<List<ProductEarnings>, int>((ref, year) async {
+  ref.watch(historySyncProvider);
+  final now = DateTime.now();
+  final from = DateTime(year - 1, 12, 1);
+  final to = year < now.year
+      ? DateTime(year, 12, 31)
+      : DateTime(now.year, now.month, now.day);
+  return ref.watch(productEarningsServiceProvider).compute(from: from, to: to);
 });
 
 // ---------------------------------------------------------------------------

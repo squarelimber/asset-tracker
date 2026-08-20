@@ -5,6 +5,7 @@ import '../features/accounts/account_detail_page.dart';
 import '../features/accounts/accounts_page.dart';
 import '../features/alerts/alerts_page.dart';
 import '../features/calendar/earnings_calendar_page.dart';
+import '../features/calendar/product_earnings_calendar_page.dart';
 import '../features/holdings/holdings_page.dart';
 import '../features/markets/markets_page.dart';
 import '../features/portfolio/portfolio_page.dart';
@@ -19,6 +20,10 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/earnings-calendar',
         builder: (context, state) => const EarningsCalendarPage(),
+      ),
+      GoRoute(
+        path: '/product-earnings',
+        builder: (context, state) => const ProductEarningsCalendarPage(),
       ),
       ShellRoute(
         builder: (context, state, child) => ShellPage(child: child),
