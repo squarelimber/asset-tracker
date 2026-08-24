@@ -67,15 +67,18 @@ class SyncApi {
     List<dynamic> tombstones, {
     int? baseRev,
   }) async {
+    final payload = <String, dynamic>{
+      'snapshot': snapshot,
+      'tombstones': tombstones,
+    };
+    if (baseRev != null) {
+      payload['baseRev'] = baseRev;
+    }
     final res = await _client
         .put(
           _uri('/api/sync'),
           headers: _headers,
-          body: jsonEncode({
-            'snapshot': snapshot,
-            'tombstones': tombstones,
-            if (baseRev != null) 'baseRev': baseRev,
-          }),
+          body: jsonEncode(payload),
         )
         .timeout(const Duration(seconds: 30));
     if (res.statusCode == 409) {
