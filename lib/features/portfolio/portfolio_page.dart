@@ -8,6 +8,7 @@ import '../../core/formats.dart';
 import '../../core/responsive.dart';
 import '../../domain/portfolio_calculator.dart';
 import '../../services/history_backfill_service.dart';
+import '../../services/market/market_service.dart';
 import 'portfolio_widgets.dart';
 
 final _summaryProvider = FutureProvider<PortfolioSummary>((ref) async {
@@ -64,18 +65,27 @@ class _PortfolioPageState extends ConsumerState<PortfolioPage> {
   Future<void> _refreshPrices({bool showSnack = true}) async {
     if (_refreshing.value) return;
     _refreshing.value = true;
-    final result = await ref.read(marketServiceProvider).refreshAll();
-    await ref.read(snapshotServiceProvider).ensureTodaySnapshot(force: true);
-    // FX rates may have changed with the refresh.
-    ref.invalidate(cnyRatesProvider);
-    _refreshing.value = false;
-    if (!mounted) return;
+    MarketRefreshResult? result;
+    Object? error;
+    try {
+      result = await ref.read(marketServiceProvider).refreshAll();
+      await ref.read(snapshotServiceProvider).ensureTodaySnapshot(force: true);
+      // FX rates may have changed with the refresh.
+      ref.invalidate(cnyRatesProvider);
+    } catch (e) {
+      error = e;
+    } finally {
+      _refreshing.value = false;
+    }
+    if (!mounted || result == null) return;
     if (showSnack) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(result.failed == 0
-              ? '行情已更新 (${result.updated} 项)'
-              : '更新 ${result.updated} 项，失败 ${result.failed} 项'),
+          content: Text(error != null
+              ? '行情刷新失败，请稍后重试'
+              : result.failed == 0
+                  ? '行情已更新 (${result.updated} 项)'
+                  : '更新 ${result.updated} 项，失败 ${result.failed} 项'),
         ),
       );
     }

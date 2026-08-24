@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:ffi';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:shelf/shelf.dart';
 import 'package:shelf/shelf_io.dart' as shelf_io;
@@ -13,11 +14,14 @@ import 'package:asset_sync_server/sync_store.dart';
 ///
 /// Protocol (single-user, last-write-wins, whole-snapshot exchange):
 ///   GET /api/sync        -> {rev, snapshot, tombstones}
-///   PUT /api/sync        -> body {snapshot, tombstones}; returns {rev}
+///   PUT /api/sync        -> body {snapshot, tombstones, baseRev?};
+///                           returns {rev}, or 409 {rev} when baseRev
+///                           does not match the current revision.
 ///
 /// Authentication: `Authorization: Bearer <token>` against the
-/// ASSET_SYNC_TOKEN environment variable. When the variable is not set,
-/// authentication is skipped (personal deployments on a trusted LAN).
+/// ASSET_SYNC_TOKEN environment variable. The server binds to 127.0.0.1 by
+/// default (override with HOST); binding to a non-loopback address without
+/// a token is refused.
 Future<void> main(List<String> args) async {
   // Debian's libsqlite3-0 runtime package ships only the versioned
   // libsqlite3.so.0; the sqlite3 package's default 'libsqlite3.so' lookup
@@ -28,9 +32,19 @@ Future<void> main(List<String> args) async {
   );
 
   final port = int.tryParse(Platform.environment['PORT'] ?? '') ?? 8787;
+  final host = Platform.environment['HOST'] ?? '127.0.0.1';
   final dbPath =
       Platform.environment['SYNC_DB_PATH'] ?? 'sync_state.sqlite';
   final token = Platform.environment['ASSET_SYNC_TOKEN'];
+
+  final loopback = host == '127.0.0.1' || host == 'localhost' || host == '::1';
+  if (!loopback && (token == null || token.isEmpty)) {
+    stderr.writeln(
+      'refusing to bind $host without a token; '
+      'set ASSET_SYNC_TOKEN or use HOST=127.0.0.1',
+    );
+    exit(1);
+  }
 
   final store = SyncStore(dbPath);
   final router = Router()
@@ -39,12 +53,13 @@ Future<void> main(List<String> args) async {
     ..get('/health', (Request req) => Response.ok('ok'));
 
   final handler = const Pipeline()
+      .addMiddleware(_rateLimit())
       .addMiddleware(_cors())
       .addMiddleware(_auth(token))
       .addHandler(router.call);
 
-  await shelf_io.serve(handler, InternetAddress.anyIPv4, port);
-  stdout.writeln('asset-sync-server listening on http://0.0.0.0:$port (db: $dbPath)');
+  await shelf_io.serve(handler, InternetAddress(host), port);
+  stdout.writeln('asset-sync-server listening on http://$host:$port (db: $dbPath)');
   ProcessSignal.sigint.watch().listen((_) {
     store.close();
     exit(0);
@@ -59,8 +74,16 @@ Response _handleGet(SyncStore store, Request req) {
   return _json({'rev': state.rev, 'snapshot': state.snapshot, 'tombstones': state.tombstones});
 }
 
+const _maxBodyBytes = 32 * 1024 * 1024;
+
 Future<Response> _handlePut(SyncStore store, Request req) async {
-  final body = jsonDecode(await req.readAsString());
+  final String raw;
+  try {
+    raw = await _readLimited(req, _maxBodyBytes);
+  } on FormatException {
+    return Response(413, body: 'request body too large');
+  }
+  final body = jsonDecode(raw);
   if (body is! Map<String, dynamic>) {
     return Response.badRequest(body: 'expected JSON object');
   }
@@ -69,8 +92,59 @@ Future<Response> _handlePut(SyncStore store, Request req) async {
   if (snapshot is! Map<String, dynamic> || tombstones is! List) {
     return Response.badRequest(body: 'snapshot must be an object, tombstones a list');
   }
-  final result = store.write(snapshot, tombstones);
+  final baseRev = (body['baseRev'] as num?)?.toInt();
+  final result = store.write(snapshot, tombstones, baseRev: baseRev);
+  if (result.conflict) {
+    return Response(
+      409,
+      body: jsonEncode({'rev': result.rev}),
+      headers: const {'content-type': 'application/json; charset=utf-8'},
+    );
+  }
   return _json({'rev': result.rev});
+}
+
+/// Reads the request body, throwing [FormatException] once [maxBytes] is
+/// exceeded so clients cannot fill the disk with oversized snapshots.
+Future<String> _readLimited(Request req, int maxBytes) async {
+  var size = 0;
+  final buffer = BytesBuilder(copy: false);
+  await for (final chunk in req.read()) {
+    size += chunk.length;
+    if (size > maxBytes) throw const FormatException('too large');
+    buffer.add(chunk);
+  }
+  return utf8.decode(buffer.takeBytes());
+}
+
+/// Naive sliding-window rate limit (single-user personal server).
+///
+/// shelf's [Request] does not expose the peer address, so the client is
+/// identified by the first `X-Forwarded-For` hop when present and otherwise
+/// by a single global bucket (fine for one user, and still caps a runaway
+/// client or a misbehaving proxy).
+Middleware _rateLimit({
+  int limit = 300,
+  Duration window = const Duration(minutes: 1),
+}) {
+  final hits = <String, List<int>>{};
+  return (inner) {
+    return (Request req) {
+      final forwarded = req.headers['x-forwarded-for'];
+      final key =
+          (forwarded != null && forwarded.isNotEmpty)
+              ? forwarded.split(',').first.trim()
+              : 'global';
+      final nowMs = DateTime.now().millisecondsSinceEpoch;
+      final times = hits.putIfAbsent(key, () => <int>[])
+        ..removeWhere((t) => nowMs - t > window.inMilliseconds);
+      if (times.length >= limit) {
+        return Response(429, body: 'too many requests');
+      }
+      times.add(nowMs);
+      return inner(req);
+    };
+  };
 }
 
 Middleware _auth(String? token) {

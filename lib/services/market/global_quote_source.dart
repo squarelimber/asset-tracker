@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:http/http.dart' as http;
 
+import 'market_data_source.dart';
+
 /// One global market quote (index / commodity / FX).
 class GlobalQuote {
   const GlobalQuote({
@@ -92,10 +94,10 @@ class GlobalQuoteSource {
     final codes = [for (final d in GlobalQuoteCatalog.items) d.code];
     final results = <GlobalQuote>[];
     try {
-      final resp = await _client.get(
-        Uri.parse('$_base${codes.join(',')}'),
-        headers: {'Referer': 'https://finance.sina.com.cn'},
-      );
+      final resp = await _client
+          .get(Uri.parse('$_base${codes.join(',')}'),
+              headers: {'Referer': 'https://finance.sina.com.cn'})
+          .timeout(marketHttpTimeout);
       if (resp.statusCode != 200) return results;
       // ASCII fields are preserved by latin1 passthrough; Chinese names are
       // provided by our own catalog instead of the (GBK) response.
@@ -262,11 +264,10 @@ class GlobalQuoteSource {
         if (_tencentCodes.containsKey(d.code)) d.code: d,
     };
     try {
-      final resp = await _client.get(
-        Uri.parse(
-          '$_baseTencent${[for (final c in defOf.keys) _tencentCodes[c]].join(',')}',
-        ),
-      );
+      final resp = await _client
+          .get(Uri.parse(
+              '$_baseTencent${[for (final c in defOf.keys) _tencentCodes[c]].join(',')}'))
+          .timeout(marketHttpTimeout);
       if (resp.statusCode != 200) return results;
       final text = latin1.decode(resp.bodyBytes, allowInvalid: true);
       final map = _parseTencent(text);

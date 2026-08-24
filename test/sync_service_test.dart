@@ -12,12 +12,19 @@ import 'package:asset_tracker/data/database.dart';
 import 'package:asset_tracker/sync/sync_api.dart';
 import 'package:asset_tracker/sync/sync_service.dart';
 
-/// In-memory stand-in for the shelf sync server.
+/// In-memory stand-in for the shelf sync server, including the baseRev
+/// optimistic-concurrency check (HTTP 409 on a stale revision).
 class _FakeServer {
   int rev = 0;
   Map<String, dynamic> snapshot = {};
   List<dynamic> tombstones = [];
   int putCount = 0;
+  int putAttempts = 0;
+
+  /// Number of upcoming PUTs that first see a concurrent write (the
+  /// revision bumps before the baseRev check), forcing the client's
+  /// re-merge/retry path.
+  int concurrentWrites = 0;
 
   late final MockClient client = MockClient((request) async {
     if (request.method == 'GET' && request.url.path == '/api/sync') {
@@ -28,7 +35,17 @@ class _FakeServer {
       );
     }
     if (request.method == 'PUT' && request.url.path == '/api/sync') {
+      putAttempts++;
       final body = jsonDecode(request.body) as Map<String, dynamic>;
+      if (concurrentWrites > 0) {
+        concurrentWrites--;
+        rev++; // another device wrote while this client was merging
+      }
+      final baseRev = (body['baseRev'] as num?)?.toInt();
+      if (baseRev != null && baseRev != rev) {
+        return http.Response(jsonEncode({'rev': rev}), 409,
+            headers: {'content-type': 'application/json'});
+      }
       snapshot = (body['snapshot'] as Map<String, dynamic>?) ?? {};
       tombstones = (body['tombstones'] as List?) ?? const [];
       rev++;
@@ -227,6 +244,66 @@ void main() {
     expect(merged.quantity, 2000);
     expect(merged.name, '原名');
     await dbB.close();
+  });
+
+  test('deletion wins over an older local copy (no resurrection)', () async {
+    final holdingId = await seedHolding(name: '会被删的');
+
+    // Device B pulls the row before the deletion happens.
+    final dbB = AppDatabase(NativeDatabase.memory());
+    final daoB = AssetDao(dbB);
+    await daoB.setSetting(SyncSettingsKeys.serverUrl, 'http://fake:8787');
+    final serviceB = SyncService(
+      daoB,
+      apiFactory: (url, token) => SyncApi(url, token: token, client: server.client),
+    );
+    await service.sync(); // seed the server
+    await serviceB.sync(); // B now has a local copy
+    expect(await daoB.getHoldings(), hasLength(1));
+
+    // Device A deletes the holding and syncs the tombstone up.
+    await dao.deleteHolding(holdingId);
+    final rA = await service.sync();
+    expect(rA.ok, isTrue);
+
+    // Device B syncs: its stale local copy must be deleted, not
+    // resurrected by the merge.
+    final rB = await serviceB.sync();
+    expect(rB.ok, isTrue);
+    expect(await daoB.getHoldings(), isEmpty);
+    await dbB.close();
+  });
+
+  test('a concurrent server write is retried until the push lands', () async {
+    await seedHolding();
+    server.concurrentWrites = 2; // the first two pushes hit HTTP 409
+    final result = await service.sync();
+    expect(result.ok, isTrue);
+    expect(result.rev, server.rev);
+    expect(server.putAttempts, 3); // two 409s, then a successful push
+    expect(server.putCount, 1);
+    expect(await dao.getSetting(SyncSettingsKeys.lastRev), '${server.rev}');
+  });
+
+  test('sync fails after repeated concurrent conflicts', () async {
+    await seedHolding();
+    server.concurrentWrites = 5; // more conflicts than retry attempts
+    final result = await service.sync();
+    expect(result.ok, isFalse);
+    expect(result.message, contains('冲突'));
+    expect(server.putAttempts, 3); // all three attempts hit a 409
+    expect(server.putCount, 0);
+  });
+
+  test('price-only updates are not reported as changes', () async {
+    final holdingId = await seedHolding();
+    await service.sync();
+    await dao.updateHoldingPrice(holdingId, 1.25);
+    final result = await service.sync();
+    expect(result.ok, isTrue);
+    expect(result.changed, 0);
+    expect(result.conflicts, 0);
+    expect(result.dataChanged, isFalse);
   });
 
   test('sync fails when no server URL is configured', () async {

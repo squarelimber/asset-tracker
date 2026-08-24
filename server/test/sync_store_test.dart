@@ -40,6 +40,35 @@ void main() {
     store.close();
   });
 
+  test('baseRev mismatch rejects the write and keeps the old payload', () {
+    final store = SyncStore(path);
+    store.write({'a': 1}, const []); // rev 1
+
+    final stale = store.write({'a': 2}, const [], baseRev: 0);
+    expect(stale.conflict, isTrue);
+    expect(stale.rev, 1);
+
+    final state = store.read();
+    expect(state, isNotNull);
+    expect(state!.rev, 1);
+    expect(state.snapshot['a'], 1); // not overwritten
+
+    final ok = store.write({'a': 2}, const [], baseRev: 1);
+    expect(ok.conflict, isFalse);
+    expect(ok.rev, 2);
+    expect(store.read()!.snapshot['a'], 2);
+    store.close();
+  });
+
+  test('write without baseRev always succeeds (legacy clients)', () {
+    final store = SyncStore(path);
+    store.write({'a': 1}, const []);
+    final second = store.write({'a': 2}, const []);
+    expect(second.conflict, isFalse);
+    expect(second.rev, 2);
+    store.close();
+  });
+
   test('persists across reopen', () {
     final store = SyncStore(path);
     store.write({'accounts': []}, const []);

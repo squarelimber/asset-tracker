@@ -132,10 +132,10 @@ class GoldFxSource extends MarketDataSource {
   }
 
   Future<String> _fetchRaw(List<String> codes) async {
-    final resp = await _client.get(
-      Uri.parse('$_base${codes.join(',')}'),
-      headers: {'Referer': 'https://finance.sina.com.cn'},
-    );
+    final resp = await _client
+        .get(Uri.parse('$_base${codes.join(',')}'),
+            headers: {'Referer': 'https://finance.sina.com.cn'})
+        .timeout(marketHttpTimeout);
     if (resp.statusCode != 200) throw Exception('HTTP ${resp.statusCode}');
     return latin1.decode(resp.bodyBytes, allowInvalid: true);
   }

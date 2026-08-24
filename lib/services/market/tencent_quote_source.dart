@@ -50,9 +50,9 @@ class TencentQuoteSource extends MarketDataSource {
         // aliases (-> hf_XAU) and currency codes (-> wh*CNY); restore the
         // original symbol on the returned quotes.
         final requestOf = {for (final s in batch) s: _requestCode(s)};
-        final resp = await _client.get(
-          Uri.parse('$_base${requestOf.values.join(',')}'),
-        );
+        final resp = await _client
+            .get(Uri.parse('$_base${requestOf.values.join(',')}'))
+            .timeout(marketHttpTimeout);
         if (resp.statusCode != 200) {
           results.addAll(
             batch.map((s) => MarketQuote.failure(s, source, 'HTTP ${resp.statusCode}')),

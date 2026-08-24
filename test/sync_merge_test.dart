@@ -16,6 +16,25 @@ Map<String, dynamic> _account(int id, {String? name, String? updatedAt}) => {
 Map<String, dynamic> _snap(List<Map<String, dynamic>> rows) =>
     {SyncTables.accounts: rows};
 
+Map<String, dynamic> _holding(int id, {double? latestPrice}) => {
+      'id': id,
+      'accountId': 1,
+      'name': 'h$id',
+      'assetType': 'bank_deposit',
+      'marketSource': 'manual',
+      'symbol': null,
+      'quantity': 100.0,
+      'costPrice': 1.0,
+      'latestPrice': latestPrice ?? 1.0,
+      'costFxRate': null,
+      'purchaseDate': null,
+      'riskLevel': null,
+      'currency': 'CNY',
+      'note': null,
+      'createdAt': '2026-01-01T00:00:00.000Z',
+      'updatedAt': '2026-01-01T00:00:00.000Z',
+    };
+
 void main() {
   const merger = SyncMerger();
 
@@ -128,6 +147,77 @@ void main() {
     );
     expect(out.tombstones, hasLength(1));
     expect(out.tombstones.single.deletedAt, DateTime.utc(2026, 1, 4));
+  });
+
+  test('locally deleted row is not resurrected by the remote live copy', () {
+    final remote = _snap([_account(1, updatedAt: '2026-01-04T00:00:00.000Z')]);
+    final localTomb = TombstoneEntry(
+      table: SyncTables.accounts,
+      rowKey: '1',
+      deletedAt: DateTime.utc(2026, 1, 5),
+    );
+    final out = merger.merge(
+      local: _snap(const []),
+      remote: remote,
+      remoteTombstones: const [],
+      localTombstones: [localTomb],
+    );
+    expect(out.tables[SyncTables.accounts], isEmpty);
+    expect(out.deletedKeys[SyncTables.accounts], isEmpty);
+    expect(out.tombstones, hasLength(1));
+  });
+
+  test('row recreated after a local deletion beats the old tombstone', () {
+    final local = _snap([_account(1, updatedAt: '2026-01-06T00:00:00.000Z')]);
+    final oldTomb = TombstoneEntry(
+      table: SyncTables.accounts,
+      rowKey: '1',
+      deletedAt: DateTime.utc(2026, 1, 2),
+    );
+    final out = merger.merge(
+      local: local,
+      remote: _snap(const []),
+      remoteTombstones: const [],
+      localTombstones: [oldTomb],
+    );
+    expect(out.tables[SyncTables.accounts], hasLength(1));
+    expect(out.tombstones, isEmpty);
+  });
+
+  test('deletion on both sides keeps a single tombstone', () {
+    final tombLocal = TombstoneEntry(
+      table: SyncTables.accounts,
+      rowKey: '1',
+      deletedAt: DateTime.utc(2026, 1, 3),
+    );
+    final tombRemote = TombstoneEntry(
+      table: SyncTables.accounts,
+      rowKey: '1',
+      deletedAt: DateTime.utc(2026, 1, 2),
+    );
+    final out = merger.merge(
+      local: _snap(const []),
+      remote: _snap(const []),
+      remoteTombstones: [tombRemote],
+      localTombstones: [tombLocal],
+    );
+    expect(out.tombstones, hasLength(1));
+    expect(out.tombstones.single.deletedAt, DateTime.utc(2026, 1, 3));
+  });
+
+  test('price-only difference is neither a conflict nor an edit', () {
+    final local = {SyncTables.holdings: [_holding(1, latestPrice: 1.0)]};
+    final remote = {SyncTables.holdings: [_holding(1, latestPrice: 2.5)]};
+    final out = merger.merge(
+      local: local,
+      remote: remote,
+      remoteTombstones: const [],
+      localTombstones: const [],
+    );
+    expect(out.tables[SyncTables.holdings], hasLength(1));
+    expect(out.conflicts, 0);
+    expect(out.changed, 0);
+    expect(out.dataChanged, isFalse);
   });
 
   test('empty merge is a no-op', () {
