@@ -54,11 +54,17 @@ class DataMigrationService {
   /// exclude principal repayments/borrowing from the return.
   static const _snapshotLiabilitiesAdded = 'snapshot_liabilities_v11';
 
+  /// Repairs fresh installs made on v0.6.0–v0.6.4, where the (then
+  /// 14-column) holdings rebuild dropped risk_level and nothing re-added it,
+  /// so any write with an explicit risk level failed with "no such column".
+  static const _riskLevelAdded = 'risk_level_v12';
+
   /// Runs all pending one-time migrations. Safe to call on every launch.
   Future<void> run() async {
     await _migrateAmountBased();
     await _migrateGoldSymbol();
     await _rebuildHoldingsTable();
+    await _migrateRiskLevelColumn();
     await _migrateLiabilityCost();
     await _migrateTransferCost();
     await _migrateEtfSplit512480();
@@ -68,8 +74,13 @@ class DataMigrationService {
   }
 
   /// SQLite cannot drop a UNIQUE constraint without rebuilding the table.
-  /// Recreate `holdings` identically but without UNIQUE(symbol) so the same
-  /// market code can exist across multiple holdings/accounts.
+  /// Recreate `holdings` with the full drift schema (16 columns) but without
+  /// UNIQUE(symbol) so the same market code can exist across multiple
+  /// holdings/accounts.
+  ///
+  /// cost_fx_rate and risk_level may be absent from the old table when this
+  /// runs on an upgrade (cost_fx_rate arrives with the v10 migration, after
+  /// the rebuild), so the copy falls back to NULL for missing columns.
   Future<void> _rebuildHoldingsTable() async {
     final marker = await _getSetting(_holdingsRebuilt);
     if (marker != null) return;
@@ -87,24 +98,54 @@ class DataMigrationService {
         cost_price REAL NOT NULL DEFAULT 0.0,
         latest_price REAL NOT NULL DEFAULT 0.0,
         currency TEXT NOT NULL DEFAULT 'CNY',
+        cost_fx_rate REAL NULL,
+        purchase_date INTEGER NULL,
+        risk_level TEXT NULL,
         note TEXT NULL,
         created_at INTEGER NOT NULL DEFAULT (CAST(strftime('%s', CURRENT_TIMESTAMP) AS INTEGER)),
-        updated_at INTEGER NOT NULL DEFAULT (CAST(strftime('%s', CURRENT_TIMESTAMP) AS INTEGER)),
-        purchase_date INTEGER NULL
+        updated_at INTEGER NOT NULL DEFAULT (CAST(strftime('%s', CURRENT_TIMESTAMP) AS INTEGER))
       );
     ''');
+    final oldColumns = await _columnNames('holdings_tmp');
+    final costFxSelect =
+        oldColumns.contains('cost_fx_rate') ? 'cost_fx_rate' : 'NULL AS cost_fx_rate';
+    final riskSelect =
+        oldColumns.contains('risk_level') ? 'risk_level' : 'NULL AS risk_level';
     await _db.customStatement('''
       INSERT INTO holdings (id, account_id, name, asset_type, market_source, symbol,
-                            quantity, cost_price, latest_price, currency, note,
-                            created_at, updated_at, purchase_date)
+                            quantity, cost_price, latest_price, currency, cost_fx_rate,
+                            purchase_date, risk_level, note,
+                            created_at, updated_at)
       SELECT id, account_id, name, asset_type, market_source, symbol,
-             quantity, cost_price, latest_price, currency, note,
-             created_at, updated_at, purchase_date
+             quantity, cost_price, latest_price, currency, $costFxSelect,
+             purchase_date, $riskSelect, note,
+             created_at, updated_at
       FROM holdings_tmp;
     ''');
     await _db.customStatement('DROP TABLE holdings_tmp;');
 
     await _setSetting(_holdingsRebuilt, '${DateTime.now().millisecondsSinceEpoch}');
+  }
+
+  /// Re-adds risk_level to databases left broken by the old 14-column
+  /// rebuild (fresh installs on v0.6.0–v0.6.4). No-op when the column
+  /// already exists.
+  Future<void> _migrateRiskLevelColumn() async {
+    final marker = await _getSetting(_riskLevelAdded);
+    if (marker != null) return;
+
+    try {
+      await _db.customStatement('ALTER TABLE holdings ADD COLUMN risk_level TEXT NULL;');
+    } catch (_) {
+      // Column already present.
+    }
+
+    await _setSetting(_riskLevelAdded, '${DateTime.now().millisecondsSinceEpoch}');
+  }
+
+  Future<Set<String>> _columnNames(String table) async {
+    final rows = await _db.customSelect('PRAGMA table_info($table)').get();
+    return rows.map((row) => row.read<String>('name')).toSet();
   }
 
   Future<void> _migrateAmountBased() async {

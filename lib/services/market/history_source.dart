@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 import '../../core/enums.dart';
+import 'market_data_source.dart';
 
 /// Daily close price history: date (yyyy-MM-dd) -> close price.
 typedef DailyPriceHistory = Map<String, double>;
@@ -34,10 +35,10 @@ class EastmoneyHistorySource extends HistoryDataSource {
   Future<DailyPriceHistory> fetch(String symbol, DateTime from, DateTime to) async {
     final result = <String, double>{};
     try {
-      final resp = await _client.get(
-        Uri.parse('$_base$symbol.js'),
-        headers: {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'},
-      );
+      final resp = await _client
+          .get(Uri.parse('$_base$symbol.js'),
+              headers: {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'})
+          .timeout(marketHttpTimeout);
       if (resp.statusCode != 200) return result;
       final text = utf8.decode(resp.bodyBytes);
       final match = RegExp(r'var Data_netWorthTrend = (\[.*?\]);').firstMatch(text);
@@ -86,7 +87,7 @@ class SinaKLineSource extends HistoryDataSource {
         'ma': 'no',
         'datalen': '1000',
       });
-      final resp = await _client.get(uri);
+      final resp = await _client.get(uri).timeout(marketHttpTimeout);
       if (resp.statusCode != 200) return result;
       final text = utf8.decode(resp.bodyBytes);
       final start = text.indexOf('[');
@@ -125,7 +126,7 @@ class AuGoldHistorySource extends HistoryDataSource {
     final result = <String, double>{};
     try {
       final uri = Uri.parse(_base).replace(queryParameters: {'symbol': 'AU0'});
-      final resp = await _client.get(uri);
+      final resp = await _client.get(uri).timeout(marketHttpTimeout);
       if (resp.statusCode != 200) return result;
       final text = utf8.decode(resp.bodyBytes);
       final start = text.indexOf('[');

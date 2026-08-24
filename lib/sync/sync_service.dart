@@ -79,45 +79,58 @@ class SyncService {
   }
 
   Future<SyncResult> _syncWith(SyncApi api) async {
-    final remote = await api.fetch();
-    final local = await _exportLocal();
-    final outcome = const SyncMerger().merge(
-      local: local,
-      remote: remote.snapshot,
-      remoteTombstones: _parseTombstones(remote.tombstones),
-      localTombstones: _parseTombstones(
-        (await _dao.getTombstones()).map((t) => t.toJson()).toList(),
-      ),
-    );
+    const maxAttempts = 3;
+    for (var attempt = 1; attempt <= maxAttempts; attempt++) {
+      final remote = await api.fetch();
+      final local = await _exportLocal();
+      final outcome = const SyncMerger().merge(
+        local: local,
+        remote: remote.snapshot,
+        remoteTombstones: _parseTombstones(remote.tombstones),
+        localTombstones: _parseTombstones(
+          (await _dao.getTombstones()).map((t) => t.toJson()).toList(),
+        ),
+      );
 
-    await _dao.transaction(() async {
-      await _apply(outcome);
-      await _replaceTombstones(outcome.tombstones);
-    });
+      await _dao.transaction(() async {
+        await _apply(outcome);
+        await _replaceTombstones(outcome.tombstones);
+      });
 
-    final rev = await api.push(
-      outcome.tables,
-      outcome.tombstones.map((t) => t.toJson()).toList(),
-    );
-    await _dao.setSetting(SyncSettingsKeys.lastRev, '$rev');
-    await _dao.setSetting(
-      SyncSettingsKeys.lastSyncAt,
-      DateTime.now().toIso8601String(),
-    );
-    // Derived snapshots must be regenerated from the now-merged source rows,
-    // otherwise a freshly-arrived transaction (e.g. a repayment) changes the
-    // holdings but leaves stale snapshots, leaking the cash-flow into daily
-    // returns. Flag it so the history sync rebuilds the backfill + today.
-    if (outcome.dataChanged) {
-      await _dao.setSetting(historySyncDirtyKey, historyDirtySet);
+      final push = await api.push(
+        outcome.tables,
+        outcome.tombstones.map((t) => t.toJson()).toList(),
+        baseRev: remote.rev,
+      );
+      if (!push.ok) {
+        // Someone else wrote to the server while we were merging: re-fetch,
+        // re-merge and retry. Re-applying is safe — the merge is LWW and
+        // idempotent on already-merged local state.
+        continue;
+      }
+
+      await _dao.setSetting(SyncSettingsKeys.lastRev, '${push.rev}');
+      await _dao.setSetting(
+        SyncSettingsKeys.lastSyncAt,
+        DateTime.now().toIso8601String(),
+      );
+      // Derived snapshots must be regenerated from the now-merged source
+      // rows, otherwise a freshly-arrived transaction (e.g. a repayment)
+      // changes the holdings but leaves stale snapshots, leaking the
+      // cash-flow into daily returns. Flag it so the history sync rebuilds
+      // the backfill + today.
+      if (outcome.dataChanged) {
+        await _dao.setSetting(historySyncDirtyKey, historyDirtySet);
+      }
+      return SyncResult(
+        ok: true,
+        rev: push.rev,
+        conflicts: outcome.conflicts,
+        changed: outcome.changed,
+        dataChanged: outcome.dataChanged,
+      );
     }
-    return SyncResult(
-      ok: true,
-      rev: rev,
-      conflicts: outcome.conflicts,
-      changed: outcome.changed,
-      dataChanged: outcome.dataChanged,
-    );
+    return SyncResult.fail('同步冲突：服务器被并发更新，请重试');
   }
 
   Future<Map<String, dynamic>> _exportLocal() async {
@@ -146,19 +159,32 @@ class SyncService {
 
   Future<void> _deleteLocalRow(String table, String key) async {
     switch (table) {
-      case SyncTables.accounts:
-        await (_dao as dynamic).deleteAccount(int.parse(key));
-      case SyncTables.holdings:
-        await _dao.deleteHolding(int.parse(key));
-      case SyncTables.transactions:
-        await _dao.deleteTransaction(int.parse(key));
-      case SyncTables.snapshots:
+      case SyncTables.accounts: {
+        final id = int.tryParse(key);
+        if (id == null) return;
+        await _dao.deleteAccount(id);
+      }
+      case SyncTables.holdings: {
+        final id = int.tryParse(key);
+        if (id == null) return;
+        await _dao.deleteHolding(id);
+      }
+      case SyncTables.transactions: {
+        final id = int.tryParse(key);
+        if (id == null) return;
+        await _dao.deleteTransaction(id);
+      }
+      case SyncTables.snapshots: {
         final parts = key.split('|');
         final date = parts[0];
         final currency = parts.length > 1 ? parts[1] : 'CNY';
-        await (_dao as dynamic).deleteSnapshot(date, currency);
-      case SyncTables.alertRules:
-        await _dao.deleteAlertRule(int.parse(key));
+        await _dao.deleteSnapshot(date, currency);
+      }
+      case SyncTables.alertRules: {
+        final id = int.tryParse(key);
+        if (id == null) return;
+        await _dao.deleteAlertRule(id);
+      }
     }
   }
 

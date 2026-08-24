@@ -6,6 +6,11 @@ import 'package:asset_tracker/data/asset_dao.dart';
 import 'package:asset_tracker/data/database.dart';
 import 'package:asset_tracker/services/data_migration_service.dart';
 
+Future<Set<String>> _columnsOf(AppDatabase db, String table) async {
+  final rows = await db.customSelect('PRAGMA table_info($table)').get();
+  return rows.map((row) => row.read<String>('name')).toSet();
+}
+
 void main() {
   late AppDatabase db;
   late AssetDao dao;
@@ -393,5 +398,127 @@ void main() {
     final holdings = await dao.getHoldings();
     expect(holdings, hasLength(2));
     expect(holdings.map((h) => h.symbol).toSet(), {'110022'});
+  });
+
+  test('fresh install keeps all 16 holdings columns', () async {
+    await DataMigrationService(db).run();
+
+    final columns = await _columnsOf(db, 'holdings');
+    expect(columns, containsAll([
+      'id', 'account_id', 'name', 'asset_type', 'market_source', 'symbol',
+      'quantity', 'cost_price', 'latest_price', 'currency', 'cost_fx_rate',
+      'purchase_date', 'risk_level', 'note', 'created_at', 'updated_at',
+    ]));
+
+    // The user-facing failure on the buggy schema: a write with an explicit
+    // risk level threw "no such column: risk_level".
+    final accountId = await dao.createAccount(AccountsCompanion.insert(
+      name: '测试',
+      type: 'general',
+    ));
+    await dao.createHolding(HoldingsCompanion.insert(
+      accountId: accountId,
+      name: '外币理财',
+      assetType: 'bank_wealth',
+      marketSource: const Value('manual'),
+      quantity: const Value(100),
+      costPrice: const Value(1),
+      latestPrice: const Value(1.1),
+      currency: const Value('USD'),
+      costFxRate: const Value(6.95),
+      riskLevel: const Value('R2'),
+    ));
+
+    final h = (await dao.getHoldings()).single;
+    expect(h.riskLevel, 'R2');
+    expect(h.costFxRate, closeTo(6.95, 1e-9));
+  });
+
+  test('rebuild preserves risk_level when the old table lacks cost_fx_rate',
+      () async {
+    // v6-era table: risk_level added by drift's onUpgrade, cost_fx_rate not
+    // yet added (it arrives with the v10 migration, after the rebuild).
+    await db.customStatement(
+      'ALTER TABLE holdings RENAME TO holdings_v6;'
+      'CREATE TABLE holdings (id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT, '
+      'account_id INTEGER NOT NULL, name TEXT NOT NULL, asset_type TEXT NOT NULL, '
+      "market_source TEXT NOT NULL DEFAULT 'manual', symbol TEXT NULL, "
+      'quantity REAL NOT NULL DEFAULT 0.0, cost_price REAL NOT NULL DEFAULT 0.0, '
+      'latest_price REAL NOT NULL DEFAULT 0.0, currency TEXT NOT NULL DEFAULT \'CNY\', '
+      'purchase_date INTEGER NULL, risk_level TEXT NULL, note TEXT NULL, '
+      'created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);'
+      'INSERT INTO holdings (account_id, name, asset_type, quantity, cost_price, '
+      'latest_price, risk_level, created_at, updated_at) '
+      "VALUES (0, '旧持仓', 'bank_wealth', 100, 1.0, 1.1, 'R3', 0, 0);"
+      'DROP TABLE holdings_v6;',
+    );
+
+    await DataMigrationService(db).run();
+
+    final h = (await dao.getHoldings()).single;
+    expect(h.name, '旧持仓');
+    expect(h.riskLevel, 'R3'); // preserved through the rebuild
+    expect(h.costFxRate, isNull); // column now exists, old row stays NULL
+    final columns = await _columnsOf(db, 'holdings');
+    expect(columns, containsAll(['risk_level', 'cost_fx_rate']));
+  });
+
+  test('rebuild copies risk_level and cost_fx_rate values when present',
+      () async {
+    // A table already matching the full schema (fresh-install shape with
+    // data): both values must survive the rebuild.
+    await db.customStatement(
+      'ALTER TABLE holdings RENAME TO holdings_full;'
+      'CREATE TABLE holdings (id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT, '
+      'account_id INTEGER NOT NULL, name TEXT NOT NULL, asset_type TEXT NOT NULL, '
+      "market_source TEXT NOT NULL DEFAULT 'manual', symbol TEXT NULL, "
+      'quantity REAL NOT NULL DEFAULT 0.0, cost_price REAL NOT NULL DEFAULT 0.0, '
+      'latest_price REAL NOT NULL DEFAULT 0.0, currency TEXT NOT NULL DEFAULT \'CNY\', '
+      'cost_fx_rate REAL NULL, purchase_date INTEGER NULL, risk_level TEXT NULL, '
+      'note TEXT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);'
+      'INSERT INTO holdings (account_id, name, asset_type, quantity, cost_price, '
+      'latest_price, currency, cost_fx_rate, risk_level, created_at, updated_at) '
+      "VALUES (0, '旧持仓', 'bank_wealth', 100, 1.0, 1.1, 'USD', 6.95, 'R2', 0, 0);"
+      'DROP TABLE holdings_full;',
+    );
+
+    await DataMigrationService(db).run();
+
+    final h = (await dao.getHoldings()).single;
+    expect(h.riskLevel, 'R2');
+    expect(h.costFxRate, closeTo(6.95, 1e-9));
+  });
+
+  test('repairs databases where the old rebuild dropped risk_level', () async {
+    // Fresh install on v0.6.0–v0.6.4: rebuild marker already set, table has
+    // cost_fx_rate (re-added by v10) but no risk_level.
+    await db.customStatement(
+      'ALTER TABLE holdings RENAME TO holdings_buggy;'
+      'CREATE TABLE holdings (id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT, '
+      'account_id INTEGER NOT NULL, name TEXT NOT NULL, asset_type TEXT NOT NULL, '
+      "market_source TEXT NOT NULL DEFAULT 'manual', symbol TEXT NULL, "
+      'quantity REAL NOT NULL DEFAULT 0.0, cost_price REAL NOT NULL DEFAULT 0.0, '
+      'latest_price REAL NOT NULL DEFAULT 0.0, currency TEXT NOT NULL DEFAULT \'CNY\', '
+      'cost_fx_rate REAL NULL, purchase_date INTEGER NULL, note TEXT NULL, '
+      'created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);'
+      'INSERT INTO holdings (account_id, name, asset_type, quantity, cost_price, '
+      'latest_price, created_at, updated_at) '
+      "VALUES (0, '旧持仓', 'bank_wealth', 100, 1.0, 1.1, 0, 0);"
+      'DROP TABLE holdings_buggy;',
+    );
+    await dao.setSetting('holdings_rebuilt_v5', '1');
+
+    await DataMigrationService(db).run();
+
+    final columns = await _columnsOf(db, 'holdings');
+    expect(columns, contains('risk_level'));
+    final h = (await dao.getHoldings()).single;
+    expect(h.name, '旧持仓');
+    expect(h.riskLevel, isNull); // old row unaffected by the repair
+    // Writes with an explicit risk level work again.
+    final stmt = db.update(db.holdings)..where((t) => t.id.equals(h.id));
+    await stmt.write(const HoldingsCompanion(riskLevel: Value('R4')));
+    final after = (await dao.getHolding(h.id))!;
+    expect(after.riskLevel, 'R4');
   });
 }

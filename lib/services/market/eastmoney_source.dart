@@ -41,10 +41,13 @@ class EastmoneySource extends MarketDataSource {
         'pageIndex': '1',
         'pageSize': '1',
       });
-      final resp = await _client.get(uri, headers: {
-        'Referer': 'http://fundf10.eastmoney.com/',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
-      });
+      final resp = await _client
+          .get(uri,
+              headers: {
+                'Referer': 'http://fundf10.eastmoney.com/',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+              })
+          .timeout(marketHttpTimeout);
       if (resp.statusCode != 200) {
         return MarketQuote.failure(symbol, source, 'HTTP ${resp.statusCode}');
       }

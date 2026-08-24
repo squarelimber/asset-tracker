@@ -126,8 +126,8 @@ class MarketService {
       }
     });
 
-    // Refresh FX rates for any non-CNY currency in use, so conversions
-    // stay current on every market refresh (rates cached in price_cache).
+    // Refresh FX rates for any non-CNY currency in use (rates cached in
+    // price_cache with a 24h TTL, see loadCnyRates).
     final currencies = holdings
         .map((h) => h.currency)
         .where((c) => c != 'CNY')
@@ -153,17 +153,29 @@ class MarketService {
     return _fetchFromSource(source, symbols);
   }
 
+  /// How long a cached FX rate is trusted before a live re-fetch.
+  static const _fxTtl = Duration(hours: 24);
+
   /// CNY per unit for the given currency codes, combining the cached rates
-  /// with a live fetch for missing ones. Unknown/failed codes are omitted.
+  /// with a live fetch for missing or stale ones. A stale cache value is
+  /// used as a last resort when the live fetch fails, so conversions keep
+  /// working offline; unknown codes are omitted.
   Future<Map<String, double>> loadCnyRates(List<String> currencies) async {
     final unique = currencies.map((c) => c.toUpperCase()).toSet().toList();
     if (unique.isEmpty) return const {};
     final rates = <String, double>{};
+    final stale = <String, double>{};
 
     final cached = await _dao.getCachedPrices(unique);
+    final now = DateTime.now();
     for (final c in unique) {
       final row = cached[c];
-      if (row != null && row.price > 0) rates[c] = row.price;
+      if (row == null || row.price <= 0) continue;
+      if (now.difference(row.fetchedAt) <= _fxTtl) {
+        rates[c] = row.price;
+      } else {
+        stale[c] = row.price;
+      }
     }
 
     final missing = unique.where((c) => !rates.containsKey(c)).toList();
@@ -187,8 +199,11 @@ class MarketService {
           }
         }
       } catch (_) {
-        // Keep whatever we got from the cache.
+        // Offline: fall back to the stale cache values below.
       }
+    }
+    for (final c in unique) {
+      if (!rates.containsKey(c) && stale.containsKey(c)) rates[c] = stale[c]!;
     }
     return rates;
   }

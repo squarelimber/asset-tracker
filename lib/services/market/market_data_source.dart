@@ -1,5 +1,9 @@
 import '../../core/enums.dart';
 
+/// Default timeout for market-data HTTP requests, so a hung endpoint can
+/// never wedge a refresh (or the app) forever.
+const marketHttpTimeout = Duration(seconds: 15);
+
 /// A single market quote fetched from a data source.
 class MarketQuote {
   const MarketQuote({

@@ -98,6 +98,50 @@ void main() {
     expect(t.costMoved, isFalse);
   });
 
+  test('import rejects backups with dangling references', () async {
+    final broken = jsonEncode({
+      'app': 'asset_tracker',
+      'version': 2,
+      'accounts': [
+        {'id': 1, 'name': '账户', 'type': 'general', 'currency': 'CNY'},
+      ],
+      'holdings': [
+        {
+          'id': 10,
+          'accountId': 99, // does not exist in the backup
+          'name': '孤儿持仓',
+          'assetType': 'savings',
+          'marketSource': 'manual',
+          'quantity': 1,
+          'costPrice': 1,
+          'latestPrice': 1,
+          'currency': 'CNY',
+        },
+      ],
+      'transactions': [
+        {
+          'id': 20,
+          'accountId': 1,
+          'holdingId': 42, // does not exist in the backup
+          'type': 'buy',
+          'amount': 10,
+          'currency': 'CNY',
+          'occurredAt': '2026-08-01T10:00:00',
+        },
+      ],
+      'snapshots': const [],
+      'alertRules': const [],
+    });
+
+    final result = await service.importJson(broken);
+
+    expect(result.ok, isFalse);
+    expect(result.message, contains('不存在'));
+    expect(await dao.getAccounts(), isEmpty);
+    expect(await dao.getHoldings(), isEmpty);
+    expect(await dao.getTransactions(), isEmpty);
+  });
+
   test('legacy backups without id fields still import', () async {
     final legacy = jsonEncode({
       'app': 'asset_tracker',

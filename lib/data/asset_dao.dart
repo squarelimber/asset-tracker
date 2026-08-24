@@ -98,8 +98,10 @@ class AssetDao {
         quantity: Value(holding.quantity),
         costPrice: Value(holding.costPrice),
         latestPrice: Value(holding.latestPrice),
+        costFxRate: Value(holding.costFxRate),
         currency: Value(holding.currency),
         purchaseDate: Value(holding.purchaseDate),
+        riskLevel: Value(holding.riskLevel),
         note: Value(holding.note),
         updatedAt: Value(now ?? DateTime.now()),
       ),
@@ -128,12 +130,15 @@ class AssetDao {
     });
   }
 
+  /// Writes a refreshed market price. Deliberately does NOT bump
+  /// `updatedAt`: prices are volatile cache data, and bumping the edit
+  /// timestamp on every refresh would make each refresh look like a user
+  /// edit (spurious sync conflicts and needless history rebuilds).
   Future<void> updateHoldingPrice(int id, double price) async {
     final stmt = _db.update(_db.holdings)..where((t) => t.id.equals(id));
     await stmt.write(
       HoldingsCompanion(
         latestPrice: Value(price),
-        updatedAt: Value(DateTime.now()),
       ),
     );
   }

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -10,6 +11,15 @@ class RemoteState {
   final int rev;
   final Map<String, dynamic> snapshot;
   final List<dynamic> tombstones;
+}
+
+/// Outcome of a push: [ok] when the server accepted it, otherwise the
+/// server's current revision (HTTP 409 conflict) for a re-merge retry.
+class PushResult {
+  const PushResult({required this.ok, required this.rev});
+
+  final bool ok;
+  final int rev;
 }
 
 /// Thin HTTP client for the asset-sync-server protocol.
@@ -35,7 +45,9 @@ class SyncApi {
 
   /// Fetches the latest state. Returns null when the server has no data yet.
   Future<RemoteState> fetch() async {
-    final res = await _client.get(_uri('/api/sync'), headers: _headers);
+    final res = await _client
+        .get(_uri('/api/sync'), headers: _headers)
+        .timeout(const Duration(seconds: 30));
     if (res.statusCode != 200) {
       throw SyncException('获取失败 (HTTP ${res.statusCode})');
     }
@@ -47,18 +59,34 @@ class SyncApi {
     );
   }
 
-  /// Pushes the full snapshot, returning the new revision.
-  Future<int> push(Map<String, dynamic> snapshot, List<dynamic> tombstones) async {
-    final res = await _client.put(
-      _uri('/api/sync'),
-      headers: _headers,
-      body: jsonEncode({'snapshot': snapshot, 'tombstones': tombstones}),
-    );
+  /// Pushes the full snapshot. When [baseRev] is given, the server rejects
+  /// the push with a conflict ([PushResult.ok] == false) if its revision has
+  /// moved on since the fetch, so concurrent writes are never clobbered.
+  Future<PushResult> push(
+    Map<String, dynamic> snapshot,
+    List<dynamic> tombstones, {
+    int? baseRev,
+  }) async {
+    final res = await _client
+        .put(
+          _uri('/api/sync'),
+          headers: _headers,
+          body: jsonEncode({
+            'snapshot': snapshot,
+            'tombstones': tombstones,
+            if (baseRev != null) 'baseRev': baseRev,
+          }),
+        )
+        .timeout(const Duration(seconds: 30));
+    if (res.statusCode == 409) {
+      final body = jsonDecode(res.body) as Map<String, dynamic>;
+      return PushResult(ok: false, rev: (body['rev'] as num?)?.toInt() ?? 0);
+    }
     if (res.statusCode != 200) {
       throw SyncException('上传失败 (HTTP ${res.statusCode})');
     }
     final body = jsonDecode(res.body) as Map<String, dynamic>;
-    return (body['rev'] as num?)?.toInt() ?? 0;
+    return PushResult(ok: true, rev: (body['rev'] as num?)?.toInt() ?? 0);
   }
 
   void close() => _client.close();
@@ -84,7 +112,9 @@ String? validateServerUrl(String raw) {
   return null;
 }
 
-/// True when [error] is a network-level failure (server unreachable),
-/// which the UI may present differently from an HTTP error.
+/// True when [error] is a network-level failure (server unreachable or
+/// unresponsive), which the UI may present differently from an HTTP error.
 bool isNetworkError(Object error) =>
-    error is SocketException || error is http.ClientException;
+    error is SocketException ||
+    error is http.ClientException ||
+    error is TimeoutException;

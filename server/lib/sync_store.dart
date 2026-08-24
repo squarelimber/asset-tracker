@@ -36,11 +36,26 @@ class SyncStore {
   }
 
   /// Atomically replaces the snapshot, bumping the revision by one.
-  ({int rev, Map<String, dynamic> snapshot, List<dynamic> tombstones}) write(
+  ///
+  /// Pass [baseRev] for optimistic concurrency: when the store's current
+  /// revision differs from it, nothing is written and the result carries
+  /// `conflict: true` together with the current revision, so the client can
+  /// re-merge against the newer state and retry.
+  ({int rev, Map<String, dynamic> snapshot, List<dynamic> tombstones, bool conflict})
+      write(
     Map<String, dynamic> snapshot,
-    List<dynamic> tombstones,
-  ) {
+    List<dynamic> tombstones, {
+    int? baseRev,
+  }) {
     final current = read();
+    if (baseRev != null && (current?.rev ?? 0) != baseRev) {
+      return (
+        rev: current?.rev ?? 0,
+        snapshot: snapshot,
+        tombstones: tombstones,
+        conflict: true,
+      );
+    }
     final nextRev = (current?.rev ?? 0) + 1;
     final now = DateTime.now().toUtc().toIso8601String();
     _db.execute(
@@ -55,7 +70,7 @@ class SyncStore {
       ''',
       [nextRev, jsonEncode(snapshot), jsonEncode(tombstones), now],
     );
-    return (rev: nextRev, snapshot: snapshot, tombstones: tombstones);
+    return (rev: nextRev, snapshot: snapshot, tombstones: tombstones, conflict: false);
   }
 
   void close() => _db.dispose();

@@ -92,12 +92,17 @@ class MergeOutcome {
 /// Last-write-wins merge of a local snapshot against a remote one.
 ///
 /// Rules:
+/// - Deletions are considered as the union of local and remote tombstones
+///   (newer deletion time per key wins), so a locally deleted row is never
+///   resurrected by the remote's still-live copy.
 /// - A tombstone beats a live row when its deletion time is newer; an older
 ///   tombstone is dropped (the row wins and is re-created on the remote).
 /// - Otherwise the row with the newer `updatedAt` wins; a row only present
 ///   on one side is kept/added.
 /// - When both sides modified the same row with different content, the
 ///   conflict counter is bumped (the newer one still wins silently).
+/// - `latestPrice` is volatile market data and is ignored when comparing
+///   row content, so price-only differences are neither conflicts nor edits.
 class SyncMerger {
   const SyncMerger();
 
@@ -108,6 +113,19 @@ class SyncMerger {
     required List<TombstoneEntry> remoteTombstones,
     required List<TombstoneEntry> localTombstones,
   }) {
+    // The per-key tombstone union (newer deletedAt wins) drives the merge.
+    // Using only the remote list would resurrect a row that was deleted
+    // locally: the remote snapshot still carries its live copy, and without
+    // the local tombstone in the merge the row would be re-created.
+    final tombstoneMap = <String, TombstoneEntry>{};
+    for (final t in [...remoteTombstones, ...localTombstones]) {
+      final key = '${t.table}:${t.rowKey}';
+      final existing = tombstoneMap[key];
+      if (existing == null || t.deletedAt.isAfter(existing.deletedAt)) {
+        tombstoneMap[key] = t;
+      }
+    }
+
     final tables = <String, List<Map<String, dynamic>>>{};
     final deletedKeys = <String, List<String>>{};
     var conflicts = 0;
@@ -119,7 +137,7 @@ class SyncMerger {
         table: table,
         localRows: _rowsOf(local, table),
         remoteRows: _rowsOf(remote, table),
-        tombstones: remoteTombstones,
+        tombstones: tombstoneMap.values.toList(),
       );
       tables[table] = merged.rows;
       deletedKeys[table] = merged.deleteKeys;
@@ -130,17 +148,9 @@ class SyncMerger {
       }
     }
 
-    // Tombstone union: keep the newer deletion time per key; drop a
-    // tombstone when the merged row is alive and newer than the tombstone
-    // (the row win is propagated by simply not carrying the tombstone).
-    final tombstoneMap = <String, TombstoneEntry>{};
-    for (final t in [...remoteTombstones, ...localTombstones]) {
-      final key = '${t.table}:${t.rowKey}';
-      final existing = tombstoneMap[key];
-      if (existing == null || t.deletedAt.isAfter(existing.deletedAt)) {
-        tombstoneMap[key] = t;
-      }
-    }
+    // Drop a tombstone when the merged row is alive and newer than the
+    // tombstone (the row win is propagated by simply not carrying the
+    // tombstone).
     final mergedRowsByKey = <String, Map<String, dynamic>>{};
     for (final table in SyncTables.all) {
       for (final row in tables[table]!) {
@@ -208,7 +218,7 @@ class SyncMerger {
         final winner = _newerOf(local, remote);
         if (winner != null) {
           merged[key] = winner;
-          if (remote != null && !_same(local, remote)) conflicts++;
+          if (local != null && remote != null && !_same(local, remote)) conflicts++;
           if (local == null || !_same(local, winner)) changed++;
         }
         continue;
@@ -265,7 +275,10 @@ class SyncMerger {
 
   static bool _same(Map<String, dynamic>? a, Map<String, dynamic>? b) {
     if (a == null || b == null) return a == b;
-    return jsonEncode(a) == jsonEncode(b);
+    if (identical(a, b)) return true;
+    final aa = Map<String, dynamic>.from(a)..remove('latestPrice');
+    final bb = Map<String, dynamic>.from(b)..remove('latestPrice');
+    return jsonEncode(aa) == jsonEncode(bb);
   }
 
   static List<Map<String, dynamic>> _rowsOf(Map<String, dynamic> snapshot, String table) {

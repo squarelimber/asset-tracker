@@ -30,7 +30,7 @@ class CoinGeckoSource extends MarketDataSource {
           'vs_currencies': 'cny',
           'include_24hr_change': 'true',
         });
-        final resp = await _client.get(uri);
+        final resp = await _client.get(uri).timeout(marketHttpTimeout);
         if (resp.statusCode != 200) {
           results.addAll(
               batch.map((s) => MarketQuote.failure(s, source, 'HTTP ${resp.statusCode}')));

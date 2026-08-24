@@ -25,10 +25,10 @@ class SinaSource extends MarketDataSource {
     // Sina accepts a large batch per request; chunk conservatively.
     for (final batch in MarketFetchHelper.chunk(symbols, 50)) {
       try {
-        final resp = await _client.get(
-          Uri.parse('$_base${batch.join(',')}'),
-          headers: {'Referer': 'https://finance.sina.com.cn'},
-        );
+        final resp = await _client
+            .get(Uri.parse('$_base${batch.join(',')}'),
+                headers: {'Referer': 'https://finance.sina.com.cn'})
+            .timeout(marketHttpTimeout);
         if (resp.statusCode != 200) {
           results.addAll(batch.map((s) => MarketQuote.failure(s, source, 'HTTP ${resp.statusCode}')));
           continue;

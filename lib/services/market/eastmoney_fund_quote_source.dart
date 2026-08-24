@@ -40,7 +40,7 @@ class EastmoneyFundQuoteSource extends MarketDataSource {
         'secid': '0.$symbol',
         'fields': 'f43,f57,f58,f169,f170',
       });
-      final resp = await _client.get(uri);
+      final resp = await _client.get(uri).timeout(marketHttpTimeout);
       if (resp.statusCode != 200) {
         return MarketQuote.failure(symbol, source, 'HTTP ${resp.statusCode}');
       }

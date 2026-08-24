@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 
 import '../../core/enums.dart';
 import 'history_source.dart';
+import 'market_data_source.dart';
 
 /// Tencent K-line history (web.ifzq.gtimg.cn) — CORS-friendly
 /// (`Access-Control-Allow-Origin: *`) replacement for the Sina K-line
@@ -55,7 +56,7 @@ class TencentHistorySource extends HistoryDataSource {
     final uri = Uri.parse(_base).replace(queryParameters: {
       'param': '$symbol,day,${_key(from)},${_key(to)},$count,qfq',
     });
-    final resp = await _client.get(uri);
+    final resp = await _client.get(uri).timeout(marketHttpTimeout);
     if (resp.statusCode != 200) return const [];
     final json = jsonDecode(utf8.decode(resp.bodyBytes)) as Map<String, dynamic>;
     final data = json['data']?[symbol] as Map<String, dynamic>?;
