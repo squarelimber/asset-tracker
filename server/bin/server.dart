@@ -21,7 +21,8 @@ import 'package:asset_sync_server/sync_store.dart';
 /// Authentication: `Authorization: Bearer <token>` against the
 /// ASSET_SYNC_TOKEN environment variable. The server binds to 127.0.0.1 by
 /// default (override with HOST); binding to a non-loopback address without
-/// a token is refused.
+/// a token is refused for direct runs (containers are exempt, where
+/// 0.0.0.0 is the normal bind address).
 Future<void> main(List<String> args) async {
   // Debian's libsqlite3-0 runtime package ships only the versioned
   // libsqlite3.so.0; the sqlite3 package's default 'libsqlite3.so' lookup
@@ -38,7 +39,11 @@ Future<void> main(List<String> args) async {
   final token = Platform.environment['ASSET_SYNC_TOKEN'];
 
   final loopback = host == '127.0.0.1' || host == 'localhost' || host == '::1';
-  if (!loopback && (token == null || token.isEmpty)) {
+  // Binding to all interfaces is the normal mode inside a container (the
+  // container boundary plus explicit port publishing is the security model),
+  // so the token requirement only applies to direct runs on a host.
+  final inContainer = File('/.dockerenv').existsSync();
+  if (!loopback && (token == null || token.isEmpty) && !inContainer) {
     stderr.writeln(
       'refusing to bind $host without a token; '
       'set ASSET_SYNC_TOKEN or use HOST=127.0.0.1',

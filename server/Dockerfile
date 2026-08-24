@@ -14,6 +14,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
 WORKDIR /app
 COPY --from=build /app/server ./server
 EXPOSE 8787
-ENV PORT=8787 SYNC_DB_PATH=/data/sync_state.sqlite
+ENV PORT=8787 HOST=0.0.0.0 SYNC_DB_PATH=/data/sync_state.sqlite
 VOLUME ["/data"]
 ENTRYPOINT ["/app/server"]
