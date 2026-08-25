@@ -148,11 +148,10 @@ class TransactionService {
       throw ArgumentError('卖出数量超过持仓数量（当前 ${holding.quantity}）');
     }
     final newQty = holding.quantity - quantity;
-    await _updateHolding(
-      holding,
-      quantity: newQty,
-      costPrice: newQty == 0 ? 0 : holding.costPrice,
-    );
+    // Keep the unit cost after a full sell-out: the realized-gain estimate
+    // reads the holding's current cost, and a later buy overwrites it
+    // (moving average with oldQty = 0 is just the new purchase price).
+    await _updateHolding(holding, quantity: newQty);
     if (cashTargetId != null) {
       await _applyCashMove(cashTargetId, amount, invested: true);
     }
@@ -356,12 +355,14 @@ class TransactionService {
     final qty = txn.quantity ?? 0;
     if (qty <= 0) throw ArgumentError('买入流水数量无效');
     if (qty > holding.quantity) {
-      // Already reversed or inconsistent data; just zero it out.
-      await _updateHolding(holding, quantity: 0, costPrice: 0);
+      // Already reversed or inconsistent data; just zero the quantity.
+      await _updateHolding(holding, quantity: 0);
     } else {
       final newQty = holding.quantity - qty;
+      // A full reversal keeps the unit cost (same invariant as a full
+      // sell-out) so realized gains stay computable.
       final cost = newQty == 0
-          ? 0.0
+          ? holding.costPrice
           : (holding.quantity * holding.costPrice - txn.amount) / newQty;
       await _updateHolding(holding, quantity: newQty, costPrice: cost < 0 ? 0.0 : cost);
     }

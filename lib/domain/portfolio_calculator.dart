@@ -52,11 +52,22 @@ class PortfolioSummary {
   final double realizedProfit;
 
   double get netWorth => totalAssets - totalLiabilities;
+
+  /// Market value minus cost basis; equals the current unrealized profit
+  /// (realized gains never enter this difference, see [unrealizedProfit]).
   double get profit => totalAssets - totalCost;
   double get profitPct => totalCost == 0 ? 0 : profit / totalCost;
 
-  /// Unrealized profit (floating) = total profit minus realized gains.
-  double get unrealizedProfit => profit - realizedProfit;
+  /// Current unrealized (floating) profit.
+  ///
+  /// Bookkeeping identity: buy/sell proceeds move cash value and cost
+  /// together, and a sell shrinks the holding's cost at cost basis, so
+  /// `totalAssets - totalCost` already excludes realized gains.
+  double get unrealizedProfit => profit;
+
+  /// Total return = unrealized + realized.
+  double get totalProfit => profit + realizedProfit;
+  double get totalProfitPct => totalCost == 0 ? 0 : totalProfit / totalCost;
 }
 
 /// Pure portfolio math, unit-testable without widgets or DB.
@@ -139,7 +150,7 @@ class PortfolioCalculator {
         ),
     ]..sort((a, b) => b.marketValue.compareTo(a.marketValue));
 
-    final realized = _realizedProfit(holdings, sellTransactions);
+    final realized = _realizedProfit(holdings, sellTransactions, cnyRates);
 
     return PortfolioSummary(
       totalAssets: assets,
@@ -153,14 +164,23 @@ class PortfolioCalculator {
     );
   }
 
-  /// Sum of realized gains over all sell transactions.
+  /// Sum of realized gains over all sell transactions, converted into CNY.
   /// Estimated with the holding's current unit cost, which is exact when no
   /// purchase happened after the sell (moving average otherwise approximates).
-  double _realizedProfit(List<HoldingRow> holdings, List<TransactionRow> sells) {
+  double _realizedProfit(
+    List<HoldingRow> holdings,
+    List<TransactionRow> sells,
+    Map<String, double> cnyRates,
+  ) {
     if (sells.isEmpty) return 0;
     final costByHolding = <int, double>{
       for (final h in holdings) h.id: h.costPrice,
     };
+    double rateOf(String currency) {
+      final rate = cnyRates[currency.toUpperCase()];
+      return (rate == null || rate <= 0) ? 1 : rate;
+    }
+
     var total = 0.0;
     for (final t in sells) {
       final holdingId = t.holdingId;
@@ -168,7 +188,7 @@ class PortfolioCalculator {
       final unitCost = costByHolding[holdingId] ?? 0;
       final qty = t.quantity ?? 0;
       final price = t.price ?? 0;
-      total += (price - unitCost) * qty;
+      total += (price - unitCost) * qty * rateOf(t.currency);
     }
     return total;
   }
