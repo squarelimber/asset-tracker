@@ -126,6 +126,43 @@ void main() {
       expect(r.ok, isFalse);
       expect(r.message, contains('超过'));
     });
+
+    test('full sell-out keeps the unit cost for realized-gain estimation',
+        () async {
+      final acc = await addAccount('A');
+      final fund = await addHolding(
+        accountId: acc, name: '基金', type: AssetType.mutualFund,
+        quantity: 100, costPrice: 10, latestPrice: 12,
+      );
+      final r = await service.record(
+        accountId: acc, holdingId: fund, type: TransactionType.sell,
+        quantity: 100, price: 12, amount: 1200,
+      );
+      expect(r.ok, isTrue);
+      final fundAfter = (await dao.getHolding(fund))!;
+      expect(fundAfter.quantity, 0);
+      expect(fundAfter.costPrice, 10);
+    });
+
+    test('buy-back after sell-out restarts the cost at the new price',
+        () async {
+      final acc = await addAccount('A');
+      final fund = await addHolding(
+        accountId: acc, name: '基金', type: AssetType.mutualFund,
+        quantity: 100, costPrice: 10, latestPrice: 12,
+      );
+      await service.record(
+        accountId: acc, holdingId: fund, type: TransactionType.sell,
+        quantity: 100, price: 12, amount: 1200,
+      );
+      await service.record(
+        accountId: acc, holdingId: fund, type: TransactionType.buy,
+        quantity: 50, price: 20, amount: 1000,
+      );
+      final fundAfter = (await dao.getHolding(fund))!;
+      expect(fundAfter.quantity, 50);
+      expect(fundAfter.costPrice, closeTo(20, 1e-9));
+    });
   });
 
   group('transfer', () {
@@ -554,6 +591,24 @@ void main() {
       final h = (await dao.getHolding(fund))!;
       expect(h.quantity, 100);
       expect(h.costPrice, closeTo(10, 1e-9));
+    });
+
+    test('removing the last buy keeps the unit cost on the emptied holding',
+        () async {
+      final acc = await addAccount('A');
+      final fund = await addHolding(
+        accountId: acc, name: '基金', type: AssetType.mutualFund,
+        quantity: 0, costPrice: 0, latestPrice: 10,
+      );
+      await service.record(
+        accountId: acc, holdingId: fund, type: TransactionType.buy,
+        quantity: 100, price: 10, amount: 1000,
+      );
+      final txnId = (await dao.getTransactions()).single.id;
+      expect((await service.remove(txnId)).ok, isTrue);
+      final h = (await dao.getHolding(fund))!;
+      expect(h.quantity, 0);
+      expect(h.costPrice, 10);
     });
 
     test('removing an expense refunds cash and invested', () async {

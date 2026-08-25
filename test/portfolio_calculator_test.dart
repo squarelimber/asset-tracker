@@ -148,9 +148,88 @@ void main() {
         ),
       ],
     );
-    // (15 - 10) * 50 = 250 realized; total profit = (20-10)*100 = 1000.
+    // (15 - 10) * 50 = 250 realized; unrealized = (20-10)*100 = 1000.
     expect(s.realizedProfit, closeTo(250, 1e-6));
-    expect(s.unrealizedProfit, closeTo(750, 1e-6));
+    expect(s.unrealizedProfit, closeTo(1000, 1e-6));
+    expect(s.totalProfit, closeTo(1250, 1e-6));
+    expect(s.totalProfitPct, closeTo(1.25, 1e-9));
+  });
+
+  test('unrealized + realized equals total return after a sell', () {
+    // Post-sell state: 50 of 100 shares sold @15 (cost 10), proceeds 750
+    // booked into cash with value == cost.
+    final s = calc.compute(
+      [
+        _holding(id: 1, type: 'stock', quantity: 50, price: 20, cost: 10),
+        _holding(id: 2, type: 'cash', quantity: 750, price: 1, cost: 750),
+      ],
+      sellTransactions: [
+        TransactionRow(
+          id: 1,
+          accountId: 1,
+          holdingId: 1,
+          cashSourceId: null,
+          cashTargetId: 2,
+          type: 'sell',
+          quantity: 50,
+          price: 15,
+          amount: 750,
+          currency: 'CNY',
+          occurredAt: DateTime(2026, 1, 1),
+          note: null,
+          costMoved: true,
+          updatedAt: DateTime(2026, 1, 1),
+        ),
+      ],
+    );
+    expect(s.profit, closeTo(500, 1e-6));
+    expect(s.realizedProfit, closeTo(250, 1e-6));
+    expect(s.unrealizedProfit, closeTo(500, 1e-6));
+    expect(s.totalProfit, closeTo(750, 1e-6));
+    expect(
+      s.totalProfit,
+      closeTo(s.unrealizedProfit + s.realizedProfit, 1e-6),
+    );
+  });
+
+  test('realized profit of foreign sells is converted into CNY', () {
+    final s = calc.compute(
+      [
+        _holding(
+          id: 1,
+          type: 'stock',
+          quantity: 100,
+          price: 2,
+          cost: 1.5,
+          currency: 'USD',
+          costFxRate: 6.95,
+        ),
+      ],
+      cnyRates: const {'USD': 7.2},
+      sellTransactions: [
+        TransactionRow(
+          id: 1,
+          accountId: 1,
+          holdingId: 1,
+          cashSourceId: null,
+          cashTargetId: null,
+          type: 'sell',
+          quantity: 50,
+          price: 1.8,
+          amount: 90,
+          currency: 'USD',
+          occurredAt: DateTime(2026, 1, 1),
+          note: null,
+          costMoved: true,
+          updatedAt: DateTime(2026, 1, 1),
+        ),
+      ],
+    );
+    // Realized: (1.8 - 1.5) * 50 * 7.2 = 108 CNY.
+    expect(s.realizedProfit, closeTo(108, 1e-6));
+    // Unrealized: 100 x 2 x 7.2 - 100 x 1.5 x 6.95 = 397.5 CNY.
+    expect(s.unrealizedProfit, closeTo(397.5, 1e-6));
+    expect(s.totalProfit, closeTo(505.5, 1e-6));
   });
 
   test('risk breakdown groups holdings by effective risk tier', () {

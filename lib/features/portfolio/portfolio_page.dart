@@ -227,9 +227,10 @@ class _SummaryHeader extends ConsumerWidget {
                   color: changeColor,
                 ),
                 _Chip(
-                  label: '累计收益 ${Formats.pct(summary.profitPct)}',
-                  value: '${summary.profit >= 0 ? '+' : ''}${amount(summary.profit)}',
-                  color: context.changeColor(summary.profit),
+                  label: '累计收益 ${Formats.pct(summary.totalProfitPct)}',
+                  value:
+                      '${summary.totalProfit >= 0 ? '+' : ''}${amount(summary.totalProfit)}',
+                  color: context.changeColor(summary.totalProfit),
                 ),
                 if (summary.realizedProfit != 0)
                   _Chip(
