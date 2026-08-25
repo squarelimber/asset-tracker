@@ -154,106 +154,113 @@ class _PEBody extends StatelessWidget {
       });
 
     return ResponsiveShell(
-      child: ListView(
+      child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        children: [
-          Center(
-            child: SegmentedButton<_PEView>(
-              segments: const [
-                ButtonSegment(value: _PEView.year, label: Text('年')),
-                ButtonSegment(value: _PEView.month, label: Text('月')),
-              ],
-              selected: {view},
-              showSelectedIcon: false,
-              style: const ButtonStyle(
-                visualDensity: VisualDensity.compact,
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              ),
-              onSelectionChanged: (s) => onViewChanged(s.first),
-            ),
-          ),
-          const SizedBox(height: 12),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              IconButton(
-                tooltip: isYearView ? '上一年' : '上一月',
-                icon: const Icon(Icons.chevron_left),
-                onPressed: isYearView ? () => onShiftYear(-1) : () => onShiftMonth(-1),
-              ),
-              Expanded(
-                child: Center(
-                  child: Text(
-                    isYearView ? '$year年' : '$year年$month月',
-                    style: Theme.of(context)
-                        .textTheme
-                        .titleMedium
-                        ?.copyWith(fontWeight: FontWeight.w600),
-                  ),
-                ),
-              ),
-              IconButton(
-                tooltip: isYearView ? '下一年' : '下一月',
-                icon: const Icon(Icons.chevron_right),
-                onPressed: isYearView ? () => onShiftYear(1) : () => onShiftMonth(1),
-              ),
-            ],
-          ),
-          const SizedBox(height: 4),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              SegmentedButton<_PEFilter>(
+        child: Column(
+          children: [
+            Center(
+              child: SegmentedButton<_PEView>(
                 segments: const [
-                  ButtonSegment(value: _PEFilter.all, label: Text('全部')),
-                  ButtonSegment(value: _PEFilter.held, label: Text('仅持有中')),
+                  ButtonSegment(value: _PEView.year, label: Text('年')),
+                  ButtonSegment(value: _PEView.month, label: Text('月')),
                 ],
-                selected: {filter},
+                selected: {view},
                 showSelectedIcon: false,
                 style: const ButtonStyle(
                   visualDensity: VisualDensity.compact,
                   tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                 ),
-                onSelectionChanged: (s) => onFilterChanged(s.first),
+                onSelectionChanged: (s) => onViewChanged(s.first),
               ),
-              if (isYearView && isPhone) ...[
-                const SizedBox(width: 12),
-                SegmentedButton<int>(
+            ),
+            const SizedBox(height: 12),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                IconButton(
+                  tooltip: isYearView ? '上一年' : '上一月',
+                  icon: const Icon(Icons.chevron_left),
+                  onPressed:
+                      isYearView ? () => onShiftYear(-1) : () => onShiftMonth(-1),
+                ),
+                Expanded(
+                  child: Center(
+                    child: Text(
+                      isYearView ? '$year年' : '$year年$month月',
+                      style: Theme.of(context)
+                          .textTheme
+                          .titleMedium
+                          ?.copyWith(fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                ),
+                IconButton(
+                  tooltip: isYearView ? '下一年' : '下一月',
+                  icon: const Icon(Icons.chevron_right),
+                  onPressed:
+                      isYearView ? () => onShiftYear(1) : () => onShiftMonth(1),
+                ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                SegmentedButton<_PEFilter>(
                   segments: const [
-                    ButtonSegment(value: 6, label: Text('近6月')),
-                    ButtonSegment(value: 12, label: Text('12月')),
+                    ButtonSegment(value: _PEFilter.all, label: Text('全部')),
+                    ButtonSegment(value: _PEFilter.held, label: Text('仅持有中')),
                   ],
-                  selected: {mobileMonths},
+                  selected: {filter},
                   showSelectedIcon: false,
                   style: const ButtonStyle(
                     visualDensity: VisualDensity.compact,
                     tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                   ),
-                  onSelectionChanged: (s) => onMobileMonthsChanged(s.first),
+                  onSelectionChanged: (s) => onFilterChanged(s.first),
                 ),
+                if (isYearView && isPhone) ...[
+                  const SizedBox(width: 12),
+                  SegmentedButton<int>(
+                    segments: const [
+                      ButtonSegment(value: 6, label: Text('近6月')),
+                      ButtonSegment(value: 12, label: Text('12月')),
+                    ],
+                    selected: {mobileMonths},
+                    showSelectedIcon: false,
+                    style: const ButtonStyle(
+                      visualDensity: VisualDensity.compact,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                    onSelectionChanged: (s) => onMobileMonthsChanged(s.first),
+                  ),
+                ],
               ],
-            ],
-          ),
-          const SizedBox(height: 12),
-          if (isYearView)
-            _YearMatrix(
-              rows: rows,
-              months: shownMonths,
-              year: year,
-              onTapMonth: onOpenMonth,
-            )
-          else
-            _MonthList(
-              rows: monthRows,
-              year: year,
-              month: month,
             ),
-          const SizedBox(height: 12),
-          Text(
-            '收益为成本法口径：已剔除申赎等本金进出影响；已清仓产品按流水回放保留完整历史，清仓月收益为已实现收益。',
-            style: Theme.of(context).textTheme.bodySmall,
-          ),
-        ],
+            const SizedBox(height: 12),
+            Expanded(
+              child: isYearView
+                  ? _YearMatrix(
+                      rows: rows,
+                      months: shownMonths,
+                      year: year,
+                      onTapMonth: onOpenMonth,
+                    )
+                  : SingleChildScrollView(
+                      child: _MonthList(
+                        rows: monthRows,
+                        year: year,
+                        month: month,
+                      ),
+                    ),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              '收益为成本法口径：已剔除申赎等本金进出影响；已清仓产品按流水回放保留完整历史，清仓月收益为已实现收益。',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -266,8 +273,10 @@ class _PEBody extends StatelessWidget {
   }
 }
 
-/// Month x product heatmap for one year.
-class _YearMatrix extends StatelessWidget {
+/// Month x product heatmap for one year. The product-name column (left) and
+/// the month header (top) stay pinned while the cells scroll in both axes;
+/// the header and the grid follow the same horizontal offset.
+class _YearMatrix extends StatefulWidget {
   const _YearMatrix({
     required this.rows,
     required this.months,
@@ -281,16 +290,53 @@ class _YearMatrix extends StatelessWidget {
   final ValueChanged<int> onTapMonth;
 
   @override
+  State<_YearMatrix> createState() => _YearMatrixState();
+}
+
+class _YearMatrixState extends State<_YearMatrix> {
+  static const double _headerHeight = 24;
+  static const double _rowHeight = 44;
+
+  final ScrollController _headerCtrl = ScrollController();
+  final ScrollController _bodyCtrl = ScrollController();
+  bool _syncing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _headerCtrl.addListener(() => _sync(_headerCtrl, _bodyCtrl));
+    _bodyCtrl.addListener(() => _sync(_bodyCtrl, _headerCtrl));
+  }
+
+  void _sync(ScrollController src, ScrollController dst) {
+    if (_syncing) return;
+    if (src.positions.isEmpty || dst.positions.isEmpty) return;
+    final s = src.positions.first;
+    final d = dst.positions.first;
+    if ((s.pixels - d.pixels).abs() < 0.5) return;
+    _syncing = true;
+    d.jumpTo(s.pixels);
+    _syncing = false;
+  }
+
+  @override
+  void dispose() {
+    _headerCtrl.dispose();
+    _bodyCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     final calc = const ProductEarningsCalculator();
     final isPhone = Responsive.isPhone(context);
 
     // Best product per month (highest rate among products with data).
     final bestByMonth = <int, String>{};
-    for (final m in months) {
+    for (final m in widget.months) {
       double? bestRate;
       String? bestName;
-      for (final row in rows) {
+      for (final row in widget.rows) {
         final agg = _aggOf(row, m);
         if (agg == null || agg.rate == null) continue;
         if (bestRate == null || agg.rate! > bestRate) {
@@ -302,87 +348,157 @@ class _YearMatrix extends StatelessWidget {
     }
 
     final nameWidth = isPhone ? 92.0 : 150.0;
-    final columnCount = months.length + 1;
-    final headerCells = <Widget>[
-      SizedBox(width: nameWidth),
-      for (final m in months)
-        Center(
-          child: Text(
-            '$m月',
-            style: Theme.of(context).textTheme.bodySmall,
-          ),
-        ),
-      Center(
-        child: Text(
-          '全年',
-          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                fontWeight: FontWeight.w600,
-              ),
-        ),
-      ),
-    ];
+    final colWidth = isPhone ? 52.0 : 64.0;
+    final dividerColor = Theme.of(context).colorScheme.outlineVariant;
 
-    final tableRows = <TableRow>[TableRow(children: headerCells)];
-    for (final row in rows) {
-      final cells = <Widget>[
+    final header = Row(
+      children: [
         SizedBox(
           width: nameWidth,
-          child: Row(
-            children: [
-              Flexible(
-                child: Text(
-                  row.p.name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.bodyMedium,
-                ),
-              ),
-              if (row.p.closed)
-                Container(
-                  margin: const EdgeInsets.only(left: 4),
-                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-                  decoration: BoxDecoration(
-                    color: Theme.of(context).colorScheme.outlineVariant,
-                    borderRadius: BorderRadius.circular(4),
+          height: _headerHeight,
+          child: Center(
+            child: Text(
+              '产品',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ),
+        ),
+        Container(width: 1, height: _headerHeight, color: dividerColor),
+        Expanded(
+          child: SingleChildScrollView(
+            controller: _headerCtrl,
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: [
+                for (final m in widget.months)
+                  SizedBox(
+                    width: colWidth,
+                    child: Center(
+                      child: Text(
+                        '$m月',
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                    ),
                   ),
-                  child: Text(
-                    '清仓',
-                    style: TextStyle(
-                      fontSize: 9,
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                SizedBox(
+                  width: colWidth,
+                  child: Center(
+                    child: Text(
+                      '全年',
+                      style: Theme.of(context)
+                          .textTheme
+                          .bodySmall
+                          ?.copyWith(fontWeight: FontWeight.w600),
                     ),
                   ),
                 ),
-            ],
+              ],
+            ),
           ),
         ),
-      ];
-      for (final m in months) {
+      ],
+    );
+
+    final nameColumn = SizedBox(
+      width: nameWidth,
+      child: Column(
+        children: [
+          for (final row in widget.rows)
+            SizedBox(
+              height: _rowHeight,
+              child: Center(
+                child: Row(
+                  children: [
+                    Flexible(
+                      child: Text(
+                        row.p.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.bodyMedium,
+                      ),
+                    ),
+                    if (row.p.closed)
+                      Container(
+                        margin: const EdgeInsets.only(left: 4),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 4, vertical: 1),
+                        decoration: BoxDecoration(
+                          color: Theme.of(context).colorScheme.outlineVariant,
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text(
+                          '清仓',
+                          style: TextStyle(
+                            fontSize: 9,
+                            color: Theme.of(context)
+                                .colorScheme
+                                .onSurfaceVariant,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+
+    final gridRows = <Widget>[];
+    for (final row in widget.rows) {
+      final cells = <Widget>[];
+      for (final m in widget.months) {
         final agg = _aggOf(row, m);
-        final isBest = agg != null && bestByMonth[m] == row.p.name;
-        cells.add(_MatrixCell(
-          agg: agg,
-          isBest: isBest,
-          onTap: agg != null && agg.days > 0 ? () => onTapMonth(m) : null,
-        ));
+        cells.add(
+          SizedBox(
+            width: colWidth,
+            child: _MatrixCell(
+              agg: agg,
+              isBest: agg != null && bestByMonth[m] == row.p.name,
+              onTap: agg != null && agg.days > 0
+                  ? () => widget.onTapMonth(m)
+                  : null,
+            ),
+          ),
+        );
       }
-      final yearlyProfit = calc.yearlyProfit(row.months);
-      final yearlyRate = calc.yearlyRate(row.months, row.p, year);
-      cells.add(_YearlyCell(profit: yearlyProfit, rate: yearlyRate));
-      tableRows.add(TableRow(children: cells));
+      cells.add(
+        SizedBox(
+          width: colWidth,
+          child: _YearlyCell(
+            profit: calc.yearlyProfit(row.months),
+            rate: calc.yearlyRate(row.months, row.p, widget.year),
+          ),
+        ),
+      );
+      gridRows.add(SizedBox(height: _rowHeight, child: Row(children: cells)));
     }
 
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: Table(
-        defaultVerticalAlignment: TableCellVerticalAlignment.middle,
-        columnWidths: {
-          0: FixedColumnWidth(nameWidth),
-          for (var i = 1; i < columnCount; i++)
-            i: FixedColumnWidth(isPhone ? 52.0 : 64.0),
-        },
-        children: tableRows,
-      ),
+    return Column(
+      children: [
+        header,
+        Container(height: 1, color: dividerColor),
+        Expanded(
+          child: SingleChildScrollView(
+            child: IntrinsicHeight(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  nameColumn,
+                  Container(width: 1, color: dividerColor),
+                  Expanded(
+                    child: SingleChildScrollView(
+                      controller: _bodyCtrl,
+                      scrollDirection: Axis.horizontal,
+                      child: Column(children: gridRows),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 
