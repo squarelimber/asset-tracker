@@ -125,13 +125,13 @@ class _DesktopBars extends StatelessWidget {
                   flex: (segs[i].pct * 1000).round().clamp(1, 1 << 16),
                   child: Container(
                     decoration: BoxDecoration(
-                      color: segs[i].color,
                       gradient: LinearGradient(
                         begin: Alignment.topCenter,
                         end: Alignment.bottomCenter,
                         colors: [
-                          Colors.white.withValues(alpha: 0.14),
-                          Colors.white.withValues(alpha: 0.02),
+                          Color.lerp(segs[i].color, Colors.white, 0.12) ??
+                              segs[i].color,
+                          segs[i].color,
                         ],
                       ),
                       borderRadius: BorderRadius.circular(3),
