@@ -16,6 +16,8 @@ class AppTheme {
       onSurface: T.text1,
       error: T.up,
       onError: Colors.black,
+      outline: T.border,
+      outlineVariant: T.borderSoft,
     );
     return ThemeData(
       useMaterial3: true,
