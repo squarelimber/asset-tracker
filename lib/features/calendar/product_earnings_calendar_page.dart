@@ -5,6 +5,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/providers.dart';
 import '../../app/theme.dart';
+import '../../ui/components/app_bar_actions.dart';
+import '../../ui/tokens.dart';
 import '../../core/formats.dart';
 import '../../core/responsive.dart';
 import '../../domain/product_monthly_earnings.dart';
@@ -59,7 +61,10 @@ class _ProductEarningsCalendarPageState
   Widget build(BuildContext context) {
     final products = ref.watch(productEarningsProvider(_year));
     return Scaffold(
-      appBar: AppBar(title: const Text('产品收益日历')),
+      appBar: AppBar(
+        title: const Text('产品收益日历'),
+        actions: [const TerminalAppBarActions()],
+      ),
       body: products.when(
         data: (list) => _PEBody(
           products: list,
@@ -529,7 +534,7 @@ class _MatrixCell extends StatelessWidget {
     if (hasRate) {
       final up = rate >= 0;
       final intensity = math.min(0.28, (rate.abs() / 0.10) * 0.28);
-      final base = up ? AppColors.up : AppColors.down;
+      final base = up ? T.up : T.down;
       bg = base.withValues(alpha: intensity);
       fg = base;
     } else if (hasData) {
@@ -551,7 +556,7 @@ class _MatrixCell extends StatelessWidget {
                     .withValues(alpha: 0.3),
             borderRadius: BorderRadius.circular(8),
             border: isBest
-                ? Border.all(color: AppColors.primary, width: 1.6)
+                ? Border.all(color: T.accent, width: 1.6)
                 : null,
           ),
           child: Stack(
@@ -579,7 +584,7 @@ class _MatrixCell extends StatelessWidget {
                     padding: const EdgeInsets.symmetric(
                         horizontal: 3, vertical: 0.5),
                     decoration: BoxDecoration(
-                      color: AppColors.primary,
+                      color: T.accent,
                       borderRadius: BorderRadius.circular(3),
                     ),
                     child: const Text(

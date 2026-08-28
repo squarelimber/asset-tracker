@@ -10,7 +10,7 @@ import '../features/holdings/holdings_page.dart';
 import '../features/markets/markets_page.dart';
 import '../features/portfolio/portfolio_page.dart';
 import '../features/settings/settings_page.dart';
-import '../features/shell_page.dart';
+import '../ui/shell/shell_page.dart';
 import '../features/stats/stats_page.dart';
 
 final routerProvider = Provider<GoRouter>((ref) {

@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../app/providers.dart';
 import '../../app/theme.dart';
+import '../../ui/tokens.dart';
 import '../../core/formats.dart';
 import '../../core/responsive.dart';
 import '../../data/database.dart';
@@ -641,7 +642,7 @@ class _NetWorthChartState extends ConsumerState<NetWorthChart> {
                           spacing: 14,
                           runSpacing: 4,
                           children: [
-                            _LegendDot(color: AppColors.up, label: '资产'),
+                            _LegendDot(color: T.up, label: '资产'),
                             for (final code in _benchSelected)
                               if (_benchData.containsKey(code))
                                 _LegendDot(
@@ -794,7 +795,7 @@ class _TrendChart extends StatelessWidget {
   Widget build(BuildContext context) {
     // Fixed red brand color for a positive, energetic feel; the line does
     // not change with gains/losses (conveyed by the stats figures instead).
-    final color = AppColors.up;
+    final color = T.up;
     final isRate = view == _TrendView.returnRate;
     // Normalize the asset series to start at 0% at the range start, so it
     // shares the same baseline as the normalized index benchmarks: both

@@ -4,6 +4,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/providers.dart';
 import '../../app/theme.dart';
+import '../../ui/components/app_bar_actions.dart';
+import '../../ui/tokens.dart';
 import '../../core/enums.dart';
 import '../../core/formats.dart';
 import '../../core/history_sync.dart';
@@ -169,6 +171,7 @@ class _HoldingsPageState extends ConsumerState<HoldingsPage> {
               )
             : const Text('持仓'),
         actions: [
+          const TerminalAppBarActions(),
           IconButton(
             tooltip: '搜索',
             icon: Icon(_searching ? Icons.close : Icons.search),
@@ -705,7 +708,7 @@ class _SectionHeader extends StatelessWidget {
             style: Theme.of(context).textTheme.titleMedium?.copyWith(
                   fontWeight: FontWeight.w700,
                   color: isLiability
-                      ? AppColors.down
+                      ? T.down
                       : Theme.of(context).colorScheme.onSurface,
                 ),
           ),
@@ -838,7 +841,7 @@ class _HoldingCard extends ConsumerWidget {
                 Formats.money(marketValue, holding.currency),
                 style: Theme.of(context).textTheme.titleLarge?.copyWith(
                       color: type == AssetType.liability
-                          ? AppColors.down
+                          ? T.down
                           : null,
                     ),
               ),
@@ -1299,7 +1302,7 @@ class _HoldingCard extends ConsumerWidget {
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('取消')),
           FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: AppColors.up),
+            style: FilledButton.styleFrom(backgroundColor: T.up),
             onPressed: () => Navigator.pop(context, true),
             child: const Text('删除'),
           ),
@@ -1368,7 +1371,7 @@ class _HoldingDetailSheet extends ConsumerWidget {
                   _InfoRow(
                     label: '当前欠款',
                     value: Formats.money(marketValue, holding.currency),
-                    valueColor: AppColors.down,
+                    valueColor: T.down,
                   )
                 else if (type.isAmountBased) ...[
                   _InfoRow(label: '当前金额', value: Formats.money(marketValue, holding.currency)),
@@ -1538,7 +1541,7 @@ class _TransactionTile extends ConsumerWidget {
                         child: const Text('取消'),
                       ),
                       FilledButton(
-                        style: FilledButton.styleFrom(backgroundColor: AppColors.up),
+                        style: FilledButton.styleFrom(backgroundColor: T.up),
                         onPressed: () => Navigator.pop(context, true),
                         child: const Text('删除'),
                       ),
@@ -1555,7 +1558,7 @@ class _TransactionTile extends ConsumerWidget {
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
                     content: Text(result.ok ? '已删除并回滚' : (result.message ?? '删除失败')),
-                    backgroundColor: result.ok ? null : AppColors.up,
+                    backgroundColor: result.ok ? null : T.up,
                   ),
                 );
               },

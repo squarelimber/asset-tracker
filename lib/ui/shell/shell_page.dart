@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
-import '../core/responsive.dart';
+import '../../core/responsive.dart';
 
 /// App shell with adaptive navigation:
 /// - Phone: bottom navigation bar
@@ -17,8 +17,6 @@ class ShellPage extends StatelessWidget {
     (icon: Icons.account_balance_wallet_outlined, activeIcon: Icons.account_balance_wallet, label: '账户', path: '/accounts'),
     (icon: Icons.candlestick_chart_outlined, activeIcon: Icons.candlestick_chart, label: '行情', path: '/markets'),
     (icon: Icons.assessment_outlined, activeIcon: Icons.assessment, label: '统计', path: '/stats'),
-    (icon: Icons.notifications_outlined, activeIcon: Icons.notifications, label: '提醒', path: '/alerts'),
-    (icon: Icons.settings_outlined, activeIcon: Icons.settings, label: '设置', path: '/settings'),
   ];
 
   @override

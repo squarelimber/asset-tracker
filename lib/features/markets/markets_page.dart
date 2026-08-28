@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../app/theme.dart';
+import '../../ui/components/app_bar_actions.dart';
+import '../../ui/tokens.dart';
 import '../../core/formats.dart';
 import '../../core/responsive.dart';
 import '../../services/market/global_quote_source.dart';
@@ -20,6 +21,7 @@ class MarketsPage extends ConsumerWidget {
       appBar: AppBar(
         title: const Text('行情'),
         actions: [
+          const TerminalAppBarActions(),
           IconButton(
             tooltip: '刷新行情',
             icon: const Icon(Icons.refresh),
@@ -84,7 +86,7 @@ class _QuoteCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final up = quote.change >= 0;
-    final color = up ? AppColors.up : AppColors.down;
+    final color = up ? T.up : T.down;
     return SizedBox(
       width: 176,
       child: Card(

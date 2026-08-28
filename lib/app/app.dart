@@ -13,8 +13,7 @@ class AssetTrackerApp extends ConsumerWidget {
     return MaterialApp.router(
       title: 'Asset Tracker',
       debugShowCheckedModeBanner: false,
-      theme: AppTheme.light(),
-      darkTheme: AppTheme.dark(),
+      theme: AppTheme.dark(),
       routerConfig: router,
     );
   }

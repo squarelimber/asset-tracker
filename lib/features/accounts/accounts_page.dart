@@ -5,6 +5,8 @@ import 'package:go_router/go_router.dart';
 
 import '../../app/providers.dart';
 import '../../app/theme.dart';
+import '../../ui/components/app_bar_actions.dart';
+import '../../ui/tokens.dart';
 import '../../core/enums.dart';
 import '../../core/formats.dart';
 import '../../core/history_sync.dart';
@@ -19,7 +21,10 @@ class AccountsPage extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final accounts = ref.watch(accountsProvider);
     return Scaffold(
-      appBar: AppBar(title: const Text('账户')),
+      appBar: AppBar(
+        title: const Text('账户'),
+        actions: [const TerminalAppBarActions()],
+      ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => _showAccountDialog(context, ref),
         icon: const Icon(Icons.add),
@@ -193,7 +198,7 @@ class _AccountCard extends ConsumerWidget {
                               Text(
                                 '负债 ¥${Formats.amount(_accountLiability(list, rates))}',
                                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                      color: AppColors.down,
+                                      color: T.down,
                                     ),
                               ),
                           ],
