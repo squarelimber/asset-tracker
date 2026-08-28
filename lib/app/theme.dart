@@ -49,6 +49,10 @@ class AppTheme {
       navigationRailTheme: NavigationRailThemeData(
         backgroundColor: T.surface,
         indicatorColor: T.surface2,
+        selectedIconTheme: const IconThemeData(color: T.text1),
+        unselectedIconTheme: const IconThemeData(color: T.text2),
+        selectedLabelTextStyle: T.label(size: 11, color: T.text1),
+        unselectedLabelTextStyle: T.label(size: 11, color: T.text2),
       ),
       dividerTheme: const DividerThemeData(color: T.border, thickness: 1),
       snackBarTheme: const SnackBarThemeData(
