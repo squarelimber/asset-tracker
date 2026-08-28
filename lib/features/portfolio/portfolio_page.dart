@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/providers.dart';
 import '../../app/theme.dart';
+import '../../ui/components/app_bar_actions.dart';
 import '../../core/enums.dart';
 import '../../core/formats.dart';
 import '../../core/responsive.dart';
@@ -112,6 +113,7 @@ class _PortfolioPageState extends ConsumerState<PortfolioPage> {
       appBar: AppBar(
         title: const Text('总览'),
         actions: [
+          const TerminalAppBarActions(),
           Consumer(builder: (context, ref, _) {
             final hidden = ref.watch(hideAmountsProvider);
             return IconButton(

@@ -2,7 +2,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/providers.dart';
-import '../../app/theme.dart';
+import '../../ui/tokens.dart';
 import '../../core/enums.dart';
 import '../../core/formats.dart';
 import '../../core/history_sync.dart';
@@ -265,7 +265,7 @@ Future<void> showHoldingTransactionDialog(
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
                 content: Text(result.ok ? '已记录' : (result.message ?? '记录失败')),
-                backgroundColor: result.ok ? null : AppColors.up,
+                backgroundColor: result.ok ? null : T.up,
               ),
             );
           },
@@ -457,7 +457,7 @@ Future<void> showAccountTransactionDialog(
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
                 content: Text(result.ok ? '已记录' : (result.message ?? '记录失败')),
-                backgroundColor: result.ok ? null : AppColors.up,
+                backgroundColor: result.ok ? null : T.up,
               ),
             );
           },

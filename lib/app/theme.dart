@@ -1,87 +1,81 @@
 import 'package:flutter/material.dart';
 
-/// Design tokens: modern minimal financial style.
-/// Up = red, Down = green (China market convention).
-class AppColors {
-  AppColors._();
-
-  static const Color primary = Color(0xFF1E3A5F); // deep navy
-  static const Color up = Color(0xFFE64545); // gain red
-  static const Color down = Color(0xFF00B578); // loss green
-  static const Color warning = Color(0xFFFF9500);
-  static const Color background = Color(0xFFF6F7F9);
-  static const Color card = Colors.white;
-}
+import '../ui/tokens.dart';
 
 class AppTheme {
   AppTheme._();
 
-  static ThemeData light() => _base(Brightness.light);
-  static ThemeData dark() => _base(Brightness.dark);
-
-  static ThemeData _base(Brightness brightness) {
-    final isDark = brightness == Brightness.dark;
-    final scheme = ColorScheme.fromSeed(
-      seedColor: AppColors.primary,
-      brightness: brightness,
+  static ThemeData dark() {
+    final scheme = ColorScheme(
+      brightness: Brightness.dark,
+      primary: T.accent,
+      onPrimary: Colors.black,
+      secondary: T.accent,
+      onSecondary: Colors.black,
+      surface: T.surface,
+      onSurface: T.text1,
+      error: T.up,
+      onError: Colors.black,
     );
-
     return ThemeData(
       useMaterial3: true,
+      brightness: Brightness.dark,
       colorScheme: scheme,
-      scaffoldBackgroundColor: isDark ? const Color(0xFF121417) : AppColors.background,
-      cardTheme: CardThemeData(
-        elevation: 0,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        color: isDark ? const Color(0xFF1C1F23) : AppColors.card,
-        margin: EdgeInsets.zero,
-      ),
-      appBarTheme: AppBarTheme(
+      scaffoldBackgroundColor: T.bg,
+      appBarTheme: const AppBarTheme(
         centerTitle: false,
         elevation: 0,
-        scrolledUnderElevation: 0.5,
-        backgroundColor: isDark ? const Color(0xFF121417) : AppColors.background,
+        scrolledUnderElevation: 0,
+        backgroundColor: T.bg,
+        foregroundColor: T.text1,
       ),
-      navigationBarTheme: const NavigationBarThemeData(),
+      cardTheme: CardThemeData(
+        elevation: 0,
+        margin: EdgeInsets.zero,
+        color: T.surface,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(T.rCard),
+          side: const BorderSide(color: T.border),
+        ),
+      ),
+      navigationBarTheme: NavigationBarThemeData(
+        backgroundColor: T.surface,
+        indicatorColor: T.surface2,
+        iconTheme: WidgetStatePropertyAll(IconThemeData(color: T.text2)),
+        labelTextStyle: WidgetStatePropertyAll(T.label(size: 11)),
+      ),
+      navigationRailTheme: NavigationRailThemeData(
+        backgroundColor: T.surface,
+        indicatorColor: T.surface2,
+      ),
+      dividerTheme: const DividerThemeData(color: T.border, thickness: 1),
       inputDecorationTheme: InputDecorationTheme(
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
         isDense: true,
-      ),
-      dividerTheme: DividerThemeData(
-        color: scheme.outlineVariant.withValues(alpha: 0.4),
-        thickness: 0.5,
+        filled: true,
+        fillColor: T.surface2,
+        hintStyle: const TextStyle(color: T.text3),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(T.rInput),
+          borderSide: BorderSide.none,
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(T.rInput),
+          borderSide: const BorderSide(color: T.accent),
+        ),
       ),
       textTheme: TextTheme(
-        // Large figures for money amounts.
-        headlineMedium: TextStyle(
-          fontSize: 32,
-          fontWeight: FontWeight.w700,
-          fontFeatures: const [FontFeature.tabularFigures()],
-        ),
-        titleLarge: TextStyle(
-          fontSize: 18,
-          fontWeight: FontWeight.w600,
-          fontFeatures: const [FontFeature.tabularFigures()],
-        ),
-        titleMedium: TextStyle(
-          fontSize: 15,
-          fontWeight: FontWeight.w600,
-          fontFeatures: const [FontFeature.tabularFigures()],
-        ),
-        bodyMedium: TextStyle(
-          fontSize: 14,
-          fontFeatures: const [FontFeature.tabularFigures()],
-        ),
+        headlineMedium: T.mono(size: 30, weight: FontWeight.w700),
+        titleLarge: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: T.text1),
+        titleMedium: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: T.text1),
+        bodyMedium: const TextStyle(fontSize: 14, color: T.text1),
+        bodySmall: const TextStyle(fontSize: 12, color: T.text2),
       ),
     );
   }
 }
 
-/// Up/down color helper honoring theme brightness.
 extension UpDownColor on BuildContext {
-  Color upColor() => AppColors.up;
-  Color downColor() => AppColors.down;
-
-  /// Red for positive change, green for negative (China convention).
-  Color changeColor(double value) => value >= 0 ? AppColors.up : AppColors.down;
+  Color upColor() => T.up;
+  Color downColor() => T.down;
+  Color changeColor(double value) => T.changeColor(value);
 }

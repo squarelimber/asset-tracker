@@ -11,7 +11,8 @@ import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../../app/providers.dart';
-import '../../app/theme.dart';
+import '../../ui/components/app_bar_actions.dart';
+import '../../ui/tokens.dart';
 import '../../core/formats.dart';
 import '../../core/responsive.dart';
 import '../../services/backup_service.dart';
@@ -35,7 +36,10 @@ class SettingsPage extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     return Scaffold(
-      appBar: AppBar(title: const Text('设置')),
+      appBar: AppBar(
+        title: const Text('设置'),
+        actions: [const TerminalAppBarActions()],
+      ),
       body: ResponsiveShell(
         child: SingleChildScrollView(
           child: Column(
@@ -61,7 +65,7 @@ class SettingsPage extends ConsumerWidget {
                     ListTile(
                       leading: const Icon(
                         Icons.download,
-                        color: AppColors.warning,
+                        color: T.warning,
                       ),
                       title: const Text('导入备份'),
                       subtitle: const Text('从 JSON 文件恢复（将覆盖当前全部数据）'),
@@ -216,7 +220,7 @@ class SettingsPage extends ConsumerWidget {
             child: const Text('取消'),
           ),
           FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: AppColors.up),
+            style: FilledButton.styleFrom(backgroundColor: T.up),
             onPressed: () => Navigator.pop(context, true),
             child: const Text('覆盖导入'),
           ),
@@ -235,7 +239,7 @@ class SettingsPage extends ConsumerWidget {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(result.message),
-        backgroundColor: result.ok ? null : AppColors.up,
+        backgroundColor: result.ok ? null : T.up,
       ),
     );
   }

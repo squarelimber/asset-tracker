@@ -3,6 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/providers.dart';
 import '../../app/theme.dart';
+import '../../ui/components/app_bar_actions.dart';
+import '../../ui/tokens.dart';
 import '../../core/formats.dart';
 import '../../core/responsive.dart';
 import '../../domain/trade_stats.dart';
@@ -21,7 +23,10 @@ class StatsPage extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final stats = ref.watch(_statsProvider);
     return Scaffold(
-      appBar: AppBar(title: const Text('统计')),
+      appBar: AppBar(
+        title: const Text('统计'),
+        actions: [const TerminalAppBarActions()],
+      ),
       body: ResponsiveShell(
         child: stats.when(
           data: (s) {
@@ -44,12 +49,12 @@ class StatsPage extends ConsumerWidget {
                     _StatCard(
                       label: '累计分红',
                       value: '¥${Formats.amount(s.dividendTotal)}',
-                      color: AppColors.up,
+                      color: T.up,
                     ),
                     _StatCard(
                       label: '累计买入',
                       value: '¥${Formats.amount(s.boughtTotal)}',
-                      color: AppColors.primary,
+                      color: T.accent,
                     ),
                     _StatCard(
                       label: '累计卖出',

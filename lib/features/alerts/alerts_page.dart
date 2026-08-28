@@ -5,7 +5,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/providers.dart';
-import '../../app/theme.dart';
+import '../../ui/components/app_bar_actions.dart';
+import '../../ui/tokens.dart';
 import '../../core/enums.dart';
 import '../../core/formats.dart';
 import '../../core/responsive.dart';
@@ -45,6 +46,7 @@ class _AlertsPageState extends ConsumerState<AlertsPage> {
       appBar: AppBar(
         title: const Text('提醒'),
         actions: [
+          const TerminalAppBarActions(),
           IconButton(
             tooltip: '立即检查',
             onPressed: _running ? null : _runNow,
@@ -124,7 +126,7 @@ class _AlertsPageState extends ConsumerState<AlertsPage> {
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('取消')),
           FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: AppColors.up),
+            style: FilledButton.styleFrom(backgroundColor: T.up),
             onPressed: () => Navigator.pop(context, true),
             child: const Text('删除'),
           ),
@@ -265,9 +267,9 @@ class _EventTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final color = switch (event.title) {
-      '单日跌幅预警' => AppColors.up,
-      '集中度风险' => AppColors.warning,
-      '配置比例偏离' => AppColors.primary,
+      '单日跌幅预警' => T.up,
+      '集中度风险' => T.warning,
+      '配置比例偏离' => T.accent,
       _ => Colors.teal,
     };
     return Card(
@@ -346,8 +348,8 @@ IconData _iconFor(AlertRuleType type) => switch (type) {
     };
 
 Color _colorFor(AlertRuleType type) => switch (type) {
-      AlertRuleType.concentration => AppColors.warning,
-      AlertRuleType.assetRatio => AppColors.primary,
-      AlertRuleType.drawdown => AppColors.up,
+      AlertRuleType.concentration => T.warning,
+      AlertRuleType.assetRatio => T.accent,
+      AlertRuleType.drawdown => T.up,
       AlertRuleType.cashflow => Colors.teal,
     };

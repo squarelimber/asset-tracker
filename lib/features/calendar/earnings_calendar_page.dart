@@ -3,6 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/providers.dart';
 import '../../app/theme.dart';
+import '../../ui/components/app_bar_actions.dart';
+import '../../ui/tokens.dart';
 import '../../core/formats.dart';
 import '../../core/responsive.dart';
 import '../../domain/daily_earnings.dart';
@@ -71,7 +73,10 @@ class _EarningsCalendarPageState extends ConsumerState<EarningsCalendarPage> {
     ref.watch(historySyncProvider);
     final earnings = ref.watch(_earningsProvider);
     return Scaffold(
-      appBar: AppBar(title: const Text('收益日历')),
+      appBar: AppBar(
+        title: const Text('收益日历'),
+        actions: [const TerminalAppBarActions()],
+      ),
       body: earnings.when(
         data: (list) => _CalendarBody(
           earnings: list,
@@ -492,7 +497,7 @@ class _DayCell extends StatelessWidget {
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(10),
           color: isToday
-              ? AppColors.up.withValues(alpha: 0.10)
+              ? T.up.withValues(alpha: 0.10)
               : null,
         ),
         child: Column(
