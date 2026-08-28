@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:asset_tracker/features/holdings/invested_profit_field.dart';
+import 'package:asset_tracker/ui/pages/holdings/invested_profit_field.dart';
 
 void main() {
   testWidgets('fields stay empty when no invested amount recorded', (tester) async {
