@@ -49,6 +49,11 @@ class AppTheme {
         indicatorColor: T.surface2,
       ),
       dividerTheme: const DividerThemeData(color: T.border, thickness: 1),
+      snackBarTheme: const SnackBarThemeData(
+        backgroundColor: T.surface2,
+        contentTextStyle: TextStyle(color: T.text1, fontSize: 13),
+        behavior: SnackBarBehavior.floating,
+      ),
       inputDecorationTheme: InputDecorationTheme(
         isDense: true,
         filled: true,
