@@ -232,7 +232,7 @@ class _CalendarEntries extends StatelessWidget {
           child: _EntryTile(
             icon: Icons.calendar_month_outlined,
             label: '收益日历',
-            onTap: () => context.go('/earnings-calendar'),
+            onTap: () => context.push('/earnings-calendar'),
           ),
         ),
         const SizedBox(width: T.s3),
@@ -240,7 +240,7 @@ class _CalendarEntries extends StatelessWidget {
           child: _EntryTile(
             icon: Icons.table_chart_outlined,
             label: '产品收益日历',
-            onTap: () => context.go('/product-earnings'),
+            onTap: () => context.push('/product-earnings'),
           ),
         ),
       ],
