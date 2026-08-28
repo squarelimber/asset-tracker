@@ -4,8 +4,11 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:asset_tracker/app/providers.dart';
 import 'package:asset_tracker/core/enums.dart';
+import 'package:asset_tracker/core/formats.dart';
+import 'package:asset_tracker/data/database.dart';
 import 'package:asset_tracker/domain/product_monthly_earnings.dart';
-import 'package:asset_tracker/features/calendar/product_earnings_calendar_page.dart';
+import 'package:asset_tracker/ui/components/sparkline.dart';
+import 'package:asset_tracker/ui/pages/calendar/product_earnings_calendar_page.dart';
 
 /// A product with one baseline day and one profit day per month of [year],
 /// so every month has data (days = 2) and a deterministic rate. The value
@@ -39,6 +42,7 @@ Future<void> _pump(
   final nowYear = DateTime.now().year;
   await tester.pumpWidget(ProviderScope(
     overrides: [
+      alertEventsProvider.overrideWith((ref) => Stream.value(<AlertEventRow>[])),
       // The page starts on the current year; keep it empty so the real
       // provider (and its DB access) is never evaluated. Sync overrides skip
       // the loading state (no infinite spinner for pumpAndSettle).
@@ -62,17 +66,15 @@ void main() {
     await tester.tap(find.byTooltip('上一年'));
     await tester.pumpAndSettle();
 
+    final amount = '+${Formats.amountCompact(100)}';
     final name = find.text('产品甲');
     expect(name, findsOneWidget);
     final nameBefore = tester.getTopLeft(name);
     final headerBefore = tester.getTopLeft(find.text('1月'));
-    final cellBefore = tester.getTopLeft(find.text('+1.0%'));
+    final cellBefore = tester.getTopLeft(find.text(amount));
 
     final gridScroll = find
-        .ancestor(
-          of: find.text('+1.0%'),
-          matching: find.byType(SingleChildScrollView),
-        )
+        .ancestor(of: find.text(amount), matching: find.byType(SingleChildScrollView))
         .first;
     await tester.drag(gridScroll, const Offset(-200, 0));
     await tester.pumpAndSettle();
@@ -80,7 +82,7 @@ void main() {
     // The product name did not move.
     expect(tester.getTopLeft(name), nameBefore);
     // The grid scrolled left ...
-    final cellAfter = tester.getTopLeft(find.text('+1.0%'));
+    final cellAfter = tester.getTopLeft(find.text(amount));
     expect(cellAfter.dx, lessThan(cellBefore.dx - 100));
     // ... and the month header followed it.
     final headerAfter = tester.getTopLeft(find.text('1月'));
@@ -117,9 +119,8 @@ void main() {
     final firstRowBefore = tester.getTopLeft(firstRow);
     expect(firstRowBefore.dy, greaterThan(headerBefore.dy));
 
-    final vScroll = find
-        .ancestor(of: firstRow, matching: find.byType(SingleChildScrollView))
-        .first;
+    final vScroll =
+        find.ancestor(of: firstRow, matching: find.byType(CustomScrollView)).first;
     final vTopLeft = tester.getTopLeft(vScroll);
     await tester.dragFrom(
       vTopLeft + const Offset(40, 30),
@@ -134,28 +135,27 @@ void main() {
     expect(firstRowAfter.dy, lessThan(firstRowBefore.dy - 100));
   });
 
-  testWidgets('dragging the month header scrolls the grid horizontally',
+  testWidgets('month header follows the grid but is not independently scrollable',
       (tester) async {
     await _pump(tester, [
       _product('产品甲', [100, 200, 300, 400, 500, 600, 0, 0, 0, 0, 0, 0], 2025),
-      _product('产品乙', [10, 20, 30, 40, 50, 60, 0, 0, 0, 0, 0, 0], 2025),
     ]);
     await tester.tap(find.byTooltip('上一年'));
     await tester.pumpAndSettle();
 
-    final headerScroll = find
-        .ancestor(of: find.text('1月'), matching: find.byType(SingleChildScrollView))
+    final amount = '+${Formats.amountCompact(100)}';
+    final cellBefore = tester.getTopLeft(find.text(amount));
+    final headerTransform = find
+        .ancestor(of: find.text('1月'), matching: find.byType(Transform))
         .first;
-    final cellBefore = tester.getTopLeft(find.text('+1.0%'));
-
-    await tester.drag(headerScroll, const Offset(-150, 0));
+    await tester.drag(headerTransform, const Offset(-150, 0));
     await tester.pumpAndSettle();
 
-    final cellAfter = tester.getTopLeft(find.text('+1.0%'));
-    expect(cellAfter.dx, lessThan(cellBefore.dx - 50));
+    final cellAfter = tester.getTopLeft(find.text(amount));
+    expect(cellAfter, cellBefore);
   });
 
-  testWidgets('month view lists products of the selected month', (tester) async {
+  testWidgets('month view lists each product with its sparkline', (tester) async {
     await _pump(tester, [
       _product('产品甲', [100, 200, 300, 400, 500, 600, 0, 0, 0, 0, 0, 0], 2025),
       _product('产品乙', [10, 20, 30, 40, 50, 60, 0, 0, 0, 0, 0, 0], 2025),
@@ -167,5 +167,6 @@ void main() {
 
     expect(find.text('产品甲'), findsOneWidget);
     expect(find.text('产品乙'), findsOneWidget);
+    expect(find.byType(Sparkline), findsNWidgets(2));
   });
 }

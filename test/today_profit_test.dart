@@ -2,7 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:asset_tracker/core/symbols.dart';
 import 'package:asset_tracker/data/database.dart';
-import 'package:asset_tracker/features/holdings/holdings_page.dart';
+import 'package:asset_tracker/ui/pages/holdings/holdings_page.dart';
 
 HoldingRow _holding({
   String? symbol,

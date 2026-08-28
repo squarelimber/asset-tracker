@@ -7,7 +7,7 @@ import 'package:asset_tracker/app/providers.dart';
 import 'package:asset_tracker/core/enums.dart';
 import 'package:asset_tracker/data/asset_dao.dart';
 import 'package:asset_tracker/data/database.dart';
-import 'package:asset_tracker/features/holdings/holdings_page.dart';
+import 'package:asset_tracker/ui/pages/holdings/holdings_page.dart';
 
 void main() {
   testWidgets('add holding dialog saves a share-based holding', (tester) async {

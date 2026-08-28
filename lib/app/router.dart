@@ -1,17 +1,17 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../features/accounts/account_detail_page.dart';
-import '../features/accounts/accounts_page.dart';
-import '../features/alerts/alerts_page.dart';
-import '../features/calendar/earnings_calendar_page.dart';
-import '../features/calendar/product_earnings_calendar_page.dart';
-import '../features/holdings/holdings_page.dart';
-import '../features/markets/markets_page.dart';
-import '../features/portfolio/portfolio_page.dart';
-import '../features/settings/settings_page.dart';
+import '../ui/pages/accounts/account_detail_page.dart';
+import '../ui/pages/accounts/accounts_page.dart';
+import '../ui/pages/alerts/alerts_page.dart';
+import '../ui/pages/calendar/earnings_calendar_page.dart';
+import '../ui/pages/calendar/product_earnings_calendar_page.dart';
+import '../ui/pages/holdings/holdings_page.dart';
+import '../ui/pages/markets/markets_page.dart';
+import '../ui/pages/portfolio/portfolio_page.dart';
+import '../ui/pages/settings/settings_page.dart';
 import '../ui/shell/shell_page.dart';
-import '../features/stats/stats_page.dart';
+import '../ui/pages/stats/stats_page.dart';
 
 final routerProvider = Provider<GoRouter>((ref) {
   return GoRouter(
@@ -34,7 +34,9 @@ final routerProvider = Provider<GoRouter>((ref) {
           ),
           GoRoute(
             path: '/holdings',
-            builder: (context, state) => const HoldingsPage(),
+            builder: (context, state) => HoldingsPage(
+              initialQuery: state.extra as String?,
+            ),
           ),
           GoRoute(
             path: '/accounts',
