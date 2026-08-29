@@ -3,6 +3,7 @@ import 'package:asset_tracker/ui/components/allocation_bars.dart';
 import 'package:asset_tracker/ui/components/delta_text.dart';
 import 'package:asset_tracker/ui/components/heat_cell.dart';
 import 'package:asset_tracker/ui/components/terminal_card.dart';
+import 'package:asset_tracker/ui/components/terminal_fab.dart';
 import 'package:asset_tracker/ui/tokens.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -49,5 +50,18 @@ void main() {
     final deco = container.decoration! as BoxDecoration;
     expect(deco.color, T.surface);
     expect(deco.border!.top.color, T.border);
+  });
+
+  testWidgets('TerminalFab is flat accent button with label', (tester) async {
+    await tester.pumpWidget(const MaterialApp(
+      home: Scaffold(
+        floatingActionButton: TerminalFab(onPressed: null, icon: Icons.add, label: '添加'),
+      ),
+    ));
+    final button = tester.widget<ElevatedButton>(find.byType(ElevatedButton));
+    expect(button.style!.backgroundColor!.resolve(const {}), T.accent);
+    expect(button.style!.elevation!.resolve(const {}), 0);
+    expect(find.text('添加'), findsOneWidget);
+    expect(find.byIcon(Icons.add), findsOneWidget);
   });
 }
