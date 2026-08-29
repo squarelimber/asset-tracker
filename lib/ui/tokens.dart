@@ -27,6 +27,12 @@ class T {
   static const double s4 = 16;
   static const double s5 = 24;
 
+  /// Monospace style for all numeric values (terminal look).
+  ///
+  /// `monospace` resolves to the platform mono family (Droid Sans Mono on
+  /// Android, the CSS generic on web); the fallback chain covers Windows
+  /// (Consolas) and iOS (Menlo), where the bare name does not resolve.
+  /// CJK glyphs fall back per-glyph to the system font automatically.
   static TextStyle mono({
     double size = 14,
     Color? color,
@@ -36,6 +42,13 @@ class T {
         fontSize: size,
         color: color ?? text1,
         fontWeight: weight,
+        fontFamily: 'monospace',
+        fontFamilyFallback: const [
+          'Consolas',
+          'Menlo',
+          'Droid Sans Mono',
+          'Courier New',
+        ],
         fontFeatures: const [FontFeature.tabularFigures()],
       );
 
