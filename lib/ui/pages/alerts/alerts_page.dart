@@ -15,6 +15,7 @@ import '../../components/data_row.dart';
 import '../../components/empty_state.dart';
 import '../../components/form_fields.dart';
 import '../../components/section_header.dart';
+import '../../components/terminal_fab.dart';
 import '../../tokens.dart';
 
 final alertServiceProvider = Provider<AlertService>(
@@ -64,10 +65,10 @@ class _AlertsPageState extends ConsumerState<AlertsPage> {
           const TerminalAppBarActions(),
         ],
       ),
-      floatingActionButton: FloatingActionButton.extended(
+      floatingActionButton: TerminalFab(
         onPressed: () => _showAddRuleDialog(context),
-        icon: const Icon(Icons.add),
-        label: const Text('添加规则'),
+        icon: Icons.add,
+        label: '添加规则',
       ),
       body: ResponsiveShell(
         child: ListView(

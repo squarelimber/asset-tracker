@@ -17,6 +17,7 @@ import '../../components/form_fields.dart';
 import '../../components/kpi_grid.dart';
 import '../../components/section_header.dart';
 import '../../components/terminal_card.dart';
+import '../../components/terminal_fab.dart';
 import '../../tokens.dart';
 import '../transaction_dialogs.dart';
 
@@ -31,10 +32,10 @@ class AccountsPage extends ConsumerWidget {
         title: const Text('账户'),
         actions: const [TerminalAppBarActions()],
       ),
-      floatingActionButton: FloatingActionButton.extended(
+      floatingActionButton: TerminalFab(
         onPressed: () => _showAccountDialog(context, ref),
-        icon: const Icon(Icons.add),
-        label: const Text('添加账户'),
+        icon: Icons.add,
+        label: '添加账户',
       ),
       body: accounts.when(
         data: (list) => list.isEmpty

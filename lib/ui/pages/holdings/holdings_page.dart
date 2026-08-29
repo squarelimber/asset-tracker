@@ -13,6 +13,7 @@ import '../../components/delta_text.dart';
 import '../../components/empty_state.dart';
 import '../../components/section_header.dart';
 import '../../components/terminal_card.dart';
+import '../../components/terminal_fab.dart';
 import '../../tokens.dart';
 import 'holding_detail_sheet.dart';
 import 'holding_dialogs.dart';
@@ -198,10 +199,10 @@ class _HoldingsPageState extends ConsumerState<HoldingsPage> {
           ),
         ],
       ),
-      floatingActionButton: FloatingActionButton.extended(
+      floatingActionButton: TerminalFab(
         onPressed: () => showAddHoldingDialog(context, ref),
-        icon: const Icon(Icons.add),
-        label: const Text('添加持仓'),
+        icon: Icons.add,
+        label: '添加持仓',
       ),
       body: holdings.when(
         data: (list) {
