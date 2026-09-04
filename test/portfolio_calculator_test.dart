@@ -1,4 +1,4 @@
-﻿import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_test/flutter_test.dart';
 
 import 'package:asset_tracker/core/enums.dart';
 import 'package:asset_tracker/data/database.dart';
@@ -28,6 +28,7 @@ HoldingRow _holding({
     currency: currency,
     costFxRate: costFxRate,
     note: null,
+    archived: false,
     createdAt: DateTime(2026, 1, 1),
     updatedAt: DateTime(2026, 1, 1),
   );

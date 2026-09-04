@@ -234,6 +234,7 @@ class SyncService {
                 : Value(row['riskLevel'].toString()),
             currency: Value(row['currency']?.toString() ?? 'CNY'),
             note: row['note'] == null ? const Value.absent() : Value(row['note'].toString()),
+            archived: Value(row['archived'] == true),
             createdAt: Value(parseIso(row['createdAt']) ?? DateTime.now()),
             updatedAt: Value(updatedAt),
           ));
@@ -340,6 +341,7 @@ class SyncService {
         riskLevel: row['riskLevel'] as String?,
         currency: row['currency']?.toString() ?? 'CNY',
         note: row['note'] as String?,
+        archived: row['archived'] == true,
         createdAt: parseIso(row['createdAt']) ?? DateTime.now(),
         updatedAt: parseIso(row['updatedAt']) ?? DateTime.now(),
       );

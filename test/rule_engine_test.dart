@@ -1,4 +1,4 @@
-﻿import 'dart:convert';
+import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
 
@@ -43,6 +43,7 @@ HoldingRow _holding({
     latestPrice: price,
     currency: 'CNY',
     note: null,
+    archived: false,
     createdAt: DateTime(2026, 1, 1),
     updatedAt: DateTime(2026, 1, 1),
   );

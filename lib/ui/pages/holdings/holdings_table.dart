@@ -5,8 +5,11 @@ import '../../../app/providers.dart';
 import '../../../core/enums.dart';
 import '../../../core/formats.dart';
 import '../../../data/database.dart';
+import '../../../domain/closed_holding.dart';
+import '../../../domain/trade_stats.dart';
 import '../../components/delta_text.dart';
 import '../../components/empty_state.dart';
+import '../../components/status_chip.dart';
 import '../../tokens.dart';
 
 enum HoldingSection { assets, liabilities }
@@ -98,12 +101,31 @@ class _TableRow extends ConsumerWidget {
     final type = AssetType.fromStorage(h.assetType);
     final isLiability = type == AssetType.liability;
     final isAmount = type.isAmountBased;
+    final closed = isHoldingClosed(h);
     final marketValue = isAmount ? h.quantity : h.quantity * h.latestPrice;
     final cost = isAmount
         ? (h.costPrice > 0 ? h.costPrice : h.quantity)
         : h.quantity * h.costPrice;
     final profit = marketValue - cost;
     final profitPct = cost == 0 ? 0.0 : profit / cost;
+    // Sold-out positions show their realized P&L instead of live quotes.
+    final closedTxns = closed && !isLiability
+        ? ref.watch(transactionsByHoldingProvider(h.id)).valueOrNull ??
+            const <TransactionRow>[]
+        : const <TransactionRow>[];
+    final realized = closed && !isLiability
+        ? (TradeStatsCalculator.realizedProfitByHolding(
+            closedTxns,
+            {h.id: h.costPrice},
+          )[h.id] ??
+          0)
+        : 0.0;
+    final invested = closedTxns
+        .where((t) => TransactionType.fromStorage(t.type) == TransactionType.buy)
+        .fold(0.0, (a, t) => a + t.amount);
+    final realizedPct = closed && !isLiability && invested > 0
+        ? realized / invested
+        : null;
     final hide = ref.watch(hideAmountsProvider);
     final dash = Text('--', style: T.mono(size: 13, color: T.text3));
     return InkWell(
@@ -122,14 +144,16 @@ class _TableRow extends ConsumerWidget {
                 children: [
                   Icon(type.icon, size: 14, color: type.color),
                   const SizedBox(width: 8),
-                  Expanded(
+                  Flexible(
                     child: Text(
                       h.name,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: T.mono(size: 14, color: T.text1),
+                      style: T.mono(size: 14, color: closed || h.archived ? T.text3 : T.text1),
                     ),
                   ),
+                  if (closed) StatusChip(closedHoldingLabel(h)),
+                  if (h.archived) const StatusChip('已归档'),
                 ],
               ),
             ),
@@ -169,7 +193,7 @@ class _TableRow extends ConsumerWidget {
               flex: 2,
               child: Align(
                 alignment: Alignment.centerRight,
-                child: isAmount
+                child: isAmount || closed
                     ? dash
                     : Text(Formats.smartNum(h.latestPrice),
                         style: T.mono(size: 13, color: T.text1)),
@@ -184,27 +208,50 @@ class _TableRow extends ConsumerWidget {
                         hide ? '****' : Formats.money(marketValue, h.currency),
                         style: T.mono(size: 13, color: T.down),
                       )
-                    : Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          DeltaText(
-                            value: profitPct,
-                            text: hide
-                                ? '****'
-                                : '${profit >= 0 ? '+' : ''}${Formats.money(profit, h.currency)}',
-                          ),
-                          const SizedBox(width: 6),
-                          Text(
-                            '(${Formats.pct(profitPct)})',
-                            style: T.mono(size: 12, color: T.changeColor(profit)),
-                          ),
-                          const SizedBox(width: 10),
-                          Text(
-                            hide ? '****' : Formats.money(marketValue, h.currency),
-                            style: T.mono(size: 11, color: T.text3),
-                          ),
-                        ],
-                      ),
+                    : closed && isAmount
+                        ? Text('已结清', style: T.mono(size: 12, color: T.text3))
+                        : closed
+                            ? Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  DeltaText(
+                                    value: realizedPct ?? 0,
+                                    text: hide
+                                        ? '****'
+                                        : '${realized >= 0 ? '+' : ''}${Formats.money(realized, h.currency)}',
+                                  ),
+                                  if (realizedPct != null) ...[
+                                    const SizedBox(width: 6),
+                                    Text(
+                                      '(${Formats.pct(realizedPct)})',
+                                      style: T.mono(size: 12, color: T.changeColor(realized)),
+                                    ),
+                                  ],
+                                  const SizedBox(width: 8),
+                                  Text('已实现', style: T.mono(size: 10, color: T.text3)),
+                                ],
+                              )
+                            : Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  DeltaText(
+                                    value: profitPct,
+                                    text: hide
+                                        ? '****'
+                                        : '${profit >= 0 ? '+' : ''}${Formats.money(profit, h.currency)}',
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    '(${Formats.pct(profitPct)})',
+                                    style: T.mono(size: 12, color: T.changeColor(profit)),
+                                  ),
+                                  const SizedBox(width: 10),
+                                  Text(
+                                    hide ? '****' : Formats.money(marketValue, h.currency),
+                                    style: T.mono(size: 11, color: T.text3),
+                                  ),
+                                ],
+                              ),
               ),
             ),
           ],

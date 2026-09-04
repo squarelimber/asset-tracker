@@ -24,6 +24,7 @@ HoldingRow _amountHolding({
     costFxRate: null,
     riskLevel: null,
     note: null,
+    archived: false,
   );
 }
 
@@ -142,6 +143,7 @@ void main() {
       costFxRate: null,
       riskLevel: null,
       note: null,
+      archived: false,
     );
     final from = DateTime(2026, 1, 1);
     final to = DateTime(2026, 1, 11);

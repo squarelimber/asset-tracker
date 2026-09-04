@@ -9,11 +9,13 @@ import '../../../core/formats.dart';
 import '../../../core/responsive.dart';
 import '../../../core/symbols.dart';
 import '../../../data/database.dart';
+import '../../../domain/closed_holding.dart';
 import '../../components/app_bar_actions.dart';
 import '../../components/data_row.dart';
 import '../../components/delta_text.dart';
 import '../../components/empty_state.dart';
 import '../../components/section_header.dart';
+import '../../components/status_chip.dart';
 import '../../components/terminal_card.dart';
 import '../../components/terminal_fab.dart';
 import '../../tokens.dart';
@@ -31,6 +33,19 @@ enum HoldingSort {
   nameAsc('名称 A-Z');
 
   const HoldingSort(this.label);
+
+  final String label;
+}
+
+/// Lifecycle filters for the holdings list. 「全部」hides archived rows
+/// (they stay reachable through the 已归档 filter and the detail sheet).
+enum HoldingFilter {
+  all('全部'),
+  active('仅当前持仓'),
+  closed('仅已清仓'),
+  archived('已归档');
+
+  const HoldingFilter(this.label);
 
   final String label;
 }
@@ -100,6 +115,7 @@ class HoldingsPage extends ConsumerStatefulWidget {
 class _HoldingsPageState extends ConsumerState<HoldingsPage> {
   HoldingSection _section = HoldingSection.assets;
   HoldingSort _sort = HoldingSort.defaultOrder;
+  HoldingFilter _filter = HoldingFilter.all;
   bool _searching = false;
   final _searchCtrl = TextEditingController();
   String _query = '';
@@ -127,17 +143,36 @@ class _HoldingsPageState extends ConsumerState<HoldingsPage> {
     super.dispose();
   }
 
+  bool _matchesFilter(HoldingRow h) {
+    switch (_filter) {
+      case HoldingFilter.all:
+        return !h.archived;
+      case HoldingFilter.active:
+        return !h.archived && !isHoldingClosed(h);
+      case HoldingFilter.closed:
+        return !h.archived && isHoldingClosed(h);
+      case HoldingFilter.archived:
+        return h.archived;
+    }
+  }
+
   List<HoldingRow> _sorted(List<HoldingRow> list) {
-    final filtered = _query.trim().isEmpty
+    var filtered = _query.trim().isEmpty
         ? [...list]
         : list
             .where((h) =>
                 h.name.toLowerCase().contains(_query.toLowerCase()) ||
                 (h.symbol ?? '').toLowerCase().contains(_query.toLowerCase()))
             .toList();
+    filtered = filtered.where(_matchesFilter).toList();
     switch (_sort) {
       case HoldingSort.defaultOrder:
-        break;
+        // Active holdings keep their database order; fully exited ones sink
+        // to the bottom, most recently touched first.
+        final active = filtered.where((h) => !isHoldingClosed(h)).toList();
+        final closed = filtered.where(isHoldingClosed).toList()
+          ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+        return [...active, ...closed];
       case HoldingSort.amountDesc:
         filtered.sort((a, b) => _holdingMarketValue(b).compareTo(_holdingMarketValue(a)));
       case HoldingSort.amountAsc:
@@ -177,6 +212,19 @@ class _HoldingsPageState extends ConsumerState<HoldingsPage> {
                 _searchCtrl.clear();
               }
             }),
+          ),
+          PopupMenuButton<HoldingFilter>(
+            tooltip: '筛选',
+            icon: Icon(
+              _filter == HoldingFilter.all ? Icons.filter_list : Icons.filter_alt,
+              color: _filter == HoldingFilter.all ? null : T.accent,
+            ),
+            initialValue: _filter,
+            onSelected: (f) => setState(() => _filter = f),
+            itemBuilder: (_) => [
+              for (final f in HoldingFilter.values)
+                PopupMenuItem(value: f, child: Text(f.label)),
+            ],
           ),
           PopupMenuButton<HoldingSort>(
             tooltip: '排序',
@@ -261,7 +309,11 @@ class _HoldingsPageState extends ConsumerState<HoldingsPage> {
                           ),
                         ),
                         if (assets.isEmpty)
-                          const EmptyState(message: '暂无资产')
+                          EmptyState(
+                            message: _filter == HoldingFilter.all
+                                ? '暂无资产'
+                                : '没有符合条件的持仓',
+                          )
                         else
                           for (final h in assets)
                             _HoldingRowCard(
@@ -277,7 +329,11 @@ class _HoldingsPageState extends ConsumerState<HoldingsPage> {
                           ),
                         ),
                         if (liabilities.isEmpty)
-                          const EmptyState(message: '暂无负债')
+                          EmptyState(
+                            message: _filter == HoldingFilter.all
+                                ? '暂无负债'
+                                : '没有符合条件的持仓',
+                          )
                         else
                           for (final h in liabilities)
                             _HoldingRowCard(
@@ -335,15 +391,26 @@ class _HoldingRowCard extends ConsumerWidget {
     final todayProfit = todayProfitOf(todayRow, holding.quantity);
     final todayPct = todayChangePctOf(todayRow);
     final hide = ref.watch(hideAmountsProvider);
-    final subtitle = type == AssetType.liability
-        ? '负债 · 起始 ${Formats.date(holding.purchaseDate ?? holding.createdAt)}'
-        : type.isAmountBased
-            ? '持有 ${Formats.holdingDuration(holding.purchaseDate ?? holding.createdAt)}'
-            : '${holding.symbol ?? '手动净值'} · 持有 ${Formats.holdingDuration(holding.purchaseDate ?? holding.createdAt)}';
+    final closed = isHoldingClosed(holding);
+    final subtitle = closed
+        ? (type == AssetType.liability
+            ? '已还清'
+            : type.isAmountBased
+                ? '已结清'
+                : '清仓 · ${holding.symbol ?? '手动净值'}')
+        : type == AssetType.liability
+            ? '负债 · 起始 ${Formats.date(holding.purchaseDate ?? holding.createdAt)}'
+            : type.isAmountBased
+                ? '持有 ${Formats.holdingDuration(holding.purchaseDate ?? holding.createdAt)}'
+                : '${holding.symbol ?? '手动净值'} · 持有 ${Formats.holdingDuration(holding.purchaseDate ?? holding.createdAt)}';
     return TerminalCard(
       onTap: onTap,
       child: DataRow(
         title: holding.name,
+        titleSuffix: closed
+            ? StatusChip(closedHoldingLabel(holding))
+            : (holding.archived ? const StatusChip('已归档') : null),
+        dimmed: closed || holding.archived,
         subtitle: Text(subtitle, style: T.label(size: 11, color: T.text3)),
         leading: Icon(type.icon, size: 16, color: type.color),
         showChevron: true,

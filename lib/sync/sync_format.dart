@@ -67,6 +67,7 @@ class SyncFormatter {
         'riskLevel': h.riskLevel,
         'currency': h.currency,
         'note': h.note,
+        'archived': h.archived,
         'createdAt': h.createdAt.toIso8601String(),
         'updatedAt': h.updatedAt.toIso8601String(),
       };
