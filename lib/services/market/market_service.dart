@@ -67,10 +67,12 @@ class MarketService {
           MarketSource.coingecko: CoinGeckoSource(),
         };
 
-  /// Refresh prices for all market-linked holdings.
+  /// Refresh prices for all market-linked holdings. Fully exited positions
+  /// (quantity <= 0) are skipped: they have no live position to price.
   Future<MarketRefreshResult> refreshAll() async {
     final holdings = (await _dao.getHoldings())
-        .where((h) => AssetType.fromStorage(h.assetType).isMarketLinked)
+        .where((h) =>
+            AssetType.fromStorage(h.assetType).isMarketLinked && h.quantity > 0)
         .toList();
 
     if (holdings.isEmpty) {

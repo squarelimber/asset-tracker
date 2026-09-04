@@ -6,11 +6,13 @@ import '../../../core/enums.dart';
 import '../../../core/formats.dart';
 import '../../../core/history_sync.dart';
 import '../../../data/database.dart';
+import '../../../domain/closed_holding.dart';
 import '../../components/app_bar_actions.dart';
 import '../../components/data_row.dart';
 import '../../components/delta_text.dart';
 import '../../components/empty_state.dart';
 import '../../components/section_header.dart';
+import '../../components/status_chip.dart';
 import '../../components/terminal_card.dart';
 import '../../tokens.dart';
 import '../transaction_dialogs.dart';
@@ -98,8 +100,13 @@ class _HoldingRow extends ConsumerWidget {
     final profit = marketValue - cost;
     final profitPct = cost == 0 ? 0.0 : profit / cost;
     final hide = ref.watch(hideAmountsProvider);
+    final closed = isHoldingClosed(h);
     return DataRow(
       title: h.name,
+      titleSuffix: closed
+          ? StatusChip(closedHoldingLabel(h))
+          : (h.archived ? const StatusChip('已归档') : null),
+      dimmed: closed || h.archived,
       leading: Icon(type.icon, size: 16, color: type.color),
       subtitle: Text(
         type == AssetType.liability

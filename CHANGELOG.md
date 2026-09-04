@@ -2,6 +2,24 @@
 
 All notable changes to Asset Tracker. Entries are condensed from the commit history; dates follow the release tags.
 
+## [Unreleased]
+
+### Added
+
+- Sold-out (fully redeemed / fully sold) positions are first-class citizens:
+  - Lifecycle filter on the holdings page: 全部 / 仅当前持仓 / 仅已清仓 / 已归档; default view keeps active positions on top, exited ones sink to the bottom (most recently touched first)
+  - Status badges on list rows and the detail sheet: 清仓 (share-based), 已结清 (amount-based), 已还清 (liabilities), 已归档
+  - Detail sheet for exited share-based positions shows realized P&L (Σ (sell price − unit cost) × quantity, with return % against invested capital) and the last-sell date; holding duration ends at the last sell
+  - Exited amount-based positions show 已结清 with zero residual cost instead of a misleading live quote
+  - Archive / restore from the detail sheet menu: archived positions stay in the database and the earnings calendar but are hidden from the default views (reachable via the 已归档 filter)
+  - Desktop holdings table shows realized P&L for exited positions instead of stale quotes
+- Deleting a holding that has transaction history now warns that its earnings-calendar history will be permanently removed and suggests archiving instead
+
+### Changed
+
+- Market refresh skips fully exited positions (no live position to price)
+- Schema v8: `holdings.archived` column (defaults to false), migrated in place
+
 ## [0.8.0] - 2026-09-04
 
 ### Added

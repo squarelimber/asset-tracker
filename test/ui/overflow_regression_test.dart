@@ -93,6 +93,7 @@ void main() {
       costPrice: 900,
       latestPrice: 1000,
       currency: 'CNY',
+      archived: false,
       createdAt: DateTime(2026, 1, 1),
       updatedAt: DateTime(2026, 1, 1),
     );
@@ -128,6 +129,7 @@ void main() {
       costPrice: 900,
       latestPrice: 1000,
       currency: 'CNY',
+      archived: false,
       createdAt: DateTime(2026, 1, 1),
       updatedAt: DateTime(2026, 1, 1),
     );
@@ -142,6 +144,7 @@ void main() {
       costPrice: 10,
       latestPrice: 12,
       currency: 'CNY',
+      archived: false,
       createdAt: DateTime(2026, 1, 1),
       updatedAt: DateTime(2026, 1, 1),
     );
@@ -155,6 +158,7 @@ void main() {
       costPrice: 0,
       latestPrice: 0,
       currency: 'CNY',
+      archived: false,
       createdAt: DateTime(2026, 1, 1),
       updatedAt: DateTime(2026, 1, 1),
     );

@@ -22,7 +22,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase([QueryExecutor? executor]) : super(executor ?? _openConnection());
 
   @override
-  int get schemaVersion => 7;
+  int get schemaVersion => 8;
 
   static QueryExecutor _openConnection() {
     // Web requires explicit web options: sqlite3.wasm and drift_worker.js
@@ -97,6 +97,13 @@ class AppDatabase extends _$AppDatabase {
               'UPDATE alert_rules SET updated_at = created_at;',
             );
             await m.createTable(db.syncTombstones);
+          }
+          // v7 -> v8: add archived flag to holdings (sold-out products can be
+          // archived instead of deleted, keeping their earnings-calendar
+          // history). Constant default, so drift's addColumn is safe here.
+          if (from < 8) {
+            final db = m.database as AppDatabase;
+            await m.addColumn(db.holdings, db.holdings.archived);
           }
         },
       );

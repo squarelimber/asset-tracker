@@ -12,6 +12,8 @@ class DataRow extends StatelessWidget {
     this.leading,
     this.onTap,
     this.showChevron = false,
+    this.titleSuffix,
+    this.dimmed = false,
   });
 
   final String title;
@@ -21,10 +23,33 @@ class DataRow extends StatelessWidget {
   final VoidCallback? onTap;
   final bool showChevron;
 
+  /// Small chip rendered right after the title (e.g. 清仓 / 已还清).
+  final Widget? titleSuffix;
+
+  /// Dim the title for inactive rows (sold-out / archived holdings).
+  final bool dimmed;
+
   @override
   Widget build(BuildContext context) {
+    final titleStyle = TextStyle(fontSize: 14, color: dimmed ? T.text3 : T.text1);
     final titleCol = <Widget>[
-      Text(title, style: const TextStyle(fontSize: 14, color: T.text1)),
+      if (titleSuffix == null)
+        Text(title, style: titleStyle)
+      else
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Flexible(
+              child: Text(
+                title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: titleStyle,
+              ),
+            ),
+            titleSuffix!,
+          ],
+        ),
     ];
     if (subtitle != null) titleCol.add(subtitle!);
     final row = Padding(

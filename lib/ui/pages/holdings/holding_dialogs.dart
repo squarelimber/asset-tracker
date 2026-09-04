@@ -730,11 +730,26 @@ Future<void> confirmDeleteHolding(
   WidgetRef ref,
   HoldingRow holding,
 ) async {
+  final hasTxns = (await ref.read(daoProvider).getTransactionsForHolding(holding.id)).isNotEmpty;
   final ok = await showDialog<bool>(
     context: context,
     builder: (context) => AlertDialog(
       title: const Text('删除持仓'),
-      content: Text('确定删除「${holding.name}」吗？相关交易流水也会被删除。'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('确定删除「${holding.name}」吗？相关交易流水也会被删除。'),
+          if (hasTxns) ...[
+            const SizedBox(height: 12),
+            Text(
+              '⚠️ 收益日历中该产品的历史收益将永久删除。'
+              '如需保留历史，可改用「归档」。',
+              style: const TextStyle(color: T.warning, fontSize: 12.5),
+            ),
+          ],
+        ],
+      ),
       actions: [
         TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('取消')),
         FilledButton(

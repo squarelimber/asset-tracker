@@ -103,6 +103,20 @@ class AssetDao {
         purchaseDate: Value(holding.purchaseDate),
         riskLevel: Value(holding.riskLevel),
         note: Value(holding.note),
+        archived: Value(holding.archived),
+        updatedAt: Value(now ?? DateTime.now()),
+      ),
+    );
+  }
+
+  /// Archives (or un-archives) a holding. Archived rows stay in the database
+  /// — including their transactions and earnings-calendar history — but are
+  /// hidden from the default holdings views.
+  Future<void> setArchived(int id, bool archived, {DateTime? now}) async {
+    final stmt = _db.update(_db.holdings)..where((t) => t.id.equals(id));
+    await stmt.write(
+      HoldingsCompanion(
+        archived: Value(archived),
         updatedAt: Value(now ?? DateTime.now()),
       ),
     );

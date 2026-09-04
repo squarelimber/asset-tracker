@@ -609,6 +609,21 @@ class $HoldingsTable extends Holdings
     type: DriftSqlType.string,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _archivedMeta = const VerificationMeta(
+    'archived',
+  );
+  @override
+  late final GeneratedColumn<bool> archived = GeneratedColumn<bool>(
+    'archived',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("archived" IN (0, 1))',
+    ),
+    defaultValue: const Constant(false),
+  );
   static const VerificationMeta _createdAtMeta = const VerificationMeta(
     'createdAt',
   );
@@ -649,6 +664,7 @@ class $HoldingsTable extends Holdings
     purchaseDate,
     riskLevel,
     note,
+    archived,
     createdAt,
     updatedAt,
   ];
@@ -763,6 +779,12 @@ class $HoldingsTable extends Holdings
         note.isAcceptableOrUnknown(data['note']!, _noteMeta),
       );
     }
+    if (data.containsKey('archived')) {
+      context.handle(
+        _archivedMeta,
+        archived.isAcceptableOrUnknown(data['archived']!, _archivedMeta),
+      );
+    }
     if (data.containsKey('created_at')) {
       context.handle(
         _createdAtMeta,
@@ -840,6 +862,10 @@ class $HoldingsTable extends Holdings
         DriftSqlType.string,
         data['${effectivePrefix}note'],
       ),
+      archived: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}archived'],
+      )!,
       createdAt: attachedDatabase.typeMapping.read(
         DriftSqlType.dateTime,
         data['${effectivePrefix}created_at'],
@@ -875,6 +901,7 @@ class HoldingRow extends DataClass implements Insertable<HoldingRow> {
   final DateTime? purchaseDate;
   final String? riskLevel;
   final String? note;
+  final bool archived;
   final DateTime createdAt;
   final DateTime updatedAt;
   const HoldingRow({
@@ -892,6 +919,7 @@ class HoldingRow extends DataClass implements Insertable<HoldingRow> {
     this.purchaseDate,
     this.riskLevel,
     this.note,
+    required this.archived,
     required this.createdAt,
     required this.updatedAt,
   });
@@ -922,6 +950,7 @@ class HoldingRow extends DataClass implements Insertable<HoldingRow> {
     if (!nullToAbsent || note != null) {
       map['note'] = Variable<String>(note);
     }
+    map['archived'] = Variable<bool>(archived);
     map['created_at'] = Variable<DateTime>(createdAt);
     map['updated_at'] = Variable<DateTime>(updatedAt);
     return map;
@@ -951,6 +980,7 @@ class HoldingRow extends DataClass implements Insertable<HoldingRow> {
           ? const Value.absent()
           : Value(riskLevel),
       note: note == null && nullToAbsent ? const Value.absent() : Value(note),
+      archived: Value(archived),
       createdAt: Value(createdAt),
       updatedAt: Value(updatedAt),
     );
@@ -976,6 +1006,7 @@ class HoldingRow extends DataClass implements Insertable<HoldingRow> {
       purchaseDate: serializer.fromJson<DateTime?>(json['purchaseDate']),
       riskLevel: serializer.fromJson<String?>(json['riskLevel']),
       note: serializer.fromJson<String?>(json['note']),
+      archived: serializer.fromJson<bool>(json['archived']),
       createdAt: serializer.fromJson<DateTime>(json['createdAt']),
       updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
     );
@@ -998,6 +1029,7 @@ class HoldingRow extends DataClass implements Insertable<HoldingRow> {
       'purchaseDate': serializer.toJson<DateTime?>(purchaseDate),
       'riskLevel': serializer.toJson<String?>(riskLevel),
       'note': serializer.toJson<String?>(note),
+      'archived': serializer.toJson<bool>(archived),
       'createdAt': serializer.toJson<DateTime>(createdAt),
       'updatedAt': serializer.toJson<DateTime>(updatedAt),
     };
@@ -1018,6 +1050,7 @@ class HoldingRow extends DataClass implements Insertable<HoldingRow> {
     Value<DateTime?> purchaseDate = const Value.absent(),
     Value<String?> riskLevel = const Value.absent(),
     Value<String?> note = const Value.absent(),
+    bool? archived,
     DateTime? createdAt,
     DateTime? updatedAt,
   }) => HoldingRow(
@@ -1035,6 +1068,7 @@ class HoldingRow extends DataClass implements Insertable<HoldingRow> {
     purchaseDate: purchaseDate.present ? purchaseDate.value : this.purchaseDate,
     riskLevel: riskLevel.present ? riskLevel.value : this.riskLevel,
     note: note.present ? note.value : this.note,
+    archived: archived ?? this.archived,
     createdAt: createdAt ?? this.createdAt,
     updatedAt: updatedAt ?? this.updatedAt,
   );
@@ -1062,6 +1096,7 @@ class HoldingRow extends DataClass implements Insertable<HoldingRow> {
           : this.purchaseDate,
       riskLevel: data.riskLevel.present ? data.riskLevel.value : this.riskLevel,
       note: data.note.present ? data.note.value : this.note,
+      archived: data.archived.present ? data.archived.value : this.archived,
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
       updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
     );
@@ -1084,6 +1119,7 @@ class HoldingRow extends DataClass implements Insertable<HoldingRow> {
           ..write('purchaseDate: $purchaseDate, ')
           ..write('riskLevel: $riskLevel, ')
           ..write('note: $note, ')
+          ..write('archived: $archived, ')
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt')
           ..write(')'))
@@ -1106,6 +1142,7 @@ class HoldingRow extends DataClass implements Insertable<HoldingRow> {
     purchaseDate,
     riskLevel,
     note,
+    archived,
     createdAt,
     updatedAt,
   );
@@ -1127,6 +1164,7 @@ class HoldingRow extends DataClass implements Insertable<HoldingRow> {
           other.purchaseDate == this.purchaseDate &&
           other.riskLevel == this.riskLevel &&
           other.note == this.note &&
+          other.archived == this.archived &&
           other.createdAt == this.createdAt &&
           other.updatedAt == this.updatedAt);
 }
@@ -1146,6 +1184,7 @@ class HoldingsCompanion extends UpdateCompanion<HoldingRow> {
   final Value<DateTime?> purchaseDate;
   final Value<String?> riskLevel;
   final Value<String?> note;
+  final Value<bool> archived;
   final Value<DateTime> createdAt;
   final Value<DateTime> updatedAt;
   const HoldingsCompanion({
@@ -1163,6 +1202,7 @@ class HoldingsCompanion extends UpdateCompanion<HoldingRow> {
     this.purchaseDate = const Value.absent(),
     this.riskLevel = const Value.absent(),
     this.note = const Value.absent(),
+    this.archived = const Value.absent(),
     this.createdAt = const Value.absent(),
     this.updatedAt = const Value.absent(),
   });
@@ -1181,6 +1221,7 @@ class HoldingsCompanion extends UpdateCompanion<HoldingRow> {
     this.purchaseDate = const Value.absent(),
     this.riskLevel = const Value.absent(),
     this.note = const Value.absent(),
+    this.archived = const Value.absent(),
     this.createdAt = const Value.absent(),
     this.updatedAt = const Value.absent(),
   }) : accountId = Value(accountId),
@@ -1201,6 +1242,7 @@ class HoldingsCompanion extends UpdateCompanion<HoldingRow> {
     Expression<DateTime>? purchaseDate,
     Expression<String>? riskLevel,
     Expression<String>? note,
+    Expression<bool>? archived,
     Expression<DateTime>? createdAt,
     Expression<DateTime>? updatedAt,
   }) {
@@ -1219,6 +1261,7 @@ class HoldingsCompanion extends UpdateCompanion<HoldingRow> {
       if (purchaseDate != null) 'purchase_date': purchaseDate,
       if (riskLevel != null) 'risk_level': riskLevel,
       if (note != null) 'note': note,
+      if (archived != null) 'archived': archived,
       if (createdAt != null) 'created_at': createdAt,
       if (updatedAt != null) 'updated_at': updatedAt,
     });
@@ -1239,6 +1282,7 @@ class HoldingsCompanion extends UpdateCompanion<HoldingRow> {
     Value<DateTime?>? purchaseDate,
     Value<String?>? riskLevel,
     Value<String?>? note,
+    Value<bool>? archived,
     Value<DateTime>? createdAt,
     Value<DateTime>? updatedAt,
   }) {
@@ -1257,6 +1301,7 @@ class HoldingsCompanion extends UpdateCompanion<HoldingRow> {
       purchaseDate: purchaseDate ?? this.purchaseDate,
       riskLevel: riskLevel ?? this.riskLevel,
       note: note ?? this.note,
+      archived: archived ?? this.archived,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
     );
@@ -1307,6 +1352,9 @@ class HoldingsCompanion extends UpdateCompanion<HoldingRow> {
     if (note.present) {
       map['note'] = Variable<String>(note.value);
     }
+    if (archived.present) {
+      map['archived'] = Variable<bool>(archived.value);
+    }
     if (createdAt.present) {
       map['created_at'] = Variable<DateTime>(createdAt.value);
     }
@@ -1333,6 +1381,7 @@ class HoldingsCompanion extends UpdateCompanion<HoldingRow> {
           ..write('purchaseDate: $purchaseDate, ')
           ..write('riskLevel: $riskLevel, ')
           ..write('note: $note, ')
+          ..write('archived: $archived, ')
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt')
           ..write(')'))
@@ -4867,6 +4916,7 @@ typedef $$HoldingsTableCreateCompanionBuilder =
       Value<DateTime?> purchaseDate,
       Value<String?> riskLevel,
       Value<String?> note,
+      Value<bool> archived,
       Value<DateTime> createdAt,
       Value<DateTime> updatedAt,
     });
@@ -4886,6 +4936,7 @@ typedef $$HoldingsTableUpdateCompanionBuilder =
       Value<DateTime?> purchaseDate,
       Value<String?> riskLevel,
       Value<String?> note,
+      Value<bool> archived,
       Value<DateTime> createdAt,
       Value<DateTime> updatedAt,
     });
@@ -4983,6 +5034,11 @@ class $$HoldingsTableFilterComposer
 
   ColumnFilters<String> get note => $composableBuilder(
     column: $table.note,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get archived => $composableBuilder(
+    column: $table.archived,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -5094,6 +5150,11 @@ class $$HoldingsTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<bool> get archived => $composableBuilder(
+    column: $table.archived,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<DateTime> get createdAt => $composableBuilder(
     column: $table.createdAt,
     builder: (column) => ColumnOrderings(column),
@@ -5184,6 +5245,9 @@ class $$HoldingsTableAnnotationComposer
   GeneratedColumn<String> get note =>
       $composableBuilder(column: $table.note, builder: (column) => column);
 
+  GeneratedColumn<bool> get archived =>
+      $composableBuilder(column: $table.archived, builder: (column) => column);
+
   GeneratedColumn<DateTime> get createdAt =>
       $composableBuilder(column: $table.createdAt, builder: (column) => column);
 
@@ -5256,6 +5320,7 @@ class $$HoldingsTableTableManager
                 Value<DateTime?> purchaseDate = const Value.absent(),
                 Value<String?> riskLevel = const Value.absent(),
                 Value<String?> note = const Value.absent(),
+                Value<bool> archived = const Value.absent(),
                 Value<DateTime> createdAt = const Value.absent(),
                 Value<DateTime> updatedAt = const Value.absent(),
               }) => HoldingsCompanion(
@@ -5273,6 +5338,7 @@ class $$HoldingsTableTableManager
                 purchaseDate: purchaseDate,
                 riskLevel: riskLevel,
                 note: note,
+                archived: archived,
                 createdAt: createdAt,
                 updatedAt: updatedAt,
               ),
@@ -5292,6 +5358,7 @@ class $$HoldingsTableTableManager
                 Value<DateTime?> purchaseDate = const Value.absent(),
                 Value<String?> riskLevel = const Value.absent(),
                 Value<String?> note = const Value.absent(),
+                Value<bool> archived = const Value.absent(),
                 Value<DateTime> createdAt = const Value.absent(),
                 Value<DateTime> updatedAt = const Value.absent(),
               }) => HoldingsCompanion.insert(
@@ -5309,6 +5376,7 @@ class $$HoldingsTableTableManager
                 purchaseDate: purchaseDate,
                 riskLevel: riskLevel,
                 note: note,
+                archived: archived,
                 createdAt: createdAt,
                 updatedAt: updatedAt,
               ),

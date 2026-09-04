@@ -27,6 +27,7 @@ HoldingRow _holding({
     currency: currency,
     riskLevel: null,
     note: null,
+    archived: false,
   );
 }
 

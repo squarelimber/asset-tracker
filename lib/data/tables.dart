@@ -34,6 +34,10 @@ class Holdings extends Table {
   DateTimeColumn get purchaseDate => dateTime().nullable()();
   TextColumn get riskLevel => text().nullable()();
   TextColumn get note => text().nullable()();
+
+  /// Archived holdings stay in the database (and in the earnings calendar)
+  /// but are hidden from the default holdings views.
+  BoolColumn get archived => boolean().withDefault(const Constant(false))();
   DateTimeColumn get createdAt => dateTime().withDefault(currentDateAndTime)();
   DateTimeColumn get updatedAt => dateTime().withDefault(currentDateAndTime)();
 }

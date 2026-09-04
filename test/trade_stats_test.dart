@@ -85,6 +85,7 @@ void main() {
         latestPrice: 15,
         currency: 'CNY',
         note: null,
+        archived: false,
         createdAt: DateTime(2026, 1, 1),
         updatedAt: DateTime(2026, 1, 1),
       ),
@@ -100,5 +101,41 @@ void main() {
     // 1000*7.2 - 2000 = 5200
     expect(stats.cashflow, closeTo(5200, 1e-6));
     expect(stats.incomeTotal, closeTo(7200, 1e-6));
+  });
+
+  test('realizedProfitByHolding sums sells per holding', () {
+    final byHolding = TradeStatsCalculator.realizedProfitByHolding([
+      _txn(id: 1, type: 'sell', holdingId: 1, quantity: 50, price: 15),
+      _txn(id: 2, type: 'sell', holdingId: 1, quantity: 30, price: 20),
+      _txn(id: 3, type: 'sell', holdingId: 2, quantity: 10, price: 4),
+      _txn(id: 4, type: 'buy', holdingId: 1, quantity: 5, price: 12), // ignored
+      _txn(id: 5, type: 'dividend', holdingId: 1, amount: 10), // ignored
+    ], {1: 10, 2: 5});
+    // holding 1: (15-10)*50 + (20-10)*30 = 250 + 300 = 550
+    expect(byHolding[1], closeTo(550, 1e-6));
+    // holding 2: (4-5)*10 = -10
+    expect(byHolding[2], closeTo(-10, 1e-6));
+    expect(byHolding, hasLength(2));
+  });
+
+  test('realizedProfitByHolding converts foreign currency to CNY', () {
+    final byHolding = TradeStatsCalculator.realizedProfitByHolding([
+      _txn(id: 1, type: 'sell', holdingId: 7, quantity: 10, price: 2, currency: 'USD'),
+    ], {7: 1}, cnyRates: {'USD': 7});
+    // (2-1)*10*7 = 70
+    expect(byHolding[7], closeTo(70, 1e-6));
+  });
+
+  test('lastSellDate picks the newest sell, optionally per holding', () {
+    final txns = [
+      _txn(id: 1, type: 'sell', holdingId: 1, at: DateTime(2026, 3, 1)),
+      _txn(id: 2, type: 'sell', holdingId: 2, at: DateTime(2026, 5, 1)),
+      _txn(id: 3, type: 'sell', holdingId: 1, at: DateTime(2026, 4, 1)),
+      _txn(id: 4, type: 'buy', holdingId: 1, at: DateTime(2026, 6, 1)),
+    ];
+    expect(TradeStatsCalculator.lastSellDate(txns), DateTime(2026, 5, 1));
+    expect(TradeStatsCalculator.lastSellDate(txns, holdingId: 1), DateTime(2026, 4, 1));
+    expect(TradeStatsCalculator.lastSellDate(txns, holdingId: 99), isNull);
+    expect(TradeStatsCalculator.lastSellDate(const []), isNull);
   });
 }

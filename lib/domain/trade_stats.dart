@@ -106,4 +106,47 @@ class TradeStatsCalculator {
       monthlyCashflow: monthly,
     );
   }
+
+  /// Per-holding realized profit from sell transactions, using the same
+  /// formula as [compute]: (sell.price - unit cost at the time of the sell)
+  /// x sell.quantity, converted to CNY via [cnyRates].
+  ///
+  /// [costByHolding] maps holding id to the unit cost that applied when the
+  /// shares were sold (a fully sold-out holding keeps its last costPrice).
+  /// Returns only holdings that have at least one sell.
+  static Map<int, double> realizedProfitByHolding(
+    List<TransactionRow> txns,
+    Map<int, double> costByHolding, {
+    Map<String, double> cnyRates = const {},
+  }) {
+    double rateOf(String currency) {
+      final rate = cnyRates[currency.toUpperCase()];
+      return (rate == null || rate <= 0) ? 1 : rate;
+    }
+
+    final result = <int, double>{};
+    for (final t in txns) {
+      if (TransactionType.fromStorage(t.type) != TransactionType.sell) continue;
+      final holdingId = t.holdingId;
+      if (holdingId == null) continue;
+      final unitCost = costByHolding[holdingId] ?? 0;
+      final qty = t.quantity ?? 0;
+      final price = t.price ?? 0;
+      result[holdingId] =
+          (result[holdingId] ?? 0) + (price - unitCost) * qty * rateOf(t.currency);
+    }
+    return result;
+  }
+
+  /// Date of the most recent sell transaction, optionally filtered to a
+  /// single holding. Null when no matching sell exists.
+  static DateTime? lastSellDate(List<TransactionRow> txns, {int? holdingId}) {
+    DateTime? latest;
+    for (final t in txns) {
+      if (TransactionType.fromStorage(t.type) != TransactionType.sell) continue;
+      if (holdingId != null && t.holdingId != holdingId) continue;
+      if (latest == null || t.occurredAt.isAfter(latest)) latest = t.occurredAt;
+    }
+    return latest;
+  }
 }

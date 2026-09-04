@@ -7,6 +7,9 @@ import '../../../core/formats.dart';
 import '../../../core/history_sync.dart';
 import '../../../core/symbols.dart';
 import '../../../data/database.dart';
+import '../../../domain/closed_holding.dart';
+import '../../../domain/trade_stats.dart';
+import '../../components/status_chip.dart';
 import '../../components/terminal_card.dart';
 import '../../tokens.dart';
 import '../transaction_dialogs.dart';
@@ -47,21 +50,46 @@ class HoldingDetailSheet extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final txns = ref.watch(transactionsByHoldingProvider(holding.id));
+    final txnList = txns.valueOrNull ?? const <TransactionRow>[];
     final type = AssetType.fromStorage(holding.assetType);
+    // Sold-out: positions with nothing left. Repaid liabilities keep the
+    // normal debt view.
+    final isClosed = isHoldingClosed(holding) && type != AssetType.liability;
     final marketValue =
         type.isAmountBased ? holding.quantity : holding.quantity * holding.latestPrice;
-    final cost = type.isAmountBased
-        ? (holding.costPrice > 0 ? holding.costPrice : holding.quantity)
-        : holding.quantity * holding.costPrice;
+    final cost = isClosed && type.isAmountBased
+        ? 0.0 // Fully redeemed: the principal came back, no residual cost.
+        : type.isAmountBased
+            ? (holding.costPrice > 0 ? holding.costPrice : holding.quantity)
+            : holding.quantity * holding.costPrice;
     final profit = marketValue - cost;
     final profitPct = cost == 0 ? 0.0 : profit / cost;
     final buyDate = holding.purchaseDate ?? holding.createdAt;
-    final days = DateTime.now().difference(buyDate).inDays;
-    final annualized = Formats.annualizedReturn(profitPct, days);
+    // For sold-out positions the holding period ends at the last sell.
+    final lastSell = isClosed
+        ? TradeStatsCalculator.lastSellDate(txnList, holdingId: holding.id)
+        : null;
+    final days = (lastSell ?? DateTime.now()).difference(buyDate).inDays;
+    final annualized = isClosed ? null : Formats.annualizedReturn(profitPct, days);
+    // Realized P&L of the sold-out position: per-sell (price - unit cost) x
+    // quantity, over the invested amount from buy transactions.
+    final realized = isClosed
+        ? (TradeStatsCalculator.realizedProfitByHolding(
+            txnList,
+            {holding.id: holding.costPrice},
+          )[holding.id] ??
+          0)
+        : 0.0;
+    final invested = isClosed
+        ? txnList
+            .where((t) => TransactionType.fromStorage(t.type) == TransactionType.buy)
+            .fold(0.0, (a, t) => a + t.amount)
+        : 0.0;
+    final realizedPct = isClosed && invested > 0 ? realized / invested : null;
     final cache = ref.watch(priceCacheProvider).value ?? const <String, PriceCacheRow>{};
     final cacheSymbol = cacheSymbolFor(holding);
     final todayRow = cacheSymbol == null ? null : cache[cacheSymbol];
-    final todayProfit = todayProfitOf(todayRow, holding.quantity);
+    final todayProfit = isClosed ? null : todayProfitOf(todayRow, holding.quantity);
     final todayPct = todayChangePctOf(todayRow);
     return ListView(
       controller: scrollController,
@@ -70,15 +98,23 @@ class HoldingDetailSheet extends ConsumerWidget {
         Row(
           children: [
             Expanded(
-              child: Text(
-                holding.name,
-                overflow: TextOverflow.ellipsis,
-                style: T.mono(size: 18, weight: FontWeight.w700, color: T.text1),
+              child: Row(
+                children: [
+                  Flexible(
+                    child: Text(
+                      holding.name,
+                      overflow: TextOverflow.ellipsis,
+                      style: T.mono(size: 18, weight: FontWeight.w700, color: T.text1),
+                    ),
+                  ),
+                  if (isClosed) StatusChip(closedHoldingLabel(holding)),
+                  if (holding.archived) const StatusChip('已归档'),
+                ],
               ),
             ),
             PopupMenuButton<String>(
               icon: const Icon(Icons.more_vert, size: 20),
-              onSelected: (v) {
+              onSelected: (v) async {
                 switch (v) {
                   case 'edit':
                     showEditHoldingDialog(context, ref, holding);
@@ -86,6 +122,9 @@ class HoldingDetailSheet extends ConsumerWidget {
                     if (!type.isAmountBased) {
                       showUpdatePriceDialog(context, ref, holding);
                     }
+                  case 'archive':
+                    await ref.read(daoProvider).setArchived(holding.id, !holding.archived);
+                    if (context.mounted) Navigator.of(context).pop();
                   case 'delete':
                     confirmDeleteHolding(context, ref, holding);
                 }
@@ -94,6 +133,10 @@ class HoldingDetailSheet extends ConsumerWidget {
                 const PopupMenuItem(value: 'edit', child: Text('编辑')),
                 if (!type.isAmountBased)
                   const PopupMenuItem(value: 'update_price', child: Text('更新单价')),
+                PopupMenuItem(
+                  value: 'archive',
+                  child: Text(holding.archived ? '恢复显示' : '归档'),
+                ),
                 const PopupMenuItem(value: 'delete', child: Text('删除')),
               ],
             ),
@@ -117,7 +160,23 @@ class HoldingDetailSheet extends ConsumerWidget {
                   value: Formats.money(marketValue, holding.currency),
                   valueColor: T.down,
                 )
-              else if (type.isAmountBased) ...[
+              else if (isClosed && type.isAmountBased) ...[
+                // Fully redeemed (e.g. a deposit paid out): show it as settled.
+                InfoRow(label: '当前金额', value: Formats.money(0, holding.currency)),
+                InfoRow(label: '状态', value: '已结清', valueColor: T.text3),
+              ] else if (isClosed) ...[
+                // Sold-out share-based position: realized P&L instead of
+                // live quotes.
+                InfoRow(
+                  label: '已实现收益',
+                  value: '${realized >= 0 ? '+' : ''}${Formats.money(realized, holding.currency)}'
+                      '${realizedPct == null ? '' : ' (${Formats.pct(realizedPct)})'}',
+                  valueColor: T.changeColor(realized),
+                ),
+                InfoRow(label: '成本单价', value: holding.costPrice.toStringAsFixed(4)),
+                if (lastSell != null)
+                  InfoRow(label: '清仓日期', value: Formats.date(lastSell)),
+              ] else if (type.isAmountBased) ...[
                 InfoRow(label: '当前金额', value: Formats.money(marketValue, holding.currency)),
                 InfoRow(label: '累计投入', value: Formats.money(cost, holding.currency)),
                 InfoRow(
@@ -137,7 +196,7 @@ class HoldingDetailSheet extends ConsumerWidget {
                 value: Formats.date(buyDate),
               ),
               if (type != AssetType.liability)
-                InfoRow(label: '持有时间', value: Formats.holdingDuration(buyDate)),
+                InfoRow(label: '持有时间', value: Formats.holdingDuration(buyDate, lastSell)),
               if (todayProfit != null)
                 InfoRow(
                   label: '最新收益',

@@ -28,6 +28,7 @@ HoldingRow _holding({
     costFxRate: null,
     riskLevel: null,
     note: null,
+    archived: false,
   );
 }
 
