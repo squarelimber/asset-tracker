@@ -13,6 +13,7 @@ A local-first, multi-platform asset tracking app built with Flutter. Track your 
   - Mutual funds — official NAV (Eastmoney API on desktop, push2 endpoint on the web)
   - Gold accumulation products (SGE Au99.99 spot price)
   - Foreign currency assets with auto FX rates
+  - On desktop, each source falls back to its CORS-friendly web endpoint if the primary fails
   - Bank wealth management products — manual NAV updates with smooth daily accrual (no public API; history is interpolated between your updates, respecting income/expense flows)
 - **Transaction log** — buy / sell / dividend / income / expense / transfer / credit-card spend (consume) / unit split, as the basis for cost & return calculation, with automatic rollback on delete
 - **Liabilities** — credit cards and loans tracked separately from assets; repayments and borrowing via transfers

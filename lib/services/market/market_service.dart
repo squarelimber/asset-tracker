@@ -7,6 +7,7 @@ import '../../data/database.dart';
 import 'coingecko_source.dart';
 import 'eastmoney_fund_quote_source.dart';
 import 'eastmoney_source.dart';
+import 'fallback_source.dart';
 import 'gold_fx_source.dart';
 import 'market_data_source.dart';
 import 'sina_source.dart';
@@ -49,11 +50,20 @@ class MarketService {
           MarketSource.coingecko: CoinGeckoSource(),
         }
       : {
-          MarketSource.sina: SinaSource(),
-          MarketSource.eastmoney: EastmoneySource(),
+          // Native: highest-fidelity endpoints first, with the CORS-friendly
+          // web endpoints as fallback so a single endpoint outage degrades
+          // to a slower source instead of stale cached prices.
+          MarketSource.sina: FallbackSource(
+            SinaSource(),
+            TencentQuoteSource(source: MarketSource.sina),
+          ),
+          MarketSource.eastmoney: FallbackSource(
+            EastmoneySource(),
+            EastmoneyFundQuoteSource(),
+          ),
           // Gold (sge) holdings are served by the combined gold/fx source.
-          MarketSource.sge: GoldFxSource(),
-          MarketSource.forex: GoldFxSource(),
+          MarketSource.sge: FallbackSource(GoldFxSource(), TencentGoldFxAdapter()),
+          MarketSource.forex: FallbackSource(GoldFxSource(), TencentGoldFxAdapter()),
           MarketSource.coingecko: CoinGeckoSource(),
         };
 
