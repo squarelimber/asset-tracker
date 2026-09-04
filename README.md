@@ -33,6 +33,7 @@ A local-first, multi-platform asset tracking app built with Flutter. Track your 
 | Database | Drift (SQLite; sqlite3.wasm on the web) |
 | Charts | fl_chart |
 | Market data | Sina / Tencent / Eastmoney / CoinGecko free endpoints |
+| Sync | Optional self-hosted Dart (shelf) server, LWW + tombstones |
 | CI | GitHub Actions (web deploy on Pages) |
 
 ## Try it online
@@ -78,8 +79,10 @@ lib/
   core/         # constants, symbols, formatting, responsive layout
   data/         # drift tables & DAOs
   domain/       # calculators (portfolio, rates, earnings, smooth history), rule engine
-  services/     # market data, backup, snapshots, migrations, CSV export
-  features/     # portfolio, holdings, accounts, markets, stats, calendar, alerts, settings
+  services/     # market data, alerts, backup, snapshots, migrations, CSV export
+  sync/         # multi-device sync (wire format, LWW merge, client)
+  ui/           # design tokens, shell, shared components, pages
+server/         # optional self-hosted sync server (Dart/shelf, Docker)
 ```
 
 ## Roadmap
