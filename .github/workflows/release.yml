@@ -1,0 +1,135 @@
+name: Release
+
+# Tag-triggered release: build release artifacts and attach them to a
+# GitHub Release. Usage: git tag v0.8.0 && git push origin v0.8.0
+#
+# Asset names/format match the existing releases (v0.3.1 .. v0.7.0):
+#   asset-tracker-arm64-v8a.apk
+#   asset-tracker-armeabi-v7a.apk
+#   asset-tracker-universal.apk
+#   asset_tracker-windows-x64.zip
+#
+# Release notes are taken from the matching "## [X.Y.Z]" section of
+# CHANGELOG.md (the tag must correspond to a changelog entry).
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  FLUTTER_VERSION: 3.44.9
+
+jobs:
+  build-android:
+    name: Build Android (release APKs)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build release APKs (split per ABI)
+        run: flutter build apk --release --split-per-abi
+
+      - name: Build universal release APK
+        run: flutter build apk --release
+
+      - name: Package APKs
+        run: |
+          mkdir -p out
+          cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk out/asset-tracker-arm64-v8a.apk
+          cp build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk out/asset-tracker-armeabi-v7a.apk
+          cp build/app/outputs/flutter-apk/app-release.apk out/asset-tracker-universal.apk
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v5
+        with:
+          name: android-apks
+          path: out/
+
+  build-windows:
+    name: Build Windows (release)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build windows
+        run: flutter build windows --release
+
+      - name: Package zip
+        run: Compress-Archive -Path build/windows/x64/runner/Release -DestinationPath asset_tracker-windows-x64.zip
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v5
+        with:
+          name: windows-zip
+          path: asset_tracker-windows-x64.zip
+
+  release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: [build-android, build-windows]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download Android APKs
+        uses: actions/download-artifact@v4
+        with:
+          name: android-apks
+          path: dist
+
+      - name: Download Windows zip
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-zip
+          path: dist
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          VERSION="${TAG#v}"
+          # Release notes: the matching "## [X.Y.Z]" section of CHANGELOG.md
+          awk -v target="## [$VERSION]" '
+            index($0, target) == 1 {found = 1; print; next}
+            found && $0 ~ /^## \[/ {exit}
+            found {print}
+          ' CHANGELOG.md > notes.md
+          if [ ! -s notes.md ]; then
+            echo "::warning::No changelog section for $VERSION; using a minimal note"
+            echo "$TAG" > notes.md
+          fi
+          gh release create "$TAG" \
+            --title "$TAG" \
+            --notes-file notes.md \
+            dist/asset-tracker-arm64-v8a.apk \
+            dist/asset-tracker-armeabi-v7a.apk \
+            dist/asset-tracker-universal.apk \
+            dist/asset_tracker-windows-x64.zip

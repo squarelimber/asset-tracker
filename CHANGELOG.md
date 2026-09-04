@@ -2,7 +2,7 @@
 
 All notable changes to Asset Tracker. Entries are condensed from the commit history; dates follow the release tags.
 
-## [Unreleased]
+## [0.8.0] - 2026-09-04
 
 ### Added
 
