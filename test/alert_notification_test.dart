@@ -41,7 +41,7 @@ void main() {
     await db.close();
   });
 
-  Future<void> _addCashflowRule({
+  Future<void> addCashflowRule({
     required int day,
     String label = '还贷',
     bool enabled = true,
@@ -49,7 +49,7 @@ void main() {
     return dao.createAlertRule(AlertRulesCompanion.insert(
       type: AlertRuleType.cashflow.storageName,
       name: '测试规则',
-      params: jsonEncode({'dayOfMonth': day, 'label': label}),
+      params: Value(jsonEncode({'dayOfMonth': day, 'label': label})),
       enabled: Value(enabled),
     ));
   }
@@ -61,7 +61,7 @@ void main() {
   });
 
   test('cashflow rule on its day fires once and notifies', () async {
-    await _addCashflowRule(day: 15);
+    await addCashflowRule(day: 15);
     final count = await service.checkAndNotify(now: DateTime(2026, 8, 15, 10));
     expect(count, 1);
     expect(notifications.shown, hasLength(1));
@@ -70,7 +70,7 @@ void main() {
   });
 
   test('same rule does not notify twice on the same day', () async {
-    await _addCashflowRule(day: 15);
+    await addCashflowRule(day: 15);
     expect(await service.checkAndNotify(now: DateTime(2026, 8, 15, 10)), 1);
     // Later the same day (e.g. a market refresh): deduped.
     expect(await service.checkAndNotify(now: DateTime(2026, 8, 15, 22)), 0);
@@ -85,14 +85,14 @@ void main() {
   });
 
   test('cashflow rule on another day does not fire', () async {
-    await _addCashflowRule(day: 1);
+    await addCashflowRule(day: 1);
     final count = await service.checkAndNotify(now: DateTime(2026, 8, 15));
     expect(count, 0);
     expect(notifications.shown, isEmpty);
   });
 
   test('disabled rule is skipped', () async {
-    await _addCashflowRule(day: 15, enabled: false);
+    await addCashflowRule(day: 15, enabled: false);
     final count = await service.checkAndNotify(now: DateTime(2026, 8, 15));
     expect(count, 0);
     expect(notifications.shown, isEmpty);
@@ -100,7 +100,7 @@ void main() {
 
   test('disabled via settings: rules still evaluated but no notification',
       () async {
-    await _addCashflowRule(day: 15);
+    await addCashflowRule(day: 15);
     await dao.setSetting(AlertNotificationService.enabledKey, 'false');
     final count = await service.checkAndNotify(now: DateTime(2026, 8, 15));
     expect(count, 0);
@@ -108,7 +108,7 @@ void main() {
   });
 
   test('re-enabled via settings notifies again', () async {
-    await _addCashflowRule(day: 15);
+    await addCashflowRule(day: 15);
     await dao.setSetting(AlertNotificationService.enabledKey, 'false');
     await dao.setSetting(AlertNotificationService.enabledKey, 'true');
     final count = await service.checkAndNotify(now: DateTime(2026, 8, 15));
