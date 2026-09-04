@@ -731,6 +731,7 @@ Future<void> confirmDeleteHolding(
   HoldingRow holding,
 ) async {
   final hasTxns = (await ref.read(daoProvider).getTransactionsForHolding(holding.id)).isNotEmpty;
+  if (!context.mounted) return;
   final ok = await showDialog<bool>(
     context: context,
     builder: (context) => AlertDialog(
