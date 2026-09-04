@@ -9,8 +9,10 @@ import 'package:asset_tracker/services/market/sina_source.dart';
 import 'package:asset_tracker/services/market/tencent_quote_source.dart';
 
 /// Stub source returning preconfigured prices (0 / missing = failure).
+/// Price lookup is case-insensitive and quotes are emitted under the
+/// configured key, mimicking adapters that normalize symbol case.
 class _StubSource extends MarketDataSource {
-  _StubSource(MarketSource source, this.prices) : super(source);
+  _StubSource(super.source, this.prices);
 
   final Map<String, double> prices;
   int fetchCount = 0;
@@ -19,10 +21,20 @@ class _StubSource extends MarketDataSource {
   Future<List<MarketQuote>> fetch(List<String> symbols) async {
     fetchCount++;
     return symbols.map((s) {
-      final price = prices[s] ?? 0;
-      if (price <= 0) return MarketQuote.failure(s, source, 'stub failure');
+      String? key;
+      var price = 0.0;
+      for (final e in prices.entries) {
+        if (e.key.toUpperCase() == s.toUpperCase()) {
+          key = e.key;
+          price = e.value;
+          break;
+        }
+      }
+      if (key == null || price <= 0) {
+        return MarketQuote.failure(s, source, 'stub failure');
+      }
       return MarketQuote(
-        symbol: s,
+        symbol: key,
         source: source,
         name: '',
         price: price,
