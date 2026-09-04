@@ -166,8 +166,9 @@ void main() {
         .getSingle();
     expect(archivedValue.data.values.single, 0);
 
-    // setArchived flips the flag and bumps updated_at.
-    final now = DateTime.now();
+    // setArchived flips the flag and bumps updated_at. Dates are stored as
+    // unix seconds, so use a whole-second timestamp for an exact round trip.
+    final now = DateTime(2026, 9, 4, 10, 30);
     await dao.setArchived(1, true, now: now);
     final archived = await dao.getHolding(1);
     expect(archived!.archived, isTrue);
