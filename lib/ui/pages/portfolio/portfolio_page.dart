@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -77,6 +79,9 @@ class _PortfolioPageState extends ConsumerState<PortfolioPage> {
       await ref.read(snapshotServiceProvider).ensureTodaySnapshot(force: true);
       // FX rates may have changed with the refresh.
       ref.invalidate(cnyRatesProvider);
+      // Prices are fresh: re-evaluate alert rules and notify for anything
+      // newly fired (no-op when disabled or nothing changed today).
+      unawaited(ref.read(alertNotificationServiceProvider).checkAndNotify());
     } catch (e) {
       error = e;
     } finally {

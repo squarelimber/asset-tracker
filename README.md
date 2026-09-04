@@ -22,7 +22,7 @@ A local-first, multi-platform asset tracking app built with Flutter. Track your 
 - **Privacy mode** — an eye toggle hides all monetary amounts behind a mask on the overview page
 - **Corporate actions** — dividend cost-basis method (ex-dividend drops don't distort returns), unit split transactions, adjusted (qfq) price history so ex-rights days stay continuous
 - **Multi-currency cost basis** — record the purchase-time exchange rate per holding so FX gains/losses are accounted for correctly
-- **Rule engine alerts** — concentration risk, stock/bond ratio drift, daily drawdown warnings, cashflow reminders (loan/maturity/auto-invest dates)
+- **Rule engine alerts** — concentration risk, stock/bond ratio drift, daily drawdown warnings, cashflow reminders (loan/maturity/auto-invest dates); fired rules push local notifications (Android & Windows, once per rule per day)
 - **Backup & restore** — JSON export/import (desktop/web download, system share sheet on mobile) preserving ids and transfer links
 
 ## Tech Stack
@@ -98,8 +98,7 @@ server/         # optional self-hosted sync server (Dart/shelf, Docker)
 - [x] Android packaging (release APKs)
 - [x] Web build (wasm) with WasmGC detection
 - [x] Earnings calendar, privacy mode, dividend/split handling, smooth accrual for manual holdings, purchase-time FX rates
-- [ ] Local notifications
-- [ ] iOS packaging verification
+- [x] Local notifications (Android & Windows)
 
 ## Disclaimer
 
@@ -125,7 +124,7 @@ MIT © 2026 [squarelimber](https://github.com/squarelimber)
 - **隐私保护**：总览页小眼睛开关，金额默认掩码显示
 - **除权除息**：分红成本法（除息不虚降）、份额折算流水、前复权历史（折算/除权日无跳变）
 - **多币种成本**：每个持仓记录买入时汇率，汇兑损益正确计入
-- **规则提醒**：集中度风险、股债比例偏离、单日跌幅预警、还款/定投日提醒
+- **规则提醒**：集中度风险、股债比例偏离、单日跌幅预警、还款/定投日提醒，触发时推送本地通知（Android / Windows，同一规则每天最多一次）
 - **备份恢复**：JSON 导出导入（桌面/网页下载、移动端系统分享），保留原始 ID 与转账关联
 
 > 免责声明：本应用仅提供数据汇总与规则提醒，仅供参考，不构成投资建议。行情数据来自第三方免费接口，可能存在延迟或误差。

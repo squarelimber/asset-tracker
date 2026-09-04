@@ -13,6 +13,7 @@ import 'package:share_plus/share_plus.dart';
 import '../../../app/providers.dart';
 import '../../../core/formats.dart';
 import '../../../core/responsive.dart';
+import '../../../services/alert_notification_service.dart';
 import '../../../services/backup_service.dart';
 import '../../../services/csv_export.dart';
 import '../../components/app_bar_actions.dart';
@@ -115,6 +116,8 @@ class SettingsPage extends ConsumerWidget {
                 ),
               ),
               const SizedBox(height: T.s4),
+              if (!kIsWeb) const _NotificationsSection(),
+              if (!kIsWeb) const SizedBox(height: T.s4),
               const SectionHeader(label: '关于'),
               const DataRow(
                 leading: Icon(Icons.info_outline, size: 20),
@@ -253,6 +256,76 @@ class SettingsPage extends ConsumerWidget {
       fileName: fileName,
       mime: 'text/csv',
       typeGroup: const XTypeGroup(label: 'CSV', extensions: ['csv']),
+    );
+  }
+}
+
+/// Local notifications toggle. Hidden on the web build, where the
+/// notification plugin is intentionally not initialized.
+class _NotificationsSection extends ConsumerStatefulWidget {
+  const _NotificationsSection();
+
+  @override
+  ConsumerState<_NotificationsSection> createState() =>
+      _NotificationsSectionState();
+}
+
+class _NotificationsSectionState extends ConsumerState<_NotificationsSection> {
+  bool? _enabled; // null while loading
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final value =
+        await ref.read(daoProvider).getSetting(AlertNotificationService.enabledKey);
+    if (!mounted) return;
+    setState(() => _enabled = value != 'false');
+  }
+
+  Future<void> _onChanged(bool value) async {
+    setState(() => _enabled = value);
+    await ref
+        .read(daoProvider)
+        .setSetting(AlertNotificationService.enabledKey, value ? 'true' : 'false');
+    if (!value) return;
+    // Re-enabling: make sure the OS permission is actually granted (this
+    // re-checks silently if the user fixed it in system settings).
+    final notifications = ref.read(notificationServiceProvider);
+    await notifications.init();
+    final granted = await notifications.refreshPermission();
+    if (!granted && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('未获得系统通知权限，请在系统设置中允许 Asset Tracker 发送通知'),
+        ),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SectionHeader(label: '提醒通知'),
+        Text('规则触发时推送本地通知，同一条规则每天最多提醒一次。', style: T.label()),
+        const SizedBox(height: T.s3),
+        TerminalCard(
+          child: DataRow(
+            leading: const Icon(Icons.notifications_outlined),
+            title: '本地通知',
+            subtitle: const Text('风险预警与现金流提醒'),
+            trailing: Switch(
+              value: _enabled ?? true,
+              onChanged: _enabled == null ? null : _onChanged,
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
