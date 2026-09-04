@@ -43,7 +43,7 @@ class NotificationService {
     if (kIsWeb) return; // web: intentionally a no-op (see class docs)
     if (defaultTargetPlatform == TargetPlatform.android) {
       await _plugin.initialize(
-        const InitializationSettings(
+        settings: const InitializationSettings(
           android: AndroidInitializationSettings('@mipmap/ic_launcher'),
         ),
       );
@@ -53,7 +53,7 @@ class NotificationService {
       _canShow = granted ?? false;
     } else if (defaultTargetPlatform == TargetPlatform.windows) {
       await _plugin.initialize(
-        InitializationSettings(
+        settings: InitializationSettings(
           windows: WindowsInitializationSettings(
             appName: 'Asset Tracker',
             appUserModelId: _windowsAppUserModelId,
