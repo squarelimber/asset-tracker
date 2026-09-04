@@ -148,11 +148,13 @@ void main() {
       expect(a.updatedAt, a.createdAt);
     }
 
-    // Raw storage is unix seconds: confirm the columns really exist.
+    // Raw storage is unix seconds: confirm the columns really exist. The
+    // schema has since moved on (v8+), so a v6 database migrates straight
+    // through — assert at least the v7 step happened.
     final userVersion = await db
         .customSelect('PRAGMA user_version;')
         .getSingle();
-    expect(userVersion.data.values.single, 7);
+    expect(userVersion.data.values.single, greaterThanOrEqualTo(7));
 
     // The tombstone table was created by the migration.
     final tables = await db.customSelect(

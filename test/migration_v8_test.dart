@@ -109,10 +109,10 @@ const _v7Ddl = [
   ''',
   '''
   CREATE TABLE sync_tombstones (
-    table TEXT NOT NULL,
+    "table" TEXT NOT NULL,
     row_key TEXT NOT NULL,
     deleted_at INTEGER NOT NULL DEFAULT (CAST(strftime('%s', CURRENT_TIMESTAMP) AS INTEGER)),
-    PRIMARY KEY (table, row_key)
+    PRIMARY KEY ("table", row_key)
   );
   ''',
 ];
