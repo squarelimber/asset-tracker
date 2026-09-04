@@ -400,14 +400,15 @@ void main() {
     expect(holdings.map((h) => h.symbol).toSet(), {'110022'});
   });
 
-  test('fresh install keeps all 16 holdings columns', () async {
+  test('fresh install keeps all 17 holdings columns', () async {
     await DataMigrationService(db).run();
 
     final columns = await _columnsOf(db, 'holdings');
     expect(columns, containsAll([
       'id', 'account_id', 'name', 'asset_type', 'market_source', 'symbol',
       'quantity', 'cost_price', 'latest_price', 'currency', 'cost_fx_rate',
-      'purchase_date', 'risk_level', 'note', 'created_at', 'updated_at',
+      'purchase_date', 'risk_level', 'note', 'archived', 'created_at',
+      'updated_at',
     ]));
 
     // The user-facing failure on the buggy schema: a write with an explicit
@@ -463,10 +464,10 @@ void main() {
     expect(columns, containsAll(['risk_level', 'cost_fx_rate']));
   });
 
-  test('rebuild copies risk_level and cost_fx_rate values when present',
+  test('rebuild copies risk_level, cost_fx_rate and archived when present',
       () async {
     // A table already matching the full schema (fresh-install shape with
-    // data): both values must survive the rebuild.
+    // data): all values must survive the rebuild.
     await db.customStatement(
       'ALTER TABLE holdings RENAME TO holdings_full;'
       'CREATE TABLE holdings (id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT, '
@@ -475,10 +476,11 @@ void main() {
       'quantity REAL NOT NULL DEFAULT 0.0, cost_price REAL NOT NULL DEFAULT 0.0, '
       'latest_price REAL NOT NULL DEFAULT 0.0, currency TEXT NOT NULL DEFAULT \'CNY\', '
       'cost_fx_rate REAL NULL, purchase_date INTEGER NULL, risk_level TEXT NULL, '
-      'note TEXT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);'
+      'note TEXT NULL, archived INTEGER NOT NULL DEFAULT 0, '
+      'created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);'
       'INSERT INTO holdings (account_id, name, asset_type, quantity, cost_price, '
-      'latest_price, currency, cost_fx_rate, risk_level, created_at, updated_at) '
-      "VALUES (0, '旧持仓', 'bank_wealth', 100, 1.0, 1.1, 'USD', 6.95, 'R2', 0, 0);"
+      'latest_price, currency, cost_fx_rate, risk_level, archived, created_at, updated_at) '
+      "VALUES (0, '旧持仓', 'bank_wealth', 100, 1.0, 1.1, 'USD', 6.95, 'R2', 1, 0, 0);"
       'DROP TABLE holdings_full;',
     );
 
@@ -487,6 +489,7 @@ void main() {
     final h = (await dao.getHoldings()).single;
     expect(h.riskLevel, 'R2');
     expect(h.costFxRate, closeTo(6.95, 1e-9));
+    expect(h.archived, isTrue);
   });
 
   test('repairs databases where the old rebuild dropped risk_level', () async {

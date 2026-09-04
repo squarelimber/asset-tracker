@@ -60,7 +60,12 @@ class DataMigrationService {
   static const _riskLevelAdded = 'risk_level_v12';
 
   /// Runs all pending one-time migrations. Safe to call on every launch.
+  ///
+  /// [archived] is repaired first: it is the only non-nullable column whose
+  /// absence breaks every typed holdings read, so it must exist before any
+  /// other migration selects from the table.
   Future<void> run() async {
+    await _migrateArchivedColumn();
     await _migrateAmountBased();
     await _migrateGoldSymbol();
     await _rebuildHoldingsTable();
@@ -74,13 +79,13 @@ class DataMigrationService {
   }
 
   /// SQLite cannot drop a UNIQUE constraint without rebuilding the table.
-  /// Recreate `holdings` with the full drift schema (16 columns) but without
+  /// Recreate `holdings` with the full drift schema (17 columns) but without
   /// UNIQUE(symbol) so the same market code can exist across multiple
   /// holdings/accounts.
   ///
-  /// cost_fx_rate and risk_level may be absent from the old table when this
-  /// runs on an upgrade (cost_fx_rate arrives with the v10 migration, after
-  /// the rebuild), so the copy falls back to NULL for missing columns.
+  /// cost_fx_rate, risk_level and archived may be absent from the old table
+  /// when this runs on an upgrade (they arrive with later migrations), so
+  /// the copy falls back to NULL / 0 for missing columns.
   Future<void> _rebuildHoldingsTable() async {
     final marker = await _getSetting(_holdingsRebuilt);
     if (marker != null) return;
@@ -102,6 +107,7 @@ class DataMigrationService {
         purchase_date INTEGER NULL,
         risk_level TEXT NULL,
         note TEXT NULL,
+        archived INTEGER NOT NULL DEFAULT 0,
         created_at INTEGER NOT NULL DEFAULT (CAST(strftime('%s', CURRENT_TIMESTAMP) AS INTEGER)),
         updated_at INTEGER NOT NULL DEFAULT (CAST(strftime('%s', CURRENT_TIMESTAMP) AS INTEGER))
       );
@@ -111,14 +117,16 @@ class DataMigrationService {
         oldColumns.contains('cost_fx_rate') ? 'cost_fx_rate' : 'NULL AS cost_fx_rate';
     final riskSelect =
         oldColumns.contains('risk_level') ? 'risk_level' : 'NULL AS risk_level';
+    final archivedSelect =
+        oldColumns.contains('archived') ? 'archived' : '0 AS archived';
     await _db.customStatement('''
       INSERT INTO holdings (id, account_id, name, asset_type, market_source, symbol,
                             quantity, cost_price, latest_price, currency, cost_fx_rate,
-                            purchase_date, risk_level, note,
+                            purchase_date, risk_level, note, archived,
                             created_at, updated_at)
       SELECT id, account_id, name, asset_type, market_source, symbol,
              quantity, cost_price, latest_price, currency, $costFxSelect,
-             purchase_date, $riskSelect, note,
+             purchase_date, $riskSelect, note, $archivedSelect,
              created_at, updated_at
       FROM holdings_tmp;
     ''');
@@ -377,6 +385,21 @@ class DataMigrationService {
     await _db.into(_db.settings).insertOnConflictUpdate(
       SettingsCompanion.insert(key: 'history_sync_dirty', value: const Value('1')),
     );
+  }
+
+  /// Re-adds archived to databases whose holdings table predates the v8
+  /// schema. No shipped app version drops the column, but the rebuild path
+  /// must never leave a typed read without it, so this is a defensive
+  /// no-op-when-present repair (no marker: a marker set while the column is
+  /// missing would freeze the broken state forever).
+  Future<void> _migrateArchivedColumn() async {
+    try {
+      await _db.customStatement(
+        'ALTER TABLE holdings ADD COLUMN archived INTEGER NOT NULL DEFAULT 0;',
+      );
+    } catch (_) {
+      // Column already present.
+    }
   }
 
   Future<String?> _getSetting(String key) async {
