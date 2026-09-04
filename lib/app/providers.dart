@@ -8,7 +8,9 @@ import '../domain/daily_earnings.dart';
 import '../domain/holding_details.dart';
 import '../domain/product_monthly_earnings.dart';
 import '../domain/transaction_service.dart';
+import '../services/alert_notification_service.dart';
 import '../services/history_backfill_service.dart';
+import '../services/notification_service.dart';
 import '../services/market/market_service.dart';
 import '../services/product_earnings_service.dart';
 import '../services/snapshot_service.dart';
@@ -47,6 +49,20 @@ final cnyRatesProvider = FutureProvider<Map<String, double>>((ref) async {
 /// Market data orchestration engine.
 final marketServiceProvider = Provider<MarketService>(
   (ref) => MarketService(ref.watch(daoProvider)),
+);
+
+/// Local notification wrapper. Shared singleton (see notification_service.dart):
+/// re-initializing the plugin would re-trigger the Android permission prompt.
+final notificationServiceProvider = Provider<NotificationService>(
+  (ref) => notificationService,
+);
+
+/// Evaluates alert rules and shows a local notification per new event.
+final alertNotificationServiceProvider = Provider<AlertNotificationService>(
+  (ref) => AlertNotificationService(
+    ref.watch(daoProvider),
+    ref.watch(notificationServiceProvider),
+  ),
 );
 
 /// Historical net worth backfill engine.

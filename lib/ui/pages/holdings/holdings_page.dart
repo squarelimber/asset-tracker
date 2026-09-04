@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart' hide DataRow;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -300,6 +302,9 @@ class _HoldingsPageState extends ConsumerState<HoldingsPage> {
     ref.invalidate(cnyRatesProvider);
     ref.invalidate(priceCacheProvider);
     ref.read(_refreshingProvider.notifier).state = false;
+    // Prices are fresh: re-evaluate alert rules and notify for anything
+    // newly fired (no-op when disabled or nothing changed today).
+    unawaited(ref.read(alertNotificationServiceProvider).checkAndNotify());
     if (!mounted) return;
     if (showSnack) {
       ScaffoldMessenger.of(context).showSnackBar(

@@ -6,6 +6,7 @@ All notable changes to Asset Tracker. Entries are condensed from the commit hist
 
 ### Added
 
+- Local notifications for alert rules (Android & Windows): fired rules push a system notification at startup and after each market refresh, deduped to once per rule per day; toggle in Settings → 提醒通知. Web build intentionally unaffected (no service-worker replacement, no permission prompt)
 - Cross-source fallback on desktop: Sina → Tencent, Eastmoney API → push2, Sina gold/FX → Tencent adapter, so a single endpoint outage degrades to the secondary source instead of stale cached prices
 - `TerminalFab` shared component (floating quick-action button), wired into accounts / alerts / holdings pages
 

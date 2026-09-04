@@ -7,7 +7,9 @@ import 'app/app.dart';
 import 'app/providers.dart';
 import 'data/asset_dao.dart';
 import 'data/database.dart';
+import 'services/alert_notification_service.dart';
 import 'services/data_migration_service.dart';
+import 'services/notification_service.dart';
 import 'sync/sync_service.dart';
 
 Future<void> main() async {
@@ -29,6 +31,13 @@ Future<void> main() async {
       child: const AssetTrackerApp(),
     ),
   );
+  // After the first frame: evaluate alert rules and show a local
+  // notification for anything newly fired (e.g. the monthly cashflow
+  // reminder). Deferred so the Android permission dialog never appears
+  // over the launch screen.
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    unawaited(_checkAlerts(AssetDao(db)));
+  });
 }
 
 /// Minimal error screen shown when the database cannot be opened or
@@ -66,5 +75,19 @@ Future<void> _autoSyncIfConfigured(AssetDao dao) async {
     unawaited(SyncService(dao).sync());
   } catch (_) {
     // Startup must never fail because of sync configuration.
+  }
+}
+
+/// Evaluates alert rules once at startup and shows a local notification for
+/// each newly fired event. Runs detached: a permission prompt or a slow DB
+/// must never block the UI.
+Future<void> _checkAlerts(AssetDao dao) async {
+  try {
+    final enabled = await dao.getSetting(AlertNotificationService.enabledKey);
+    if (enabled == 'false') return; // don't prompt for OS permission either
+    await notificationService.init();
+    await AlertNotificationService(dao, notificationService).checkAndNotify();
+  } catch (_) {
+    // Startup must never fail because of notifications.
   }
 }

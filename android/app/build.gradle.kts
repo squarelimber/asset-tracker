@@ -6,7 +6,9 @@ plugins {
 
 android {
     namespace = "com.assettracker.asset_tracker"
-    compileSdk = flutter.compileSdkVersion
+    // Pinned to 36: flutter_local_notifications (and its Android plugin)
+    // requires compileSdk 36; keep in sync with plugin requirements.
+    compileSdk = 36
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
