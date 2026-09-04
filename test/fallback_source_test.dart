@@ -10,9 +10,8 @@ import 'package:asset_tracker/services/market/tencent_quote_source.dart';
 
 /// Stub source returning preconfigured prices (0 / missing = failure).
 class _StubSource extends MarketDataSource {
-  _StubSource(this.source, this.prices);
+  _StubSource(MarketSource source, this.prices) : super(source);
 
-  final MarketSource source;
   final Map<String, double> prices;
   int fetchCount = 0;
 
