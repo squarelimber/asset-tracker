@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart' hide DataRow;
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../app/providers.dart';
@@ -14,6 +15,8 @@ import '../../components/app_bar_actions.dart';
 import '../../components/data_row.dart';
 import '../../components/delta_text.dart';
 import '../../components/empty_state.dart';
+import '../../components/error_state.dart';
+import '../../components/key_shortcuts.dart';
 import '../../components/section_header.dart';
 import '../../components/status_chip.dart';
 import '../../components/terminal_card.dart';
@@ -21,16 +24,29 @@ import '../../components/terminal_fab.dart';
 import '../../tokens.dart';
 import 'holding_detail_sheet.dart';
 import 'holding_dialogs.dart';
+import 'holding_menu.dart';
 import 'holdings_table.dart';
 
 final _refreshingProvider = StateProvider<bool>((ref) => false);
 
-/// Sort modes for the holdings list.
+/// Sort modes for the holdings list. Every table column has an asc/desc
+/// pair so header clicks can toggle a direction.
 enum HoldingSort {
   defaultOrder('默认'),
   amountDesc('市值从高到低'),
   amountAsc('市值从低到高'),
-  nameAsc('名称 A-Z');
+  nameAsc('名称 A-Z'),
+  nameDesc('名称 Z-A'),
+  symbolAsc('代码 A-Z'),
+  symbolDesc('代码 Z-A'),
+  quantityDesc('数量从高到低'),
+  quantityAsc('数量从低到高'),
+  costDesc('成本从高到低'),
+  costAsc('成本从低到高'),
+  priceDesc('最新价从高到低'),
+  priceAsc('最新价从低到高'),
+  profitDesc('盈亏从高到低'),
+  profitAsc('盈亏从低到高');
 
   const HoldingSort(this.label);
 
@@ -53,6 +69,14 @@ enum HoldingFilter {
 double _holdingMarketValue(HoldingRow h) {
   final type = AssetType.fromStorage(h.assetType);
   return type.isAmountBased ? h.quantity : h.quantity * h.latestPrice;
+}
+
+/// Total cost in the holding's own currency (same basis as market value).
+double _holdingCost(HoldingRow h) {
+  final type = AssetType.fromStorage(h.assetType);
+  return type.isAmountBased
+      ? (h.costPrice > 0 ? h.costPrice : h.quantity)
+      : h.quantity * h.costPrice;
 }
 
 /// Today's profit for a holding from its cached quote: the cached unit
@@ -179,15 +203,56 @@ class _HoldingsPageState extends ConsumerState<HoldingsPage> {
         filtered.sort((a, b) => _holdingMarketValue(a).compareTo(_holdingMarketValue(b)));
       case HoldingSort.nameAsc:
         filtered.sort((a, b) => a.name.compareTo(b.name));
+      case HoldingSort.nameDesc:
+        filtered.sort((a, b) => b.name.compareTo(a.name));
+      case HoldingSort.symbolAsc:
+        filtered.sort((a, b) => (a.symbol ?? '').compareTo(b.symbol ?? ''));
+      case HoldingSort.symbolDesc:
+        filtered.sort((a, b) => (b.symbol ?? '').compareTo(a.symbol ?? ''));
+      case HoldingSort.quantityDesc:
+        filtered.sort((a, b) => b.quantity.compareTo(a.quantity));
+      case HoldingSort.quantityAsc:
+        filtered.sort((a, b) => a.quantity.compareTo(b.quantity));
+      case HoldingSort.costDesc:
+        filtered.sort((a, b) => _holdingCost(b).compareTo(_holdingCost(a)));
+      case HoldingSort.costAsc:
+        filtered.sort((a, b) => _holdingCost(a).compareTo(_holdingCost(b)));
+      case HoldingSort.priceDesc:
+        filtered.sort((a, b) => b.latestPrice.compareTo(a.latestPrice));
+      case HoldingSort.priceAsc:
+        filtered.sort((a, b) => a.latestPrice.compareTo(b.latestPrice));
+      case HoldingSort.profitDesc:
+        filtered.sort((a, b) =>
+            (_holdingMarketValue(b) - _holdingCost(b))
+                .compareTo(_holdingMarketValue(a) - _holdingCost(a)));
+      case HoldingSort.profitAsc:
+        filtered.sort((a, b) =>
+            (_holdingMarketValue(a) - _holdingCost(a))
+                .compareTo(_holdingMarketValue(b) - _holdingCost(b)));
     }
     return filtered;
+  }
+
+  void _toggleSearch() {
+    setState(() {
+      _searching = !_searching;
+      if (!_searching) {
+        _query = '';
+        _searchCtrl.clear();
+      }
+    });
   }
 
   @override
   Widget build(BuildContext context) {
     final holdings = ref.watch(holdingsProvider);
     final refreshing = ref.watch(_refreshingProvider);
-    return Scaffold(
+    return KeyShortcuts(
+      onKeyDown: (key) {
+        if (key == LogicalKeyboardKey.keyR) _refresh(showSnack: true);
+        if (key == LogicalKeyboardKey.slash) _toggleSearch();
+      },
+      child: Scaffold(
       appBar: AppBar(
         title: _searching
             ? TextField(
@@ -205,13 +270,7 @@ class _HoldingsPageState extends ConsumerState<HoldingsPage> {
           IconButton(
             tooltip: '搜索',
             icon: Icon(_searching ? Icons.close : Icons.search),
-            onPressed: () => setState(() {
-              _searching = !_searching;
-              if (!_searching) {
-                _query = '';
-                _searchCtrl.clear();
-              }
-            }),
+            onPressed: _toggleSearch,
           ),
           PopupMenuButton<HoldingFilter>(
             tooltip: '筛选',
@@ -281,11 +340,17 @@ class _HoldingsPageState extends ConsumerState<HoldingsPage> {
                     assets: assets,
                     liabilities: liabilities,
                     rates: rates,
+                    sort: _sort,
+                    onSortChanged: (s) => setState(() => _sort = s),
                     onHoldingTap: (h) => showHoldingDetailSheet(context, ref, h),
+                    onHoldingMenu: (h, at) => showHoldingMenu(context, ref, h, at: at),
                   )
-                : ListView(
-                    padding: const EdgeInsets.all(T.s3),
-                    children: [
+                : RefreshIndicator(
+                    onRefresh: () => _refresh(showSnack: true),
+                    child: ListView(
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      padding: const EdgeInsets.all(T.s3),
+                      children: [
                       SegmentedButton<HoldingSection>(
                         segments: const [
                           ButtonSegment(value: HoldingSection.assets, label: Text('资产')),
@@ -342,11 +407,16 @@ class _HoldingsPageState extends ConsumerState<HoldingsPage> {
                             ),
                       ],
                     ],
+                    ),
                   ),
           );
         },
         loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => Center(child: Text('加载失败: $e')),
+        error: (e, _) => ErrorState(
+          message: '持仓数据加载失败，请重试',
+          onRetry: () => ref.invalidate(holdingsProvider),
+        ),
+      ),
       ),
     );
   }
@@ -403,7 +473,7 @@ class _HoldingRowCard extends ConsumerWidget {
             : type.isAmountBased
                 ? '持有 ${Formats.holdingDuration(holding.purchaseDate ?? holding.createdAt)}'
                 : '${holding.symbol ?? '手动净值'} · 持有 ${Formats.holdingDuration(holding.purchaseDate ?? holding.createdAt)}';
-    return TerminalCard(
+    final card = TerminalCard(
       onTap: onTap,
       child: DataRow(
         title: holding.name,
@@ -436,6 +506,31 @@ class _HoldingRowCard extends ConsumerWidget {
               ),
           ],
         ),
+      ),
+    );
+    // Mobile row actions: swipe left to archive, long-press for the full
+    // context menu (记交易 / 更新价格 / 编辑 / 归档 / 删除).
+    return Dismissible(
+      key: ValueKey('holding-${holding.id}'),
+      direction: holding.archived
+          ? DismissDirection.none
+          : DismissDirection.endToStart,
+      background: Container(
+        alignment: Alignment.centerRight,
+        padding: const EdgeInsets.only(right: T.s4),
+        color: T.surface2,
+        child: const Icon(Icons.archive_outlined, color: T.text2),
+      ),
+      onDismissed: (_) async {
+        await ref.read(daoProvider).setArchived(holding.id, true);
+        if (context.mounted) {
+          ScaffoldMessenger.of(context)
+              .showSnackBar(const SnackBar(content: Text('已归档')));
+        }
+      },
+      child: GestureDetector(
+        onLongPress: () => showHoldingMenu(context, ref, holding),
+        child: card,
       ),
     );
   }

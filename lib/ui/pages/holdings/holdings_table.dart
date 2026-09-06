@@ -11,6 +11,7 @@ import '../../components/delta_text.dart';
 import '../../components/empty_state.dart';
 import '../../components/status_chip.dart';
 import '../../tokens.dart';
+import 'holdings_page.dart';
 
 enum HoldingSection { assets, liabilities }
 
@@ -22,6 +23,9 @@ class HoldingsTable extends ConsumerWidget {
     required this.liabilities,
     required this.rates,
     required this.onHoldingTap,
+    this.sort = HoldingSort.defaultOrder,
+    this.onSortChanged,
+    this.onHoldingMenu,
   });
 
   final HoldingSection section;
@@ -30,7 +34,26 @@ class HoldingsTable extends ConsumerWidget {
   final Map<String, double> rates;
   final void Function(HoldingRow) onHoldingTap;
 
-  static const _cols = ['名称', '代码', '数量', '成本', '最新', '盈亏 / 收益率'];
+  /// Current sort mode (drives the header arrows).
+  final HoldingSort sort;
+
+  /// Called when a header cell is clicked.
+  final ValueChanged<HoldingSort>? onSortChanged;
+
+  /// Row context menu (right-click / long-press). [at] is the global
+  /// anchor position, or null to anchor below the row.
+  final void Function(HoldingRow, Offset?)? onHoldingMenu;
+
+  /// Header columns: label, width flex, alignment and the (default, other)
+  /// sort pair toggled by clicking the header.
+  static const _cols = [
+    (label: '名称', flex: 3, align: Alignment.centerLeft, pair: (HoldingSort.nameAsc, HoldingSort.nameDesc)),
+    (label: '代码', flex: 2, align: Alignment.centerLeft, pair: (HoldingSort.symbolAsc, HoldingSort.symbolDesc)),
+    (label: '数量', flex: 2, align: Alignment.centerRight, pair: (HoldingSort.quantityDesc, HoldingSort.quantityAsc)),
+    (label: '成本', flex: 2, align: Alignment.centerRight, pair: (HoldingSort.costDesc, HoldingSort.costAsc)),
+    (label: '最新', flex: 2, align: Alignment.centerRight, pair: (HoldingSort.priceDesc, HoldingSort.priceAsc)),
+    (label: '盈亏 / 收益率', flex: 3, align: Alignment.centerRight, pair: (HoldingSort.profitDesc, HoldingSort.profitAsc)),
+  ];
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -42,12 +65,17 @@ class HoldingsTable extends ConsumerWidget {
       slivers: [
         SliverPersistentHeader(
           pinned: true,
-          delegate: _TableHeaderDelegate(),
+          delegate: _TableHeaderDelegate(sort: sort, onSortChanged: onSortChanged),
         ),
         SliverToBoxAdapter(
           child: Column(
             children: [
-              for (final h in list) _TableRow(h: h, onHoldingTap: onHoldingTap),
+              for (final h in list)
+                _TableRow(
+                  h: h,
+                  onHoldingTap: onHoldingTap,
+                  onHoldingMenu: onHoldingMenu,
+                ),
             ],
           ),
         ),
@@ -57,7 +85,10 @@ class HoldingsTable extends ConsumerWidget {
 }
 
 class _TableHeaderDelegate extends SliverPersistentHeaderDelegate {
-  const _TableHeaderDelegate();
+  const _TableHeaderDelegate({required this.sort, required this.onSortChanged});
+
+  final HoldingSort sort;
+  final ValueChanged<HoldingSort>? onSortChanged;
 
   @override
   double get maxExtent => 40;
@@ -73,12 +104,16 @@ class _TableHeaderDelegate extends SliverPersistentHeaderDelegate {
         children: [
           for (final c in HoldingsTable._cols)
             Expanded(
-              flex: c == '名称' ? 3 : (c == '盈亏 / 收益率' ? 3 : 2),
-              child: Align(
-                alignment: c == '名称' || c == '代码'
-                    ? Alignment.centerLeft
-                    : Alignment.centerRight,
-                child: Text(c, style: T.label(size: 11, color: T.text2)),
+              flex: c.flex,
+              child: _HeaderCell(
+                label: c.label,
+                align: c.align,
+                active: sort == c.pair.$1 || sort == c.pair.$2,
+                ascending: sort == c.pair.$1,
+                onTap: onSortChanged == null
+                    ? null
+                    : () => onSortChanged!(
+                        sort == c.pair.$1 ? c.pair.$2 : c.pair.$1),
               ),
             ),
         ],
@@ -87,14 +122,62 @@ class _TableHeaderDelegate extends SliverPersistentHeaderDelegate {
   }
 
   @override
-  bool shouldRebuild(covariant _TableHeaderDelegate old) => false;
+  bool shouldRebuild(covariant _TableHeaderDelegate old) => old.sort != sort;
+}
+
+class _HeaderCell extends StatelessWidget {
+  const _HeaderCell({
+    required this.label,
+    required this.align,
+    required this.active,
+    required this.ascending,
+    required this.onTap,
+  });
+
+  final String label;
+  final Alignment align;
+  final bool active;
+  final bool ascending;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final isLeft = align == Alignment.centerLeft;
+    final arrow = Icon(
+      ascending ? Icons.arrow_drop_up : Icons.arrow_drop_down,
+      size: 16,
+      color: active ? T.accent : T.text3,
+    );
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        child: Align(
+          alignment: align,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (!isLeft && active) arrow,
+              Text(label, style: T.label(size: 11, color: active ? T.text1 : T.text2)),
+              if (isLeft && active) arrow,
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class _TableRow extends ConsumerWidget {
-  const _TableRow({required this.h, required this.onHoldingTap});
+  const _TableRow({
+    required this.h,
+    required this.onHoldingTap,
+    this.onHoldingMenu,
+  });
 
   final HoldingRow h;
   final void Function(HoldingRow) onHoldingTap;
+  final void Function(HoldingRow, Offset?)? onHoldingMenu;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -128,7 +211,7 @@ class _TableRow extends ConsumerWidget {
         : null;
     final hide = ref.watch(hideAmountsProvider);
     final dash = Text('--', style: T.mono(size: 13, color: T.text3));
-    return InkWell(
+    final row = InkWell(
       onTap: () => onHoldingTap(h),
       child: Container(
         height: 44,
@@ -257,6 +340,14 @@ class _TableRow extends ConsumerWidget {
           ],
         ),
       ),
+    );
+    if (onHoldingMenu == null) return row;
+    // Right-click (desktop) or long-press opens the row context menu.
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onSecondaryTapUp: (d) => onHoldingMenu!(h, d.globalPosition),
+      onLongPress: () => onHoldingMenu!(h, null),
+      child: row,
     );
   }
 }
