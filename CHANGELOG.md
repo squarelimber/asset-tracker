@@ -2,6 +2,12 @@
 
 All notable changes to Asset Tracker. Entries are condensed from the commit history; dates follow the release tags.
 
+## [0.8.4] - 2026-09-06
+
+### Fixed
+
+- 资产走势某天掉到 0 的问题: 持仓表为空的设备（如刚安装、首次同步前）启动时会写入一条全 0 快照，再经同步的 last-write-wins 策略覆盖掉其他设备上的正常数据。现在持仓为空时跳过快照写入，并补了回归测试
+
 ## [0.8.3] - 2026-09-06
 
 ### Changed
