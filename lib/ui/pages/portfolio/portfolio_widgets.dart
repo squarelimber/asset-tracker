@@ -249,15 +249,16 @@ class _NetWorthChartState extends ConsumerState<NetWorthChart> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Toolbar: title + view toggle + benchmark chip.
-          // On phones the trailing controls wrap onto a second line so the
-          // title never gets squeezed into vertical single-char columns.
+          // Toolbar: title on the left, view controls (收益率/净值 + 指数对比)
+          // right-aligned on the same row — the range presets below get their
+          // own dedicated row instead of sharing the pile.
           _NetWorthToolbar(
             title: const Text(
               '资产走势',
               style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: T.text1),
             ),
             trailing: Wrap(
+              alignment: WrapAlignment.end,
               spacing: 8,
               runSpacing: 8,
               crossAxisAlignment: WrapCrossAlignment.center,
@@ -290,31 +291,37 @@ class _NetWorthChartState extends ConsumerState<NetWorthChart> {
             ),
           ),
           const SizedBox(height: 12),
-          // Range presets + all/custom menu. On phones the presets are
-          // content-sized ChoiceChips that wrap instead of a full-width
-          // stretched segmented button.
+          // Range presets + all/custom menu. Phones get a single
+          // horizontally scrollable row (one line, no wrapping pile-up);
+          // desktop keeps the full-width segmented button.
           if (Responsive.isPhone(context))
-            Wrap(
-              spacing: 6,
-              runSpacing: 6,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: [
-                for (final opt in _rangeOptions)
-                  ChoiceChip(
-                    label: Text(opt.label),
-                    selected: _range == opt,
-                    showCheckmark: false,
-                    visualDensity: VisualDensity.compact,
-                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    onSelected: (_) => setState(() => _range = opt),
-                  ),
-                IconButton(
-                  tooltip: '全部 / 自定义日期',
-                  icon: const Icon(Icons.calendar_month_outlined, size: 20),
-                  visualDensity: VisualDensity.compact,
-                  onPressed: _showRangeMenu,
+            SizedBox(
+              height: 40,
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  children: [
+                    for (final opt in _rangeOptions)
+                      Padding(
+                        padding: const EdgeInsets.only(right: 6),
+                        child: ChoiceChip(
+                          label: Text(opt.label),
+                          selected: _range == opt,
+                          showCheckmark: false,
+                          visualDensity: VisualDensity.compact,
+                          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          onSelected: (_) => setState(() => _range = opt),
+                        ),
+                      ),
+                    IconButton(
+                      tooltip: '全部 / 自定义日期',
+                      icon: const Icon(Icons.calendar_month_outlined, size: 20),
+                      visualDensity: VisualDensity.compact,
+                      onPressed: _showRangeMenu,
+                    ),
+                  ],
                 ),
-              ],
+              ),
             )
           else
             Row(
@@ -482,7 +489,7 @@ class _NetWorthChartState extends ConsumerState<NetWorthChart> {
               );
             },
             loading: () => const SizedBox(
-              height: 220,
+              height: 330,
               child: Center(child: CircularProgressIndicator()),
             ),
             error: (e, _) => Padding(
@@ -520,9 +527,10 @@ class _NetWorthChartState extends ConsumerState<NetWorthChart> {
 
 enum _TrendView { returnRate, netValue }
 
-/// Toolbar for the net worth chart. On phones the title keeps its own line
-/// so narrow screens never squeeze it into vertical single-char columns;
-/// desktop retains the classic single-row layout.
+/// Toolbar for the net worth chart: title on the left, view controls
+/// (收益率/净值 toggle + 指数对比) right-aligned on the same row. The
+/// trailing block right-aligns and wraps only on very narrow screens, so
+/// the title never gets squeezed into vertical single-char columns.
 class _NetWorthToolbar extends StatelessWidget {
   const _NetWorthToolbar({required this.title, required this.trailing});
 
@@ -531,20 +539,17 @@ class _NetWorthToolbar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (Responsive.isPhone(context)) {
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          title,
-          const SizedBox(height: 4),
-          trailing,
-        ],
-      );
-    }
     return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        Expanded(child: title),
-        trailing,
+        title,
+        const SizedBox(width: T.s2),
+        Expanded(
+          child: Align(
+            alignment: Alignment.centerRight,
+            child: trailing,
+          ),
+        ),
       ],
     );
   }
@@ -705,13 +710,16 @@ class _TrendChartState extends State<_TrendChart> with SingleTickerProviderState
     return LayoutBuilder(
       builder: (context, constraints) {
         // Date ticks: roughly one per 80px of plot width, at least 3.
-        final plotWidth = (constraints.maxWidth - 48).clamp(0.0, double.infinity);
+        // plotLeft must stay in sync with the leftTitles reservedSize below.
+        const plotLeft = 48.0;
+        const plotBottom = 28.0;
+        final plotWidth = (constraints.maxWidth - plotLeft).clamp(0.0, double.infinity);
         final labelCount =
             (plotWidth / 80).floor().clamp(3, list.length.clamp(3, 12));
         final xInterval = (list.length / labelCount).ceilToDouble();
-        final chartHeight = Responsive.isPhone(context) ? 280.0 : 240.0;
-        const plotLeft = 48.0;
-        const plotBottom = 28.0;
+        // Tall enough on phone to stop reading as a cramped square; the
+        // toolbar cleanup above frees the vertical room for it.
+        final chartHeight = Responsive.isPhone(context) ? 330.0 : 280.0;
         final plotSize = Size(
           (constraints.maxWidth - plotLeft).clamp(0.0, double.infinity),
           (chartHeight - plotBottom).clamp(0.0, double.infinity),
@@ -745,9 +753,16 @@ class _TrendChartState extends State<_TrendChart> with SingleTickerProviderState
                         showTitles: true,
                         reservedSize: 48,
                         interval: ticks.step,
-                        getTitlesWidget: (v, meta) => Text(
-                          valueText(v),
-                          style: T.mono(size: 10, color: T.text3),
+                        // Right-align labels inside the reserved gutter so
+                        // they sit flush against the plot edge — the first
+                        // data point then starts right at the axis instead of
+                        // floating in a blank gap.
+                        getTitlesWidget: (v, meta) => Align(
+                          alignment: Alignment.centerRight,
+                          child: Text(
+                            valueText(v),
+                            style: T.mono(size: 10, color: T.text3),
+                          ),
                         ),
                       ),
                     ),
