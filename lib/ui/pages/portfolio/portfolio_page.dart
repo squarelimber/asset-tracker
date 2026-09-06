@@ -13,10 +13,10 @@ import '../../../domain/portfolio_calculator.dart';
 import '../../../services/history_backfill_service.dart';
 import '../../../services/market/market_service.dart';
 import '../../components/app_bar_actions.dart';
+import '../../components/asset_overview_card.dart';
 import '../../components/empty_state.dart';
 import '../../components/error_state.dart';
 import '../../components/key_shortcuts.dart';
-import '../../components/kpi_grid.dart';
 import '../../components/session_chip.dart';
 import '../../components/terminal_card.dart';
 import '../../tokens.dart';
@@ -234,28 +234,14 @@ class _KpiRow extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final hidden = ref.watch(hideAmountsProvider);
-    String amount(double v) => hidden ? Formats.masked() : Formats.amount(v);
     final todayEarning = ref.watch(todayEarningProvider);
-    final todayProfit = todayEarning?.profit ?? 0.0;
-    return KpiGrid(
-      tiles: [
-        StatTile(label: '总资产', value: amount(summary.totalAssets)),
-        StatTile(
-          label: '总负债',
-          value: amount(summary.totalLiabilities),
-          color: T.text2,
-        ),
-        StatTile(
-          label: '净资产',
-          value: amount(summary.netWorth),
-          delta: todayEarning?.pct,
-        ),
-        StatTile(
-          label: '今日盈亏',
-          value: '${todayProfit >= 0 ? '+' : ''}${amount(todayProfit)}',
-          color: T.changeColor(todayProfit),
-        ),
-      ],
+    return AssetOverviewCard(
+      totalAssets: summary.totalAssets,
+      totalLiabilities: summary.totalLiabilities,
+      netWorth: summary.netWorth,
+      todayProfit: todayEarning?.profit ?? 0.0,
+      todayPct: todayEarning?.pct,
+      hidden: hidden,
     );
   }
 }
