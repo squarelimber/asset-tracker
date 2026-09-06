@@ -1,4 +1,4 @@
-﻿import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart' show kIsWeb;
 
 import '../core/enums.dart';
 import '../core/formats.dart';
@@ -121,6 +121,14 @@ class HistoryBackfillService {
     final smoothPrincipals = <int, Map<String, double>>{};
     final fillers = <int, HistoryPriceLookup>{};
     final futures = <Future<void>>[];
+    // Symbols whose history fetch threw. A network failure must NOT be
+    // silently swallowed: the day-by-day loop would otherwise fall back to
+    // the *current* latest price for every historical date of that holding,
+    // corrupting the whole net-worth history (seen 2026-09-04: a bad network
+    // on fetch day produced a truncated/failed series and the snapshots for
+    // 2020-08..2026-09 came out wrong). We collect failures and abort below
+    // instead of writing bad rows.
+    final failedSymbols = <String>[];
     for (final h in holdings) {
       if (isSmoothedHolding(h)) {
         if (AssetType.fromStorage(h.assetType).isAmountBased) {
@@ -157,12 +165,31 @@ class HistoryBackfillService {
           final history = await adapter.fetch(symbol, windowStart, current);
           if (history.isNotEmpty) fillers[h.id] = HistoryPriceLookup(history);
         } catch (_) {
-          // A single source failure must not abort the whole rebuild.
+          // Record the failure; we abort the whole rebuild below rather than
+          // letting the day-by-day loop substitute the current price for the
+          // entire history of this holding.
+          failedSymbols.add(symbol);
         }
       }());
     }
     await Future.wait(futures);
     final coveredHoldings = fillers.length + smoothValues.length;
+
+    // If any market-source fetch failed (e.g. network error), abort without
+    // writing a single snapshot. Writing would fall back to the current
+    // latest price for every historical date of the failed holding and
+    // corrupt the net-worth history. The user can re-run the backfill once
+    // the network is back.
+    if (failedSymbols.isNotEmpty) {
+      return BackfillResult(
+        ok: false,
+        days: 0,
+        holdings: 0,
+        message:
+            '历史净值获取失败（${failedSymbols.join('、')}），本次未写入任何快照，'
+            '请检查网络后重试',
+      );
+    }
 
     final firstTimeRebuild = await _dao.getSetting(_backfillV3Marker) == null;
     final needFullRebuild = forceRebuild || firstTimeRebuild;
