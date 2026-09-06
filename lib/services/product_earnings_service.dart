@@ -76,7 +76,7 @@ class ProductEarningsService {
         if (type.isAmountBased) {
           final flows = await _dao.getTransactionsForHolding(h.id);
           smoothValues[h.id] =
-              smoothCalc.amountHistory(h, flows, from: from, to: current);
+              smoothCalc.amountHistory(h, flows, from: from, to: current, today: current);
           smoothPrincipals[h.id] =
               smoothCalc.amountPrincipal(h, flows, from: from, to: current);
         }

@@ -69,6 +69,7 @@ void main() {
       const [],
       from: DateTime(2026, 1, 1),
       to: DateTime(2026, 1, 11), // 10 days
+      today: DateTime(2026, 1, 11),
     );
     expect(map['2026-01-01'], closeTo(1000, 1e-6));
     expect(map['2026-01-11'], closeTo(1210, 1e-6));
@@ -86,6 +87,7 @@ void main() {
       flows,
       from: DateTime(2026, 1, 1),
       to: DateTime(2026, 1, 11),
+      today: DateTime(2026, 1, 11),
     );
     // Day before income: below 2000 + allocated gain for segment 1.
     final before = map['2026-01-04']!;
@@ -95,6 +97,42 @@ void main() {
     // Ends remain exact.
     expect(map['2026-01-01'], closeTo(2000, 1e-6)); // initial principal
     expect(map['2026-01-11'], closeTo(3200, 1e-6));
+  });
+
+  test('future income flow does not leak into past-day windows', () {
+    // Tiantianbao-style: inception 1/1 with 1,000,000 invested, then a
+    // 122,544.9 income on 8/31. Both quantity and cost include the income
+    // (gain = 0), so the all-time gain is 0.
+    final h = _amountHolding(quantity: 1122544.9, cost: 1122544.9);
+    final flows = [
+      _income(id: 1, at: DateTime(2026, 8, 31), amount: 122544.9, targetId: 1),
+    ];
+    // Inspect a past day (1/15) that is well before the 8/31 income, with
+    // "today" after the income. The 122,544.9 must NOT appear in the window.
+    final map = calc.amountHistory(
+      h,
+      flows,
+      from: DateTime(2026, 1, 1),
+      to: DateTime(2026, 1, 15),
+      today: DateTime(2026, 9, 6),
+    );
+    // Principal before the income is 1,000,000; with zero gain the value
+    // stays flat at the pre-income principal.
+    expect(map['2026-01-01'], closeTo(1000000, 1.0));
+    expect(map['2026-01-15'], closeTo(1000000, 1.0));
+    // Daily change is ~0, not the phantom 122,544.9.
+    final dayChange = map['2026-01-15']! - map['2026-01-14']!;
+    expect(dayChange.abs(), lessThan(1.0));
+    // The income day itself still jumps by the full amount.
+    final atIncome = calc.amountHistory(
+      h,
+      flows,
+      from: DateTime(2026, 1, 1),
+      to: DateTime(2026, 9, 6),
+      today: DateTime(2026, 9, 6),
+    );
+    expect(atIncome['2026-08-31']! - atIncome['2026-08-30']!,
+        closeTo(122544.9, 500));
   });
 
   test('transfer with costMoved=false does not shift the principal', () {

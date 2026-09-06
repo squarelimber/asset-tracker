@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
 import '../../core/formats.dart';
-import '../../core/responsive.dart';
 import '../tokens.dart';
 import 'delta_text.dart';
 import 'terminal_card.dart';
@@ -80,7 +79,8 @@ class AssetOverviewCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final desktop = Responsive.isDesktop(context);
+    final width = MediaQuery.sizeOf(context).width;
+    final desktop = width >= 1100;
     final columns = desktop ? 4 : 2;
 
     final cells = <Widget>[
@@ -105,9 +105,6 @@ class AssetOverviewCard extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           for (var r = 0; r < rows.length; r++)
-            // IntrinsicHeight bounds each row to its tallest cell so the
-            // stretch (full-height hairline dividers) works inside the
-            // unbounded-height ListView.
             IntrinsicHeight(
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.stretch,

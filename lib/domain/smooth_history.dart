@@ -33,18 +33,31 @@ class SmoothHistoryCalculator {
 
   /// Daily values (yyyy-MM-dd -> value) for an amount-based holding.
   /// [flows] are the holding's related transactions (any order).
+  ///
+  /// [today] is the reference "now" used to detect whether [to] is a past
+  /// day. When [to] is before [today], the all-time gain is distributed
+  /// across the full timeline (inception -> [today]) and the sub-range
+  /// [from, to] is read off, so flows that occurred after [to] do not leak
+  /// into the window as phantom gains. Defaults to [DateTime.now].
   Map<String, double> amountHistory(
     HoldingRow h,
     List<TransactionRow> flows, {
     required DateTime from,
     required DateTime to,
+    DateTime? today,
   }) {
     final result = <String, double>{};
-    final current = h.quantity; // current amount
+    final current = h.quantity; // current amount (as of [today])
     final currentCost = h.costPrice > 0 ? h.costPrice : h.quantity;
     final totalGain = current - currentCost;
 
-    final segments = _amountSegments(h, flows, from: from, to: to);
+    final dayTo = _dayOf(to);
+    final dayToday = _dayOf(today ?? DateTime.now());
+    // When [to] is a past day, extend the timeline to [today] so that
+    // post-[to] flows stay outside the window and the gain is spread over
+    // the full accrual period rather than compressed into [from, to].
+    final horizon = to.isBefore(dayToday) ? dayToday : dayTo;
+    final segments = _amountSegments(h, flows, from: from, to: horizon);
 
     // Distribute the total gain by principal x days.
     var weightSum = 0.0;
@@ -52,7 +65,6 @@ class SmoothHistoryCalculator {
       weightSum += s.principal * s.days;
     }
     var cumGain = 0.0;
-    final dayTo = _dayOf(to);
     for (final s in segments) {
       final segGain = weightSum <= 0 ? 0.0 : totalGain * (s.principal * s.days) / weightSum;
       final startValue = s.principal + cumGain;
@@ -70,8 +82,12 @@ class SmoothHistoryCalculator {
         );
       }
     }
-    // Ensure the final day is exactly the current amount.
-    result[todayKey(dayTo)] = current;
+    // When [to] is today (or later), the final day is exactly the current
+    // amount. When [to] is a past day the interpolated value at [to] is
+    // already consistent with the principal timeline (future flows excluded).
+    if (!to.isBefore(dayToday)) {
+      result[todayKey(dayTo)] = current;
+    }
     return result;
   }
 

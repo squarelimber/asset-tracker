@@ -138,6 +138,7 @@ class HistoryBackfillService {
             flows,
             from: windowStart,
             to: current,
+            today: current,
           );
           smoothPrincipals[h.id] = smoothCalc.amountPrincipal(
             h,
