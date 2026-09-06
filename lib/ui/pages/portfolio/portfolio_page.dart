@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -13,7 +14,10 @@ import '../../../services/history_backfill_service.dart';
 import '../../../services/market/market_service.dart';
 import '../../components/app_bar_actions.dart';
 import '../../components/empty_state.dart';
+import '../../components/error_state.dart';
+import '../../components/key_shortcuts.dart';
 import '../../components/kpi_grid.dart';
+import '../../components/session_chip.dart';
 import '../../components/terminal_card.dart';
 import '../../tokens.dart';
 import 'portfolio_widgets.dart';
@@ -54,6 +58,7 @@ class PortfolioPage extends ConsumerStatefulWidget {
 
 class _PortfolioPageState extends ConsumerState<PortfolioPage> {
   final _refreshing = ValueNotifier<bool>(false);
+  DateTime? _lastRefreshAt;
 
   @override
   void initState() {
@@ -88,6 +93,7 @@ class _PortfolioPageState extends ConsumerState<PortfolioPage> {
       _refreshing.value = false;
     }
     if (!mounted || result == null) return;
+    setState(() => _lastRefreshAt = DateTime.now());
     if (showSnack) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -118,75 +124,103 @@ class _PortfolioPageState extends ConsumerState<PortfolioPage> {
         );
       });
     });
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('总览'),
-        actions: [
-          const TerminalAppBarActions(),
-          Consumer(builder: (context, ref, _) {
-            final hidden = ref.watch(hideAmountsProvider);
-            return IconButton(
-              tooltip: hidden ? '显示金额' : '隐藏金额',
-              onPressed: () =>
-                  ref.read(hideAmountsProvider.notifier).state = !hidden,
-              icon: Icon(
-                hidden ? Icons.visibility_off_outlined : Icons.visibility_outlined,
-                color: T.text2,
-              ),
-            );
-          }),
-          ValueListenableBuilder<bool>(
-            valueListenable: _refreshing,
-            builder: (context, refreshing, _) => IconButton(
-              tooltip: '刷新行情',
-              onPressed: refreshing ? null : _refreshPrices,
-              icon: refreshing
-                  ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.refresh, color: T.text2),
-            ),
-          ),
-        ],
-      ),
-      body: holdings.when(
-        data: (list) => list.isEmpty
-            ? const EmptyState(
-                message: '还没有持仓数据\n去"持仓"页添加你的第一笔资产吧',
-              )
-            : ResponsiveShell(
-                child: summary.when(
-                  data: (s) => ListView(
-                    padding: const EdgeInsets.all(T.s3),
-                    children: [
-                      _KpiRow(summary: s),
-                      const SizedBox(height: T.s3),
-                      if (Responsive.isPhone(context)) ...[
-                        NetWorthChart(),
-                        const SizedBox(height: T.s3),
-                        AllocationCard(summary: s),
-                      ] else ...[
-                        Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Expanded(flex: 2, child: NetWorthChart()),
-                            const SizedBox(width: T.s3),
-                            Expanded(flex: 1, child: AllocationCard(summary: s)),
-                          ],
-                        ),
-                        const SizedBox(height: T.s3),
-                      ],
-                      _CalendarEntries(),
-                    ],
-                  ),
-                  loading: () => const Center(child: CircularProgressIndicator()),
-                  error: (e, _) => Center(child: Text('计算失败: $e')),
+    return KeyShortcuts(
+      onKeyDown: (key) {
+        if (key == LogicalKeyboardKey.keyR) _refreshPrices(showSnack: true);
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('总览'),
+          actions: [
+            const TerminalAppBarActions(),
+            Consumer(builder: (context, ref, _) {
+              final hidden = ref.watch(hideAmountsProvider);
+              return IconButton(
+                tooltip: hidden ? '显示金额' : '隐藏金额',
+                onPressed: () =>
+                    ref.read(hideAmountsProvider.notifier).state = !hidden,
+                icon: Icon(
+                  hidden ? Icons.visibility_off_outlined : Icons.visibility_outlined,
+                  color: T.text2,
                 ),
+              );
+            }),
+            ValueListenableBuilder<bool>(
+              valueListenable: _refreshing,
+              builder: (context, refreshing, _) => IconButton(
+                tooltip: '刷新行情',
+                onPressed: refreshing ? null : _refreshPrices,
+                icon: refreshing
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.refresh, color: T.text2),
               ),
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => Center(child: Text('加载失败: $e')),
+            ),
+          ],
+        ),
+        body: holdings.when(
+          data: (list) => list.isEmpty
+              ? const EmptyState(
+                  message: '还没有持仓数据\n去"持仓"页添加你的第一笔资产吧',
+                )
+              : ResponsiveShell(
+                  child: summary.when(
+                    data: (s) => RefreshIndicator(
+                      onRefresh: () => _refreshPrices(showSnack: true),
+                      child: ListView(
+                        physics: const AlwaysScrollableScrollPhysics(),
+                        padding: const EdgeInsets.all(T.s3),
+                        children: [
+                          Row(
+                            children: [
+                              const SessionChip(),
+                              const SizedBox(width: T.s2),
+                              if (_lastRefreshAt != null)
+                                Text(
+                                  '更新于 ${Formats.dateTime(_lastRefreshAt!)}',
+                                  style: T.mono(size: 11, color: T.text3),
+                                ),
+                              const Spacer(),
+                            ],
+                          ),
+                          const SizedBox(height: T.s2),
+                          _KpiRow(summary: s),
+                          const SizedBox(height: T.s3),
+                          if (Responsive.isPhone(context)) ...[
+                            NetWorthChart(),
+                            const SizedBox(height: T.s3),
+                            AllocationCard(summary: s),
+                          ] else ...[
+                            Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Expanded(flex: 2, child: NetWorthChart()),
+                                const SizedBox(width: T.s3),
+                                Expanded(flex: 1, child: AllocationCard(summary: s)),
+                              ],
+                            ),
+                            const SizedBox(height: T.s3),
+                          ],
+                          _CalendarEntries(),
+                        ],
+                      ),
+                    ),
+                    loading: () => const Center(child: CircularProgressIndicator()),
+                    error: (e, _) => ErrorState(
+                      message: '总览计算失败，请重试',
+                      onRetry: () => ref.invalidate(summaryProvider),
+                    ),
+                  ),
+                ),
+          loading: () => const Center(child: CircularProgressIndicator()),
+          error: (e, _) => ErrorState(
+            message: '持仓数据加载失败，请重试',
+            onRetry: () => ref.invalidate(holdingsProvider),
+          ),
+        ),
       ),
     );
   }

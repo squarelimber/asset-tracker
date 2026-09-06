@@ -11,6 +11,7 @@ import '../../components/app_bar_actions.dart';
 import '../../components/data_row.dart';
 import '../../components/delta_text.dart';
 import '../../components/empty_state.dart';
+import '../../components/error_state.dart';
 import '../../components/section_header.dart';
 import '../../components/status_chip.dart';
 import '../../components/terminal_card.dart';
@@ -45,40 +46,53 @@ class AccountDetailPage extends ConsumerWidget {
           const TerminalAppBarActions(),
         ],
       ),
-      body: ListView(
-        padding: const EdgeInsets.all(T.s3),
-        children: [
-          const SectionHeader(label: '持仓'),
-          holdings.when(
-            data: (list) => list.isEmpty
-                ? const EmptyState(message: '暂无持仓')
-                : Column(
-                    children: [
-                      for (final h in list) ...[
-                        _HoldingRow(h: h),
-                        const SizedBox(height: T.s1),
+      body: RefreshIndicator(
+        onRefresh: () async {
+          ref.invalidate(holdingsByAccountProvider(accountId));
+          ref.invalidate(transactionsByAccountProvider(accountId));
+        },
+        child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: const EdgeInsets.all(T.s3),
+          children: [
+            const SectionHeader(label: '持仓'),
+            holdings.when(
+              data: (list) => list.isEmpty
+                  ? const EmptyState(message: '暂无持仓')
+                  : Column(
+                      children: [
+                        for (final h in list) ...[
+                          _HoldingRow(h: h),
+                          const SizedBox(height: T.s1),
+                        ],
                       ],
-                    ],
-                  ),
-            loading: () => const Center(child: CircularProgressIndicator()),
-            error: (e, _) => Text('加载失败: $e'),
-          ),
-          const SizedBox(height: T.s4),
-          const SectionHeader(label: '交易流水'),
-          txns.when(
-            data: (list) => list.isEmpty
-                ? const EmptyState(message: '暂无流水')
-                : Column(
-                    children: [
-                      for (final t in list) ...[
-                        _TransactionRow(txn: t),
+                    ),
+              loading: () => const Center(child: CircularProgressIndicator()),
+              error: (e, _) => ErrorState(
+                message: '持仓加载失败，请重试',
+                onRetry: () => ref.invalidate(holdingsByAccountProvider(accountId)),
+              ),
+            ),
+            const SizedBox(height: T.s4),
+            const SectionHeader(label: '交易流水'),
+            txns.when(
+              data: (list) => list.isEmpty
+                  ? const EmptyState(message: '暂无流水')
+                  : Column(
+                      children: [
+                        for (final t in list) ...[
+                          _TransactionRow(txn: t),
+                        ],
                       ],
-                    ],
-                  ),
-            loading: () => const Center(child: CircularProgressIndicator()),
-            error: (e, _) => Text('加载失败: $e'),
-          ),
-        ],
+                    ),
+              loading: () => const Center(child: CircularProgressIndicator()),
+              error: (e, _) => ErrorState(
+                message: '流水加载失败，请重试',
+                onRetry: () => ref.invalidate(transactionsByAccountProvider(accountId)),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

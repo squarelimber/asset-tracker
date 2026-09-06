@@ -13,6 +13,7 @@ import '../../../services/alert_service.dart';
 import '../../components/app_bar_actions.dart';
 import '../../components/data_row.dart';
 import '../../components/empty_state.dart';
+import '../../components/error_state.dart';
 import '../../components/form_fields.dart';
 import '../../components/section_header.dart';
 import '../../components/terminal_fab.dart';
@@ -71,58 +72,71 @@ class _AlertsPageState extends ConsumerState<AlertsPage> {
         label: '添加规则',
       ),
       body: ResponsiveShell(
-        child: ListView(
-          children: [
-            const SectionHeader(label: '最近提醒'),
-            events.when(
-              data: (list) => list.isEmpty
-                  ? const EmptyState(message: '暂无提醒，点击右上角 ⚡ 立即检查')
-                  : Column(
-                      children: [
-                        for (final e in list)
-                          DataRow(
-                            leading: _colorDot(_eventColor(e.title)),
-                            title: e.title,
-                            subtitle:
-                                Text('${e.message}\n${Formats.dateTime(e.triggeredAt.toLocal())}'),
-                            trailing: const SizedBox.shrink(),
-                          ),
-                      ],
-                    ),
-              loading: () => const Center(child: CircularProgressIndicator()),
-              error: (e, _) => Text('加载失败: $e'),
-            ),
-            const SizedBox(height: T.s4),
-            const SectionHeader(label: '提醒规则'),
-            rules.when(
-              data: (list) => list.isEmpty
-                  ? const EmptyState(
-                      message: '暂无规则，点击右下角添加\n如：集中度风险、配置比例、跌幅预警、现金流提醒')
-                  : Column(
-                      children: [
-                        for (final r in list)
-                          DataRow(
-                            leading: _colorDot(_colorFor(AlertRuleType.fromStorage(r.type)),
-                                icon: _iconFor(AlertRuleType.fromStorage(r.type))),
-                            title: r.name,
-                            subtitle: Text(_paramsSummary(r)),
-                            trailing: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Switch(value: r.enabled, onChanged: (v) => _toggleRule(r, v)),
-                                IconButton(
-                                  icon: const Icon(Icons.delete_outline),
-                                  onPressed: () => _confirmDelete(r),
-                                ),
-                              ],
+        child: RefreshIndicator(
+          onRefresh: () async {
+            ref.invalidate(alertEventsProvider);
+            ref.invalidate(alertRulesProvider);
+          },
+          child: ListView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            children: [
+              const SectionHeader(label: '最近提醒'),
+              events.when(
+                data: (list) => list.isEmpty
+                    ? const EmptyState(message: '暂无提醒，点击右上角 ⚡ 立即检查')
+                    : Column(
+                        children: [
+                          for (final e in list)
+                            DataRow(
+                              leading: _colorDot(_eventColor(e.title)),
+                              title: e.title,
+                              subtitle:
+                                  Text('${e.message}\n${Formats.dateTime(e.triggeredAt.toLocal())}'),
+                              trailing: const SizedBox.shrink(),
                             ),
-                          ),
-                      ],
-                    ),
-              loading: () => const Center(child: CircularProgressIndicator()),
-              error: (e, _) => Text('加载失败: $e'),
-            ),
-          ],
+                        ],
+                      ),
+                loading: () => const Center(child: CircularProgressIndicator()),
+                error: (e, _) => ErrorState(
+                  message: '提醒数据加载失败，请重试',
+                  onRetry: () => ref.invalidate(alertEventsProvider),
+                ),
+              ),
+              const SizedBox(height: T.s4),
+              const SectionHeader(label: '提醒规则'),
+              rules.when(
+                data: (list) => list.isEmpty
+                    ? const EmptyState(
+                        message: '暂无规则，点击右下角添加\n如：集中度风险、配置比例、跌幅预警、现金流提醒')
+                    : Column(
+                        children: [
+                          for (final r in list)
+                            DataRow(
+                              leading: _colorDot(_colorFor(AlertRuleType.fromStorage(r.type)),
+                                  icon: _iconFor(AlertRuleType.fromStorage(r.type))),
+                              title: r.name,
+                              subtitle: Text(_paramsSummary(r)),
+                              trailing: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Switch(value: r.enabled, onChanged: (v) => _toggleRule(r, v)),
+                                  IconButton(
+                                    icon: const Icon(Icons.delete_outline),
+                                    onPressed: () => _confirmDelete(r),
+                                  ),
+                                ],
+                              ),
+                            ),
+                        ],
+                      ),
+                loading: () => const Center(child: CircularProgressIndicator()),
+                error: (e, _) => ErrorState(
+                  message: '规则加载失败，请重试',
+                  onRetry: () => ref.invalidate(alertRulesProvider),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

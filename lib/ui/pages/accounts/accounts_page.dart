@@ -13,6 +13,7 @@ import '../../components/app_bar_actions.dart';
 import '../../components/data_row.dart';
 import '../../components/delta_text.dart';
 import '../../components/empty_state.dart';
+import '../../components/error_state.dart';
 import '../../components/form_fields.dart';
 import '../../components/kpi_grid.dart';
 import '../../components/section_header.dart';
@@ -41,19 +42,26 @@ class AccountsPage extends ConsumerWidget {
         data: (list) => list.isEmpty
             ? const EmptyState(message: '还没有账户\n点击右下角按钮创建第一个账户')
             : ResponsiveShell(
-                child: ListView(
-                  children: [
-                    _AccountsKpis(accounts: list),
-                    const SizedBox(height: T.s3),
-                    for (final account in list) ...[
-                      _AccountCard(account: account),
+                child: RefreshIndicator(
+                  onRefresh: () async => ref.invalidate(accountsProvider),
+                  child: ListView(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    children: [
+                      _AccountsKpis(accounts: list),
                       const SizedBox(height: T.s3),
+                      for (final account in list) ...[
+                        _AccountCard(account: account),
+                        const SizedBox(height: T.s3),
+                      ],
                     ],
-                  ],
+                  ),
                 ),
               ),
         loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => Center(child: Text('加载失败: $e')),
+        error: (e, _) => ErrorState(
+          message: '账户数据加载失败，请重试',
+          onRetry: () => ref.invalidate(accountsProvider),
+        ),
       ),
     );
   }

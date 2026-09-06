@@ -8,6 +8,7 @@ import '../../../core/formats.dart';
 import '../../../core/responsive.dart';
 import '../../../domain/daily_earnings.dart';
 import '../../components/app_bar_actions.dart';
+import '../../components/error_state.dart';
 import '../../components/heat_cell.dart';
 import '../../components/terminal_card.dart';
 import '../../tokens.dart';
@@ -52,13 +53,17 @@ class _EarningsCalendarPageState extends ConsumerState<EarningsCalendarPage> {
       ),
       body: earnings.when(
         loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => Center(child: Text('加载失败：$e')),
+        error: (e, _) => ErrorState(
+          message: '收益日历加载失败，请重试',
+          onRetry: () => ref.invalidate(earningsProvider),
+        ),
         data: (list) => _CalendarBody(
           earnings: list,
           year: _year,
           month: _month,
           view: _view,
           calc: _calc,
+          onRefresh: () => ref.invalidate(earningsProvider),
           onPrev: () => _shift(-1),
           onNext: () => _shift(1),
           onOpenMonth: (m) {
@@ -98,6 +103,7 @@ class _CalendarBody extends StatelessWidget {
     required this.month,
     required this.view,
     required this.calc,
+    required this.onRefresh,
     required this.onPrev,
     required this.onNext,
     required this.onOpenMonth,
@@ -109,6 +115,7 @@ class _CalendarBody extends StatelessWidget {
   final int month;
   final _CalView view;
   final DailyEarningsCalculator calc;
+  final VoidCallback onRefresh;
   final VoidCallback onPrev;
   final VoidCallback onNext;
   final ValueChanged<int> onOpenMonth;
@@ -134,11 +141,14 @@ class _CalendarBody extends StatelessWidget {
     final maxProfit = profits.isEmpty ? 0.0 : profits.reduce(math.max);
 
     return ResponsiveShell(
-      child: ListView(
-        padding: const EdgeInsets.all(T.s3),
-        children: [
-          Center(
-            child: SegmentedButton<_CalView>(
+      child: RefreshIndicator(
+        onRefresh: () async => onRefresh(),
+        child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: const EdgeInsets.all(T.s3),
+          children: [
+            Center(
+              child: SegmentedButton<_CalView>(
               segments: const [
                 ButtonSegment(value: _CalView.month, label: Text('月')),
                 ButtonSegment(value: _CalView.year, label: Text('年')),
@@ -175,12 +185,13 @@ class _CalendarBody extends StatelessWidget {
               maxProfit: maxProfit,
             ),
           ],
-          const SizedBox(height: T.s3),
-          Text('盈亏 = 当日净资产 − 前日净资产；负债变化计入当日盈亏', style: T.label()),
-        ],
-      ),
-    );
-  }
+            const SizedBox(height: T.s3),
+            Text('盈亏 = 当日净资产 − 前日净资产；负债变化计入当日盈亏', style: T.label()),
+          ],
+          ),
+        ),
+      );
+    }
 
   Widget _navRow(String label) {
     return Row(
