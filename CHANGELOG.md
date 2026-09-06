@@ -2,6 +2,30 @@
 
 All notable changes to Asset Tracker. Entries are condensed from the commit history; dates follow the release tags.
 
+## [0.8.2] - 2026-09-06
+
+### Added
+
+- Pull-to-refresh on every data page: 总览 / 持仓 / 账户（含明细）/ 行情 / 统计 / 提醒 / 两个日历页 / 明细 sheet
+- Unified `ErrorState` component (icon + friendly message + retry) replacing ad-hoc error text across all pages
+- Markets page: 60s TTL quote cache; manual refresh keeps stale data while refetching, with snackbar feedback and an "更新于" timestamp
+- `SessionChip`: A-share trading session pill in 总览/行情 headers (交易中 / 午休 / 未开盘 / 已收盘 / 休市, local time; no holiday calendar)
+- Desktop rail: 提醒 / 设置 actions pinned to the bottom of the navigation rail
+- Desktop keyboard shortcuts: 1-5 switch main pages, r refresh, / focus search (suppressed while editing)
+- Holdings table: click column headers to sort (pair toggle); row context menu (right-click on desktop, long-press on phone) with 记一笔交易 / 更新价格 / 编辑 / 归档 / 删除 (confirm dialog)
+- Mobile: swipe a holdings row left to archive; long-press for the full menu
+- Stats page: 最佳/最差月份 (monthly cash flow) and 盈利月份占比
+- Overflow regression smoke tests: all 10 pages at 360×640 and 1280×800 with a fully seeded in-memory database
+
+### Changed
+
+- Dialogs and bottom sheets use terminal-styled chrome (surface2 background, border, unified radius)
+- Tappable phone rows get ≥44px touch targets
+- text3 raised to #768390 (5.0:1 contrast on bg, WCAG AA for normal text)
+- Desktop content max width 1280 → 1440
+- Web: dark background + theme-color meta to prevent white flash before the WASM bundle loads
+- KPI tile values wrap to 2 lines with ellipsis instead of overflowing
+
 ## [0.8.1] - 2026-09-04
 
 ### Added
