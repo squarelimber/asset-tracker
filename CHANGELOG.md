@@ -2,6 +2,14 @@
 
 All notable changes to Asset Tracker. Entries are condensed from the commit history; dates follow the release tags.
 
+## [0.8.3] - 2026-09-06
+
+### Changed
+
+- 总览: 总资产/总负债/净资产/今日盈亏 merged into one 资产总览 card (4 columns on desktop, 2×2 on phone)
+- 资产走势 chart enlarged (phone 280→330px, desktop 240→280px); Y-axis labels right-aligned flush with the plot edge so the first data point starts right at the axis
+- 资产走势 toolbar: title shares one row with the 收益率/净值 toggle + 指数对比 chip (right-aligned); range presets get their own dedicated row (single horizontally scrollable line on phone, no wrapping pile-up)
+
 ## [0.8.2] - 2026-09-06
 
 ### Added
