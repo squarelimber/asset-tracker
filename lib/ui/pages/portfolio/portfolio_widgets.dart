@@ -485,7 +485,20 @@ class _NetWorthChartState extends ConsumerState<NetWorthChart> {
               height: 220,
               child: Center(child: CircularProgressIndicator()),
             ),
-            error: (e, _) => Text('加载失败: $e'),
+            error: (e, _) => Padding(
+              padding: const EdgeInsets.all(24),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text('净值数据加载失败', style: T.mono(size: 12, color: T.text2)),
+                  const SizedBox(width: 8),
+                  TextButton(
+                    onPressed: () => ref.invalidate(snapshotsProvider),
+                    child: const Text('重试'),
+                  ),
+                ],
+              ),
+            ),
           ),
         ],
       ),

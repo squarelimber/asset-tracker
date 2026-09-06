@@ -9,6 +9,7 @@ import '../../../core/symbols.dart';
 import '../../../data/database.dart';
 import '../../../domain/closed_holding.dart';
 import '../../../domain/trade_stats.dart';
+import '../../components/error_state.dart';
 import '../../components/status_chip.dart';
 import '../../components/terminal_card.dart';
 import '../../tokens.dart';
@@ -233,7 +234,10 @@ class HoldingDetailSheet extends ConsumerWidget {
                   ],
                 ),
           loading: () => const Center(child: CircularProgressIndicator()),
-          error: (e, _) => Text('加载失败: $e'),
+          error: (e, _) => ErrorState(
+            message: '流水加载失败，请重试',
+            onRetry: () => ref.invalidate(transactionsByHoldingProvider(holding.id)),
+          ),
         ),
       ],
     );

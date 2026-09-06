@@ -71,7 +71,17 @@ class DayDetailSheet extends ConsumerWidget {
           error: (e, _) => SizedBox(
             height: 120,
             child: Center(
-              child: Text('加载失败: $e', style: const TextStyle(color: T.text3)),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text('加载失败', style: TextStyle(color: T.text2)),
+                  const SizedBox(width: 8),
+                  TextButton(
+                    onPressed: () => ref.invalidate(dayDetailProvider(date)),
+                    child: const Text('重试'),
+                  ),
+                ],
+              ),
             ),
           ),
         ),

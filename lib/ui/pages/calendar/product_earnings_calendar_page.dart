@@ -8,6 +8,7 @@ import '../../../core/formats.dart';
 import '../../../core/responsive.dart';
 import '../../../domain/product_monthly_earnings.dart';
 import '../../components/app_bar_actions.dart';
+import '../../components/error_state.dart';
 import '../../components/sparkline.dart';
 import '../../components/terminal_card.dart';
 import '../../tokens.dart';
@@ -71,6 +72,7 @@ class _ProductEarningsCalendarPageState
           view: _view,
           filter: _filter,
           mobileMonths: _mobileMonths,
+          onRefresh: () => ref.invalidate(productEarningsProvider(_year)),
           onShiftYear: _shiftYear,
           onShiftMonth: _shiftMonth,
           onOpenMonth: _openMonth,
@@ -79,7 +81,10 @@ class _ProductEarningsCalendarPageState
           onMobileMonthsChanged: (n) => setState(() => _mobileMonths = n),
         ),
         loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => Center(child: Text('加载失败: $e')),
+        error: (e, _) => ErrorState(
+          message: '产品收益数据加载失败，请重试',
+          onRetry: () => ref.invalidate(productEarningsProvider(_year)),
+        ),
       ),
     );
   }
@@ -93,6 +98,7 @@ class _PEBody extends StatelessWidget {
     required this.view,
     required this.filter,
     required this.mobileMonths,
+    required this.onRefresh,
     required this.onShiftYear,
     required this.onShiftMonth,
     required this.onOpenMonth,
@@ -107,6 +113,7 @@ class _PEBody extends StatelessWidget {
   final _PEView view;
   final _PEFilter filter;
   final int mobileMonths;
+  final VoidCallback onRefresh;
   final ValueChanged<int> onShiftYear;
   final ValueChanged<int> onShiftMonth;
   final ValueChanged<int> onOpenMonth;
@@ -231,14 +238,21 @@ class _PEBody extends StatelessWidget {
           const SizedBox(height: T.s3),
           Expanded(
             child: isYearView
-                ? _YearMatrix(
-                    rows: rows,
-                    year: year,
-                    requestedMonths: mobileMonths,
-                    onTapMonth: onOpenMonth,
+                ? RefreshIndicator(
+                    onRefresh: () async => onRefresh(),
+                    child: _YearMatrix(
+                      rows: rows,
+                      year: year,
+                      requestedMonths: mobileMonths,
+                      onTapMonth: onOpenMonth,
+                    ),
                   )
-                : SingleChildScrollView(
-                    child: _MonthList(rows: monthRows, year: year, month: month),
+                : RefreshIndicator(
+                    onRefresh: () async => onRefresh(),
+                    child: SingleChildScrollView(
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      child: _MonthList(rows: monthRows, year: year, month: month),
+                    ),
                   ),
           ),
           const SizedBox(height: T.s3),

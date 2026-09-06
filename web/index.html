@@ -19,6 +19,16 @@
   <meta charset="UTF-8">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
   <meta name="description" content="Local-first multi-platform asset tracking app: stocks, funds, gold, crypto and bank products with automatic market data sync.">
+  <!-- Dark-only app: tell the browser so the page (and form controls)
+       never flash light before the Flutter canvas paints. -->
+  <meta name="color-scheme" content="dark">
+  <style>
+    html, body {
+      background: #0A0C0F;
+      color: #E6EDF3;
+      margin: 0;
+    }
+  </style>
 
   <!-- iOS meta tags & icons -->
   <meta name="mobile-web-app-capable" content="yes">
@@ -58,12 +68,12 @@
       if (!supportsWasmGC()) {
         window.addEventListener('DOMContentLoaded', function () {
           document.body.innerHTML =
-            '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;font-family:-apple-system,Segoe UI,Roboto,sans-serif;text-align:center;padding:24px;color:#333;background:#f6f7f9">' +
+            '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;font-family:-apple-system,Segoe UI,Roboto,sans-serif;text-align:center;padding:24px;color:#E6EDF3;background:#0A0C0F">' +
             '<h2 style="margin:0 0 12px">浏览器版本过旧</h2>' +
             '<p style="max-width:420px;line-height:1.6">Asset Tracker 的 Web 版需要支持 WebAssembly GC 的现代浏览器。</p>' +
             '<p style="max-width:420px;line-height:1.6">请升级到以下任一版本后重试：<br>' +
             'Chrome / Edge ≥ 119<br>Safari ≥ 17（iOS 17 及以上）<br>Firefox ≥ 120</p>' +
-            '<p style="max-width:420px;line-height:1.6;color:#888;font-size:13px">也可下载 Windows 桌面版或 Android App 使用全部功能。</p>' +
+            '<p style="max-width:420px;line-height:1.6;color:#768390;font-size:13px">也可下载 Windows 桌面版或 Android App 使用全部功能。</p>' +
             '</div>';
         });
       }
