@@ -60,6 +60,30 @@ class AppTheme {
         contentTextStyle: TextStyle(color: T.text1, fontSize: 13),
         behavior: SnackBarBehavior.floating,
       ),
+      dialogTheme: const DialogThemeData(
+        backgroundColor: T.surface2,
+        surfaceTintColor: T.surface2,
+        elevation: 0,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.all(Radius.circular(T.rCard)),
+          side: BorderSide(color: T.border),
+        ),
+        titleTextStyle: TextStyle(
+          fontSize: 16,
+          fontWeight: FontWeight.w600,
+          color: T.text1,
+        ),
+        contentTextStyle: TextStyle(fontSize: 14, color: T.text1),
+      ),
+      bottomSheetTheme: const BottomSheetThemeData(
+        backgroundColor: T.surface2,
+        surfaceTintColor: T.surface2,
+        elevation: 0,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(12)),
+          side: BorderSide(color: T.border),
+        ),
+      ),
       inputDecorationTheme: InputDecorationTheme(
         isDense: true,
         filled: true,

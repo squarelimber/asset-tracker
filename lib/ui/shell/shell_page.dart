@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/responsive.dart';
+import '../components/key_shortcuts.dart';
+import '../tokens.dart';
 
 /// App shell with adaptive navigation:
 /// - Phone: bottom navigation bar
@@ -21,9 +24,22 @@ class ShellPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Responsive.isDesktop(context)
-        ? _DesktopShell(child: child)
-        : _PhoneShell(child: child);
+    if (!Responsive.isDesktop(context)) return _PhoneShell(child: child);
+    // Desktop keyboard shortcuts: 1-5 switch the five main pages.
+    return KeyShortcuts(
+      onKeyDown: (key) {
+        final i = switch (key) {
+          LogicalKeyboardKey.digit1 => 0,
+          LogicalKeyboardKey.digit2 => 1,
+          LogicalKeyboardKey.digit3 => 2,
+          LogicalKeyboardKey.digit4 => 3,
+          LogicalKeyboardKey.digit5 => 4,
+          _ => -1,
+        };
+        if (i >= 0) context.go(_destinations[i].path);
+      },
+      child: _DesktopShell(child: child),
+    );
   }
 }
 
@@ -54,6 +70,49 @@ class _PhoneShell extends StatelessWidget {
   }
 }
 
+/// A highlighted icon+label action pinned to the bottom of the desktop rail
+/// (secondary pages that do not belong in the main tab list).
+class _RailAction extends StatelessWidget {
+  const _RailAction({
+    required this.icon,
+    required this.activeIcon,
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final IconData activeIcon;
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final fg = selected ? T.text1 : T.text2;
+    return InkWell(
+      borderRadius: BorderRadius.circular(T.rCard),
+      onTap: onTap,
+      child: Container(
+        width: 56,
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        decoration: BoxDecoration(
+          color: selected ? T.surface2 : Colors.transparent,
+          borderRadius: BorderRadius.circular(T.rCard),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(selected ? activeIcon : icon, size: 22, color: fg),
+            const SizedBox(height: 4),
+            Text(label, style: T.label(size: 11, color: fg)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _DesktopShell extends StatelessWidget {
   const _DesktopShell({required this.child});
 
@@ -62,6 +121,7 @@ class _DesktopShell extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final selected = _selectedIndex(context);
+    final path = GoRouterState.of(context).uri.path;
     return Scaffold(
       body: Row(
         children: [
@@ -70,6 +130,27 @@ class _DesktopShell extends StatelessWidget {
             onDestinationSelected: (i) =>
                 context.go(ShellPage._destinations[i].path),
             labelType: NavigationRailLabelType.all,
+            trailing: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const SizedBox(height: T.s2),
+                _RailAction(
+                  icon: Icons.notifications_outlined,
+                  activeIcon: Icons.notifications,
+                  label: '提醒',
+                  selected: path.startsWith('/alerts'),
+                  onTap: () => context.go('/alerts'),
+                ),
+                const SizedBox(height: T.s1),
+                _RailAction(
+                  icon: Icons.settings_outlined,
+                  activeIcon: Icons.settings,
+                  label: '设置',
+                  selected: path.startsWith('/settings'),
+                  onTap: () => context.go('/settings'),
+                ),
+              ],
+            ),
             destinations: [
               for (final d in ShellPage._destinations)
                 NavigationRailDestination(

@@ -16,7 +16,7 @@ class Responsive {
   static bool isPhone(BuildContext context) => !isTablet(context);
 
   static double contentMaxWidth(BuildContext context) =>
-      isDesktop(context) ? 1280 : double.infinity;
+      isDesktop(context) ? 1440 : double.infinity;
 }
 
 /// A top-aligned, horizontally centered content shell used by desktop layouts.
@@ -37,7 +37,7 @@ class ResponsiveShell extends StatelessWidget {
     return Align(
       alignment: Alignment.topCenter,
       child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 1280),
+        constraints: const BoxConstraints(maxWidth: 1440),
         child: Padding(padding: effectivePadding, child: child),
       ),
     );
