@@ -11,7 +11,8 @@ class T {
   static const Color borderSoft = Color(0xFF1C2128);
   static const Color text1 = Color(0xFFE6EDF3);
   static const Color text2 = Color(0xFF8B949E);
-  static const Color text3 = Color(0xFF545D68);
+  /// Faint text / disabled. Bright enough for WCAG AA (≥4.5:1) on [bg].
+  static const Color text3 = Color(0xFF768390);
   static const Color up = Color(0xFFF85149);
   static const Color down = Color(0xFF3FB950);
   static const Color accent = Color(0xFF58A6FF);
