@@ -1,4 +1,4 @@
-﻿import 'dart:math';
+import 'dart:math';
 
 import 'package:drift/drift.dart';
 import 'package:drift/native.dart';
@@ -23,6 +23,16 @@ class _FakeHistorySource extends HistoryDataSource {
   @override
   Future<DailyPriceHistory> fetch(String symbol, DateTime from, DateTime to) async {
     return data[symbol] ?? {};
+  }
+}
+
+/// A source whose fetch throws (simulates a network failure).
+class _ThrowingHistorySource extends HistoryDataSource {
+  _ThrowingHistorySource() : super(MarketSource.eastmoney);
+
+  @override
+  Future<DailyPriceHistory> fetch(String symbol, DateTime from, DateTime to) async {
+    throw Exception('network error for $symbol');
   }
 }
 
@@ -329,5 +339,40 @@ void main() {
         .compute(snapshots)
         .firstWhere((e) => e.date == '2026-07-02');
     expect(earning.profit, closeTo(0, 1e-9));
+  });
+
+  test('a failed history fetch aborts the rebuild and writes no snapshots',
+      () async {
+    await seedFundHolding(purchaseDate: DateTime(2026, 7, 1));
+    final service =
+        HistoryBackfillService(dao, sources: {MarketSource.eastmoney: _ThrowingHistorySource()});
+
+    final result = await service.backfill(now: DateTime(2026, 7, 8));
+
+    // The fetch threw -> the rebuild must abort and write nothing, rather
+    // than substituting the current price for every historical date.
+    expect(result.ok, isFalse);
+    expect(result.days, 0);
+    expect(result.message, contains('110022'));
+    expect(result.message, contains('未写入'));
+    expect(await dao.getSnapshots(), isEmpty);
+  });
+
+  test('an empty history (newly added holding) does not abort the rebuild',
+      () async {
+    // A holding bought today with no fetched history yet: the source returns
+    // an empty series (not an error). The backfill must still succeed and
+    // carry the holding at its latest price for the (single) day.
+    await seedFundHolding(purchaseDate: DateTime(2026, 7, 7), latest: 2.9);
+    final fake = _FakeHistorySource(); // returns {} for 110022
+    final service = HistoryBackfillService(dao, sources: {MarketSource.eastmoney: fake});
+
+    final result = await service.backfill(now: DateTime(2026, 7, 8));
+
+    expect(result.ok, isTrue);
+    final snapshots = await dao.getSnapshots();
+    // Window is just 07-07 (purchase date); carried at latest price 2.9*100.
+    expect(snapshots, hasLength(1));
+    expect(snapshots.single.totalValue, closeTo(290, 1e-6));
   });
 }
