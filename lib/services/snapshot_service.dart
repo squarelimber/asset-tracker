@@ -29,6 +29,11 @@ class SnapshotService {
     if (existing != null && !force) return;
 
     final holdings = await _dao.getHoldings();
+    // A fresh install (or a device that hasn't received its first sync yet)
+    // has no holdings. Recording a zero-valued snapshot here would corrupt
+    // the net-worth trend and — because snapshots sync with last-write-wins —
+    // push that corruption to every other device. Skip until there is data.
+    if (holdings.isEmpty) return;
     // Convert non-CNY holdings with current FX rates so today's snapshot
     // matches the dashboard figures.
     final currencies =
