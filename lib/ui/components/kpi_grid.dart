@@ -29,7 +29,12 @@ class StatTile extends StatelessWidget {
         children: [
           Text(label, style: T.label()),
           const SizedBox(height: T.s1),
-          Text(value, style: T.mono(size: 20, weight: FontWeight.w600, color: color ?? T.text1)),
+          Text(
+            value,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: T.mono(size: 20, weight: FontWeight.w600, color: color ?? T.text1),
+          ),
           if (delta != null) ...[
             const SizedBox(height: T.s1),
             DeltaText(value: delta!),

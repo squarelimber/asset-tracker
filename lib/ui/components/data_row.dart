@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../core/responsive.dart';
 import '../tokens.dart';
 
 /// One list row: title/subtitle left, mono amount block right.
@@ -52,8 +53,11 @@ class DataRow extends StatelessWidget {
         ),
     ];
     if (subtitle != null) titleCol.add(subtitle!);
+    // Tappable rows get a larger vertical padding on phone so the whole
+    // row is a ≥44px touch target (WCAG 2.5.5 / iOS HIG).
+    final verticalPad = onTap != null && Responsive.isPhone(context) ? 12.0 : T.s2;
     final row = Padding(
-      padding: const EdgeInsets.symmetric(vertical: T.s2),
+      padding: EdgeInsets.symmetric(vertical: verticalPad),
       child: Row(
         children: [
           if (leading != null) ...[leading!, const SizedBox(width: T.s2)],
