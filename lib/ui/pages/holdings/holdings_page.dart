@@ -180,14 +180,21 @@ class _HoldingsPageState extends ConsumerState<HoldingsPage> {
     }
   }
 
+  /// Search match: name, symbol, or the asset-type label (e.g. tapping
+  /// "场外基金" in the allocation card filters to mutual-fund holdings).
+  bool _matchesQuery(HoldingRow h, String q) {
+    final type = AssetType.fromStorage(h.assetType);
+    return h.name.toLowerCase().contains(q) ||
+        (h.symbol ?? '').toLowerCase().contains(q) ||
+        type.label.toLowerCase().contains(q) ||
+        type.storageName.toLowerCase().contains(q);
+  }
+
   List<HoldingRow> _sorted(List<HoldingRow> list) {
-    var filtered = _query.trim().isEmpty
+    final q = _query.trim().toLowerCase();
+    var filtered = q.isEmpty
         ? [...list]
-        : list
-            .where((h) =>
-                h.name.toLowerCase().contains(_query.toLowerCase()) ||
-                (h.symbol ?? '').toLowerCase().contains(_query.toLowerCase()))
-            .toList();
+        : list.where((h) => _matchesQuery(h, q)).toList();
     filtered = filtered.where(_matchesFilter).toList();
     switch (_sort) {
       case HoldingSort.defaultOrder:
@@ -259,7 +266,7 @@ class _HoldingsPageState extends ConsumerState<HoldingsPage> {
                 controller: _searchCtrl,
                 autofocus: true,
                 decoration: const InputDecoration(
-                  hintText: '搜索名称或代码',
+                  hintText: '搜索名称/代码/类型',
                   border: InputBorder.none,
                 ),
                 onChanged: (v) => setState(() => _query = v),
