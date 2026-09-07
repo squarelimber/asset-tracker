@@ -244,50 +244,45 @@ class _NetWorthChartState extends ConsumerState<NetWorthChart> {
   @override
   Widget build(BuildContext context) {
     final snapshots = ref.watch(snapshotsProvider);
+    // Opens the benchmark picker; shows the count of selected indexes.
+    // Lives in the range row (not the title row) so the title row stays
+    // one line even on narrow phones.
+    final benchmarkChip = FilterChip(
+      label: Text(
+        _benchSelected.isEmpty
+            ? '指数对比'
+            : '指数对比(${_benchSelected.length})',
+      ),
+      selected: _benchSelected.isNotEmpty,
+      showCheckmark: false,
+      visualDensity: VisualDensity.compact,
+      onSelected: (_) => _showBenchmarkPanel(),
+    );
     return TerminalCard(
       padding: const EdgeInsets.fromLTRB(T.s3, T.s2, T.s3, T.s3),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Toolbar: title on the left, view controls (收益率/净值 + 指数对比)
-          // right-aligned on the same row — the range presets below get their
-          // own dedicated row instead of sharing the pile.
+          // Toolbar: title on the left, view toggle (收益率/净值) right-aligned
+          // on the same row. 指数对比 lives in the range row below so this
+          // stays one line even on narrow phones.
           _NetWorthToolbar(
             title: const Text(
               '资产走势',
               style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: T.text1),
             ),
-            trailing: Wrap(
-              alignment: WrapAlignment.end,
-              spacing: 8,
-              runSpacing: 8,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: [
-                SegmentedButton<_TrendView>(
-                  segments: const [
-                    ButtonSegment(value: _TrendView.returnRate, label: Text('收益率')),
-                    ButtonSegment(value: _TrendView.netValue, label: Text('净值')),
-                  ],
-                  selected: {_view},
-                  showSelectedIcon: false,
-                  style: const ButtonStyle(
-                    visualDensity: VisualDensity.compact,
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  ),
-                  onSelectionChanged: (s) => setState(() => _view = s.first),
-                ),
-                FilterChip(
-                  label: Text(
-                    _benchSelected.isEmpty
-                        ? '指数对比'
-                        : '指数对比(${_benchSelected.length})',
-                  ),
-                  selected: _benchSelected.isNotEmpty,
-                  showCheckmark: false,
-                  visualDensity: VisualDensity.compact,
-                  onSelected: (_) => _showBenchmarkPanel(),
-                ),
+            trailing: SegmentedButton<_TrendView>(
+              segments: const [
+                ButtonSegment(value: _TrendView.returnRate, label: Text('收益率')),
+                ButtonSegment(value: _TrendView.netValue, label: Text('净值')),
               ],
+              selected: {_view},
+              showSelectedIcon: false,
+              style: const ButtonStyle(
+                visualDensity: VisualDensity.compact,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              onSelectionChanged: (s) => setState(() => _view = s.first),
             ),
           ),
           const SizedBox(height: 12),
@@ -319,6 +314,8 @@ class _NetWorthChartState extends ConsumerState<NetWorthChart> {
                       visualDensity: VisualDensity.compact,
                       onPressed: _showRangeMenu,
                     ),
+                    const SizedBox(width: 4),
+                    benchmarkChip,
                   ],
                 ),
               ),
@@ -348,6 +345,8 @@ class _NetWorthChartState extends ConsumerState<NetWorthChart> {
                   visualDensity: VisualDensity.compact,
                   onPressed: _showRangeMenu,
                 ),
+                const SizedBox(width: 4),
+                benchmarkChip,
               ],
             ),
           if (_range == RangeOption.custom && _customFrom != null)
@@ -719,7 +718,9 @@ class _TrendChartState extends State<_TrendChart> with SingleTickerProviderState
         final xInterval = (list.length / labelCount).ceilToDouble();
         // Tall enough on phone to stop reading as a cramped square; the
         // toolbar cleanup above frees the vertical room for it.
-        final chartHeight = Responsive.isPhone(context) ? 330.0 : 280.0;
+        // Phone: landscape rectangle — at ~280px card width, 190px keeps the
+      // plot ~1.4:1 (wider than tall) instead of the old near-square 232x302.
+      final chartHeight = Responsive.isPhone(context) ? 190.0 : 280.0;
         final plotSize = Size(
           (constraints.maxWidth - plotLeft).clamp(0.0, double.infinity),
           (chartHeight - plotBottom).clamp(0.0, double.infinity),

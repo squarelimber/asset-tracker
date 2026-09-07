@@ -96,7 +96,10 @@ class AssetOverviewCard extends StatelessWidget {
 
     final rows = <List<Widget>>[];
     for (var i = 0; i < cells.length; i += columns) {
-      rows.add(cells.sublist(i, i + columns < cells.length ? cells.length : i + columns));
+      rows.add(cells.sublist(
+        i,
+        i + columns > cells.length ? cells.length : i + columns,
+      ));
     }
 
     return TerminalCard(
