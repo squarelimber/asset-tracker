@@ -2,6 +2,17 @@
 
 All notable changes to Asset Tracker. Entries are condensed from the commit history; dates follow the release tags.
 
+## [0.8.6] - 2026-09-07
+
+### Fixed
+
+- 天天宝本金 income 被误算为收益: `smooth_history` 新增 `today` 参数，回填时跳过当日本金入账，避免把本金当作收益计入净值曲线
+- 手机端资产总览卡片布局: 改用直接宽度判断（< 1100px → 2×2，≥ 1100px → 4 列），修复部分机型上四卡片挤成一行的问题
+
+### CI
+
+- Release workflow 改为幂等: 若 release 已存在则更新 notes 并 `--clobber` 重传资产，不再因重复创建而失败
+
 ## [0.8.5] - 2026-09-06
 
 ### Fixed
