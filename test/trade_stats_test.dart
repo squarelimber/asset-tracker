@@ -7,6 +7,8 @@ TransactionRow _txn({
   required int id,
   required String type,
   int? holdingId,
+  int? cashSourceId,
+  int? cashTargetId,
   double amount = 0,
   double? quantity,
   double? price,
@@ -17,8 +19,8 @@ TransactionRow _txn({
     id: id,
     accountId: 1,
     holdingId: holdingId,
-    cashSourceId: null,
-    cashTargetId: null,
+    cashSourceId: cashSourceId,
+    cashTargetId: cashTargetId,
     type: type,
     quantity: quantity,
     price: price,
@@ -31,6 +33,31 @@ TransactionRow _txn({
   );
 }
 
+HoldingRow _holding({
+  required int id,
+  required String type,
+  double quantity = 0,
+  double cost = 0,
+  double price = 1,
+}) {
+  return HoldingRow(
+    id: id,
+    accountId: 1,
+    name: 'h$id',
+    assetType: type,
+    marketSource: 'manual',
+    symbol: null,
+    quantity: quantity,
+    costPrice: cost,
+    latestPrice: price,
+    currency: 'CNY',
+    note: null,
+    archived: false,
+    createdAt: DateTime(2026, 1, 1),
+    updatedAt: DateTime(2026, 1, 1),
+  );
+}
+
 void main() {
   const calc = TradeStatsCalculator();
 
@@ -38,8 +65,8 @@ void main() {
     final stats = calc.compute([
       _txn(id: 1, type: 'income', amount: 10000, at: DateTime(2026, 8, 1)),
       _txn(id: 2, type: 'expense', amount: 2000, at: DateTime(2026, 8, 2)),
-      _txn(id: 3, type: 'buy', amount: 5000, at: DateTime(2026, 8, 3)),
-      _txn(id: 4, type: 'sell', amount: 8000, at: DateTime(2026, 8, 4)),
+      _txn(id: 3, type: 'buy', amount: 5000, cashSourceId: 9, at: DateTime(2026, 8, 3)),
+      _txn(id: 4, type: 'sell', amount: 8000, cashTargetId: 9, at: DateTime(2026, 8, 4)),
       _txn(id: 5, type: 'dividend', amount: 300, at: DateTime(2026, 8, 5)),
     ], const []);
     expect(stats.incomeTotal, 10000);
@@ -49,6 +76,77 @@ void main() {
     expect(stats.dividendTotal, 300);
     // 10000 + 8000 + 300 - 2000 - 5000 = 11300
     expect(stats.cashflow, 11300);
+  });
+
+  test('buys and sells without cash linkage are internal movements', () {
+    // Redemption funding another holding: a sell without a cash target and
+    // a buy without a cash source. Neither touches the cash balance.
+    final stats = calc.compute([
+      _txn(id: 1, type: 'sell', holdingId: 11, amount: 5000, at: DateTime(2026, 9, 8)),
+      _txn(id: 2, type: 'buy', holdingId: 51, amount: 5000, at: DateTime(2026, 9, 8)),
+    ], const []);
+    expect(stats.boughtTotal, 0);
+    expect(stats.soldTotal, 0);
+    expect(stats.cashflow, 0);
+    expect(stats.monthlyCashflow, isEmpty);
+  });
+
+  test('standalone redemption (no cash target) does not affect cashflow', () {
+    final stats = calc.compute([
+      _txn(id: 1, type: 'sell', holdingId: 11, amount: 49999.075, at: DateTime(2026, 9, 8)),
+    ], const []);
+    expect(stats.soldTotal, 0);
+    expect(stats.realizedProfit, 0);
+    expect(stats.cashflow, 0);
+    expect(stats.monthlyCashflow, isEmpty);
+  });
+
+  test('amount-based sell contributes zero realized profit', () {
+    // 天天宝-style bank deposit: costPrice is the cumulative invested
+    // amount (115,399.71), not a unit cost. A redemption of 49,999.075
+    // @ 1.0 must not produce (1.0 - 115399.71) x 49999.075.
+    final stats = calc.compute(
+      [
+        _txn(
+          id: 1,
+          type: 'sell',
+          holdingId: 11,
+          amount: 49999.075,
+          quantity: 49999.075,
+          price: 1.0,
+          at: DateTime(2026, 9, 8),
+        ),
+      ],
+      [
+        _holding(id: 11, type: 'bank_deposit', quantity: 117338.20, cost: 115399.71),
+      ],
+    );
+    expect(stats.realizedProfit, 0);
+    // No cash target: not counted as a sell either.
+    expect(stats.soldTotal, 0);
+    expect(stats.cashflow, 0);
+  });
+
+  test('sell to cash is counted in cashflow and still realizes', () {
+    final stats = calc.compute(
+      [
+        _txn(
+          id: 1,
+          type: 'sell',
+          holdingId: 1,
+          amount: 750,
+          quantity: 50,
+          price: 15,
+          cashTargetId: 9,
+        ),
+      ],
+      [
+        _holding(id: 1, type: 'mutual_fund', quantity: 100, cost: 10, price: 15),
+      ],
+    );
+    expect(stats.soldTotal, 750);
+    expect(stats.monthlyCashflow['2026-08'], 750);
+    expect(stats.realizedProfit, closeTo(250, 1e-6));
   });
 
   test('transfers do not affect cashflow', () {
@@ -124,6 +222,22 @@ void main() {
     ], {7: 1}, cnyRates: {'USD': 7});
     // (2-1)*10*7 = 70
     expect(byHolding[7], closeTo(70, 1e-6));
+  });
+
+  test('realizedProfitByHolding skips amount-based holdings', () {
+    final byHolding = TradeStatsCalculator.realizedProfitByHolding(
+      [
+        // Redemption of an amount-based holding: costPrice is the invested
+        // total, so the realized profit must be exactly 0.
+        _txn(id: 1, type: 'sell', holdingId: 11, quantity: 49999.075, price: 1.0),
+        _txn(id: 2, type: 'sell', holdingId: 1, quantity: 50, price: 15),
+      ],
+      {11: 115399.71, 1: 10},
+      amountBasedHoldingIds: {11},
+    );
+    expect(byHolding, hasLength(1));
+    expect(byHolding[11], isNull);
+    expect(byHolding[1], closeTo(250, 1e-6));
   });
 
   test('lastSellDate picks the newest sell, optionally per holding', () {

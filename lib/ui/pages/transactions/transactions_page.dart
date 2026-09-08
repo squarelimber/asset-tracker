@@ -106,24 +106,36 @@ class _TransactionsPageState extends ConsumerState<TransactionsPage> {
     return (rate == null || rate <= 0) ? 1 : rate;
   }
 
+  /// Net cash effect of the rows shown for one day. Mirrors the stats
+  /// page: only rows that actually move cash count (buys funded from a
+  /// cash holding, sells credited to one, income, expense, dividends).
+  /// Redemptions funding another holding and transfers are internal
+  /// movements with no net cash effect.
   double _dayNet(List<TransactionRow> rows, Map<String, double> rates) {
     var net = 0.0;
     for (final t in rows) {
       final sign = switch (TransactionType.fromStorage(t.type)) {
-        TransactionType.buy ||
-        TransactionType.expense ||
-        TransactionType.transferOut =>
-          -1.0,
-        TransactionType.sell ||
-        TransactionType.income ||
-        TransactionType.dividend ||
-        TransactionType.transferIn =>
-          1.0,
-        _ => 0.0,
+        TransactionType.buy => t.cashSourceId == null ? null : -1.0,
+        TransactionType.sell => t.cashTargetId == null ? null : 1.0,
+        TransactionType.income => 1.0,
+        TransactionType.expense => -1.0,
+        TransactionType.dividend => 1.0,
+        _ => null, // transfer / consume / split: no net cash effect
       };
+      if (sign == null) continue;
       net += sign * t.amount * _rateOf(t.currency, rates);
     }
     return net;
+  }
+
+  /// Unit cost for the tile's per-row realized line. Amount-based holdings
+  /// store the cumulative invested amount in costPrice (not a unit price),
+  /// so a per-row realized figure is not meaningful for them (it is
+  /// exactly 0 by construction) and is omitted.
+  double? _tileCostPrice(TransactionRow t, Map<int, HoldingRow> holdingsById) {
+    final h = t.holdingId == null ? null : holdingsById[t.holdingId];
+    if (h == null) return null;
+    return AssetType.fromStorage(h.assetType).isAmountBased ? null : h.costPrice;
   }
 
   List<(DateTime, List<TransactionRow>)> _groupByDay(List<TransactionRow> txns) {
@@ -312,9 +324,7 @@ class _TransactionsPageState extends ConsumerState<TransactionsPage> {
                     for (final t in rows) ...[
                       TransactionTile(
                         txn: t,
-                        costPrice: t.holdingId == null
-                            ? null
-                            : holdingsById[t.holdingId]?.costPrice,
+                        costPrice: _tileCostPrice(t, holdingsById),
                         holdingName: t.holdingId == null
                             ? null
                             : holdingsById[t.holdingId]?.name,

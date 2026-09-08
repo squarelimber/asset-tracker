@@ -25,8 +25,11 @@ class TradeStats {
   /// 'yyyy-MM' -> net cash flow for that month.
   final Map<String, double> monthlyCashflow;
 
-  /// Net cash flow: money in minus money out (transfers excluded, since
-  /// they move money between own holdings and do not change net worth).
+  /// Net cash flow: money in minus money out. Only rows that actually move
+  /// cash are counted (sells credited to a cash holding, buys funded from a
+  /// cash holding, income, expense, dividends). Internal movements —
+  /// redemptions whose proceeds fund another holding, transfers — do not
+  /// change the cash balance and are excluded.
   double get cashflow =>
       incomeTotal + dividendTotal + soldTotal - expenseTotal - boughtTotal;
 
@@ -59,6 +62,9 @@ class TradeStatsCalculator {
     final costByHolding = <int, double>{
       for (final h in holdings) h.id: h.costPrice,
     };
+    final typeByHolding = <int, AssetType>{
+      for (final h in holdings) h.id: AssetType.fromStorage(h.assetType),
+    };
     var realized = 0.0;
 
     for (final t in txns) {
@@ -69,15 +75,32 @@ class TradeStatsCalculator {
 
       switch (type) {
         case TransactionType.buy:
-          bought += amount;
-          monthly[month] = flow - amount;
+          // A buy without a cash source is funded by another holding
+          // (e.g. "由 天天宝 出资"): an internal movement, no cash effect.
+          if (t.cashSourceId != null) {
+            bought += amount;
+            monthly[month] = flow - amount;
+          }
         case TransactionType.sell:
-          sold += amount;
-          monthly[month] = flow + amount;
-          final unitCost = costByHolding[t.holdingId] ?? 0;
-          final qty = t.quantity ?? 0;
-          final price = t.price ?? 0;
-          realized += (price - unitCost) * qty * rateOf(t.currency);
+          // A sell without a cash target is a redemption whose proceeds
+          // fund another holding: an internal movement, no cash effect.
+          if (t.cashTargetId != null) {
+            sold += amount;
+            monthly[month] = flow + amount;
+          }
+          // Realized profit (price - unit cost) x quantity is only valid
+          // for share-based holdings, where costPrice is a unit cost.
+          // Amount-based holdings store the cumulative invested amount in
+          // costPrice (unit price and unit cost are both 1.0), so their
+          // realized profit is exactly 0 by construction.
+          final holdingType =
+              t.holdingId == null ? null : typeByHolding[t.holdingId];
+          if (holdingType != null && !holdingType.isAmountBased) {
+            final unitCost = costByHolding[t.holdingId] ?? 0;
+            final qty = t.quantity ?? 0;
+            final price = t.price ?? 0;
+            realized += (price - unitCost) * qty * rateOf(t.currency);
+          }
         case TransactionType.income:
           income += amount;
           monthly[month] = flow + amount;
@@ -113,10 +136,14 @@ class TradeStatsCalculator {
   ///
   /// [costByHolding] maps holding id to the unit cost that applied when the
   /// shares were sold (a fully sold-out holding keeps its last costPrice).
+  /// [amountBasedHoldingIds] must list the amount-based holdings (cash /
+  /// deposits / liquid wealth): their costPrice is the cumulative invested
+  /// amount, not a unit cost, and their realized profit is exactly 0.
   /// Returns only holdings that have at least one sell.
   static Map<int, double> realizedProfitByHolding(
     List<TransactionRow> txns,
     Map<int, double> costByHolding, {
+    Set<int> amountBasedHoldingIds = const {},
     Map<String, double> cnyRates = const {},
   }) {
     double rateOf(String currency) {
@@ -129,6 +156,7 @@ class TradeStatsCalculator {
       if (TransactionType.fromStorage(t.type) != TransactionType.sell) continue;
       final holdingId = t.holdingId;
       if (holdingId == null) continue;
+      if (amountBasedHoldingIds.contains(holdingId)) continue;
       final unitCost = costByHolding[holdingId] ?? 0;
       final qty = t.quantity ?? 0;
       final price = t.price ?? 0;

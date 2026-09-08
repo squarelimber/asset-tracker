@@ -200,6 +200,9 @@ class _TableRow extends ConsumerWidget {
         ? (TradeStatsCalculator.realizedProfitByHolding(
             closedTxns,
             {h.id: h.costPrice},
+            // Amount-based holdings store the invested total in costPrice;
+            // their realized profit is exactly 0 (see trade_stats.dart).
+            amountBasedHoldingIds: isAmount ? {h.id} : const {},
           )[h.id] ??
           0)
         : 0.0;
