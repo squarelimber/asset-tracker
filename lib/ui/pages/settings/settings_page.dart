@@ -1,14 +1,10 @@
 import 'dart:convert';
-import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:file_selector/file_selector.dart';
-import 'package:flutter/foundation.dart'
-    show defaultTargetPlatform, kIsWeb, TargetPlatform;
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart' hide DataRow;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:path_provider/path_provider.dart';
-import 'package:share_plus/share_plus.dart';
 
 import '../../../app/providers.dart';
 import '../../../core/formats.dart';
@@ -16,19 +12,13 @@ import '../../../core/responsive.dart';
 import '../../../services/alert_notification_service.dart';
 import '../../../services/backup_service.dart';
 import '../../../services/csv_export.dart';
+import '../../../services/file_export.dart';
 import '../../components/app_bar_actions.dart';
 import '../../components/data_row.dart';
 import '../../components/section_header.dart';
 import '../../components/terminal_card.dart';
 import '../../tokens.dart';
 import 'sync_settings_page.dart';
-
-/// Whether the platform has a native save dialog. Android/iOS do not, so
-/// exports go through the system share sheet instead.
-bool get _isMobilePlatform =>
-    !kIsWeb &&
-    (defaultTargetPlatform == TargetPlatform.android ||
-        defaultTargetPlatform == TargetPlatform.iOS);
 
 final backupServiceProvider = Provider<BackupService>(
   (ref) => BackupService(ref.watch(daoProvider)),
@@ -156,38 +146,14 @@ class SettingsPage extends ConsumerWidget {
     required String fileName,
     required String mime,
     required XTypeGroup typeGroup,
-  }) async {
-    if (_isMobilePlatform) {
-      final dir = await getTemporaryDirectory();
-      final file = File('${dir.path}/$fileName');
-      await file.writeAsBytes(bytes);
-      await SharePlus.instance.share(
-        ShareParams(
-          files: [XFile(file.path, mimeType: mime, name: fileName)],
-        ),
-      );
-      if (!context.mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('已发起分享')));
-      return;
-    }
-    final location = await getSaveLocation(
-      suggestedName: fileName,
-      acceptedTypeGroups: [typeGroup],
-    );
-    if (location == null) return;
-    // XFile.saveTo writes through the native file dialog on desktop and
-    // triggers a download on the web.
-    await XFile.fromData(
-      bytes,
-      mimeType: mime,
-      name: fileName,
-    ).saveTo(location.path);
-    if (!context.mounted) return;
-    ScaffoldMessenger.of(
+  }) {
+    return saveBytesToUser(
       context,
-    ).showSnackBar(const SnackBar(content: Text('已导出')));
+      bytes,
+      fileName: fileName,
+      mime: mime,
+      typeGroup: typeGroup,
+    );
   }
 
   Future<void> _import(BuildContext context, WidgetRef ref) async {

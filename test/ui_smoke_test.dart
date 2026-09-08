@@ -22,6 +22,7 @@ import 'package:asset_tracker/ui/pages/markets/markets_page.dart';
 import 'package:asset_tracker/ui/pages/portfolio/portfolio_page.dart';
 import 'package:asset_tracker/ui/pages/settings/settings_page.dart';
 import 'package:asset_tracker/ui/pages/stats/stats_page.dart';
+import 'package:asset_tracker/ui/pages/transactions/transactions_page.dart';
 
 const _fakeQuotes = [
   GlobalQuote(
@@ -247,6 +248,7 @@ void main() {
       _smokePage('ProductEarningsCalendarPage', () => const ProductEarningsCalendarPage(), size: size);
       _smokePage('AlertsPage', () => const AlertsPage(), size: size);
       _smokePage('SettingsPage', () => const SettingsPage(), size: size);
+      _smokePage('TransactionsPage', () => const TransactionsPage(), size: size);
     });
   }
 

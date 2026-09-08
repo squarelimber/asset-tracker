@@ -63,4 +63,43 @@ class CsvExport {
     }
     return buf.toString();
   }
+
+  /// Detailed transactions CSV for the unified history page: adds account
+  /// and counterparty (cash source / target / transfer partner) columns.
+  String transactionsDetailed(
+    List<TransactionRow> txns,
+    Map<int, String> holdingName,
+    Map<int, String> accountName,
+  ) {
+    final buf = StringBuffer('\uFEFF');
+    buf.writeln('日期,类型,账户,持仓,数量,单价,金额,币种,对手方,备注');
+    for (final t in txns) {
+      final type = TransactionType.fromStorage(t.type);
+      final counterparty = switch (type) {
+        TransactionType.buy || TransactionType.expense =>
+          t.cashSourceId == null ? '' : (holdingName[t.cashSourceId!] ?? ''),
+        TransactionType.sell || TransactionType.dividend ||
+        TransactionType.income =>
+          t.cashTargetId == null ? '' : (holdingName[t.cashTargetId!] ?? ''),
+        TransactionType.transferIn =>
+          t.cashSourceId == null ? '' : (holdingName[t.cashSourceId!] ?? ''),
+        TransactionType.transferOut =>
+          t.cashTargetId == null ? '' : (holdingName[t.cashTargetId!] ?? ''),
+        _ => '',
+      };
+      buf.writeln([
+        Formats.date(t.occurredAt.toLocal()),
+        type.label,
+        _esc(accountName[t.accountId] ?? ''),
+        _esc(t.holdingId == null ? '' : (holdingName[t.holdingId] ?? '')),
+        t.quantity == null ? '' : _num(t.quantity!),
+        t.price == null ? '' : _num(t.price!),
+        _num(t.amount),
+        t.currency,
+        _esc(counterparty),
+        _esc(t.note ?? ''),
+      ].join(','));
+    }
+    return buf.toString();
+  }
 }

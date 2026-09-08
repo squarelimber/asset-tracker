@@ -116,6 +116,181 @@ class TransactionService {
     }
   }
 
+  /// Records a purchase of [targetHoldingId] funded by redeeming
+  /// [sourceHoldingId]: atomically writes a sell row for the source (the
+  /// redemption, proceeds not parked in cash) and a buy row for the target,
+  /// both with the same timestamp. This is the "use money from an existing
+  /// holding (e.g. a money-market fund) to buy a new product" flow.
+  ///
+  /// The source's redemption quantity is derived from its current unit
+  /// price: latestPrice -> costPrice -> 1.0 (money-market funds trade at
+  /// 1.000). Amount-based sources (cash/deposit/liquid wealth) are debited
+  /// by [amount] directly, with the invested amount moving along (same as a
+  /// plain buy deduction).
+  ///
+  /// Removing either row later reverses that row's linkage only (existing
+  /// [remove] rules), so the pair is forgiving of partial cleanup.
+  Future<TransactionResult> recordBuyFundedByHolding({
+    required int sourceHoldingId,
+    required int targetHoldingId,
+    required double targetQuantity,
+    double? targetPrice,
+    required double amount,
+    String currency = 'CNY',
+    DateTime? occurredAt,
+    String? note,
+  }) async {
+    try {
+      if (sourceHoldingId == targetHoldingId) {
+        throw ArgumentError('资金来源与目标产品不能相同');
+      }
+      if (amount <= 0) throw ArgumentError('金额必须大于 0');
+      if (targetQuantity <= 0) throw ArgumentError('买入数量必须大于 0');
+
+      final source = await _getHolding(sourceHoldingId);
+      final target = await _getHolding(targetHoldingId);
+      final sourceType = AssetType.fromStorage(source.assetType);
+      if (sourceType == AssetType.liability) {
+        throw ArgumentError('负债不能作为资金来源');
+      }
+      if (source.currency != target.currency) {
+        throw ArgumentError('资金来源与目标产品币种不一致');
+      }
+
+      final (unit, sourceQty) = _redemptionOf(source, sourceType, amount);
+
+      await _dao.transaction(() async {
+        await _applyRedemption(source, sourceType, amount, sourceQty);
+        await _applyBuy(
+          holdingId: targetHoldingId,
+          quantity: targetQuantity,
+          amount: amount,
+          cashSourceId: null,
+        );
+
+        final when = occurredAt ?? DateTime.now();
+        await _dao.createTransaction(TransactionsCompanion.insert(
+          accountId: source.accountId,
+          holdingId: Value(sourceHoldingId),
+          type: TransactionType.sell.storageName,
+          quantity: Value(sourceQty),
+          price: Value(unit),
+          amount: amount,
+          currency: Value(currency),
+          occurredAt: when,
+          note: Value('赎回购买 ${target.name}'),
+        ));
+        await _dao.createTransaction(TransactionsCompanion.insert(
+          accountId: target.accountId,
+          holdingId: Value(targetHoldingId),
+          type: TransactionType.buy.storageName,
+          quantity: Value(targetQuantity),
+          price: targetPrice == null ? const Value.absent() : Value(targetPrice),
+          amount: amount,
+          currency: Value(currency),
+          occurredAt: when,
+          note: (note == null || note.isEmpty)
+              ? Value('由 ${source.name} 出资')
+              : Value(note),
+        ));
+      });
+      return TransactionResult.success;
+    } catch (e) {
+      return TransactionResult.fail(_failMessage(e));
+    }
+  }
+
+  /// Records a standalone redemption of [sourceHoldingId] (proceeds not
+  /// parked in any cash holding): a single sell row with the derived
+  /// quantity. Used e.g. when a brand-new holding is created and its
+  /// funding comes from redeeming an existing holding.
+  Future<TransactionResult> recordRedemption({
+    required int sourceHoldingId,
+    required double amount,
+    String currency = 'CNY',
+    DateTime? occurredAt,
+    String? note,
+  }) async {
+    try {
+      if (amount <= 0) throw ArgumentError('金额必须大于 0');
+      final source = await _getHolding(sourceHoldingId);
+      final sourceType = AssetType.fromStorage(source.assetType);
+      if (sourceType == AssetType.liability) {
+        throw ArgumentError('负债不能赎回');
+      }
+      final (unit, sourceQty) = _redemptionOf(source, sourceType, amount);
+
+      await _dao.transaction(() async {
+        await _applyRedemption(source, sourceType, amount, sourceQty);
+        await _dao.createTransaction(TransactionsCompanion.insert(
+          accountId: source.accountId,
+          holdingId: Value(sourceHoldingId),
+          type: TransactionType.sell.storageName,
+          quantity: Value(sourceQty),
+          price: Value(unit),
+          amount: amount,
+          currency: Value(currency),
+          occurredAt: occurredAt ?? DateTime.now(),
+          note: (note == null || note.isEmpty) ? const Value.absent() : Value(note),
+        ));
+      });
+      return TransactionResult.success;
+    } catch (e) {
+      return TransactionResult.fail(_failMessage(e));
+    }
+  }
+
+  /// Redemption unit price and quantity for debiting [source] by [amount]:
+  /// amount-based sources move [amount] at unit 1.0; share-based sources
+  /// move amount / unit at unit = latestPrice -> costPrice -> 1.0.
+  (double, double) _redemptionOf(
+    HoldingRow source,
+    AssetType sourceType,
+    double amount,
+  ) {
+    if (sourceType.isAmountBased) {
+      if (source.quantity + 1e-6 < amount) {
+        throw ArgumentError(
+            '资金来源「${source.name}」余额不足（可用 ${_fmt(source.quantity)}）');
+      }
+      return (1.0, amount);
+    }
+    final unit = source.latestPrice > 0
+        ? source.latestPrice
+        : (source.costPrice > 0 ? source.costPrice : 1.0);
+    final available = source.quantity * unit;
+    if (available + 1e-6 < amount) {
+      throw ArgumentError(
+          '资金来源「${source.name}」可用市值不足（可用 ${_fmt(available)}）');
+    }
+    return (unit, amount / unit);
+  }
+
+  /// Applies the redemption to [source]: amount-based debits balance and
+  /// invested (same as a buy deduction); share-based reduces quantity with
+  /// the unit cost kept (same invariant as a sell).
+  Future<void> _applyRedemption(
+    HoldingRow source,
+    AssetType sourceType,
+    double amount,
+    double sourceQty,
+  ) async {
+    if (sourceType.isAmountBased) {
+      await _applyCashMove(source.id, -amount, invested: true);
+    } else {
+      await _updateHolding(
+        source,
+        quantity: (source.quantity - sourceQty).clamp(0.0, double.infinity),
+      );
+    }
+  }
+
+  static String _fmt(double v) =>
+      v.toStringAsFixed(2).replaceFirst(RegExp(r'\.?0+$'), '');
+
+  static String _failMessage(Object e) =>
+      e is ArgumentError ? e.message.toString() : '操作失败: $e';
+
   Future<void> _applyBuy({
     required int? holdingId,
     required double? quantity,
