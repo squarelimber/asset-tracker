@@ -16,6 +16,7 @@ import '../../components/data_row.dart';
 import '../../components/delta_text.dart';
 import '../../components/empty_state.dart';
 import '../../components/error_state.dart';
+import '../../components/form_fields.dart';
 import '../../components/key_shortcuts.dart';
 import '../../components/section_header.dart';
 import '../../components/status_chip.dart';
@@ -254,6 +255,10 @@ class _HoldingsPageState extends ConsumerState<HoldingsPage> {
   Widget build(BuildContext context) {
     final holdings = ref.watch(holdingsProvider);
     final refreshing = ref.watch(_refreshingProvider);
+    // Phones/tablets have no room for search + filter + sort in the
+    // toolbar: the search box and the two list controls move into the
+    // body below (matching the non-desktop body branch).
+    final isDesktop = Responsive.isDesktop(context);
     return KeyShortcuts(
       onKeyDown: (key) {
         if (key == LogicalKeyboardKey.keyR) _refresh(showSnack: true);
@@ -261,7 +266,7 @@ class _HoldingsPageState extends ConsumerState<HoldingsPage> {
       },
       child: Scaffold(
       appBar: AppBar(
-        title: _searching
+        title: (isDesktop && _searching)
             ? TextField(
                 controller: _searchCtrl,
                 autofocus: true,
@@ -274,34 +279,39 @@ class _HoldingsPageState extends ConsumerState<HoldingsPage> {
             : const Text('持仓'),
         actions: [
           const TerminalAppBarActions(),
-          IconButton(
-            tooltip: '搜索',
-            icon: Icon(_searching ? Icons.close : Icons.search),
-            onPressed: _toggleSearch,
-          ),
-          PopupMenuButton<HoldingFilter>(
-            tooltip: '筛选',
-            icon: Icon(
-              _filter == HoldingFilter.all ? Icons.filter_list : Icons.filter_alt,
-              color: _filter == HoldingFilter.all ? null : T.accent,
+          if (isDesktop)
+            IconButton(
+              tooltip: '搜索',
+              icon: Icon(_searching ? Icons.close : Icons.search),
+              onPressed: _toggleSearch,
             ),
-            initialValue: _filter,
-            onSelected: (f) => setState(() => _filter = f),
-            itemBuilder: (_) => [
-              for (final f in HoldingFilter.values)
-                PopupMenuItem(value: f, child: Text(f.label)),
-            ],
-          ),
-          PopupMenuButton<HoldingSort>(
-            tooltip: '排序',
-            icon: const Icon(Icons.sort),
-            initialValue: _sort,
-            onSelected: (s) => setState(() => _sort = s),
-            itemBuilder: (_) => [
-              for (final s in HoldingSort.values)
-                PopupMenuItem(value: s, child: Text(s.label)),
-            ],
-          ),
+          if (isDesktop)
+            PopupMenuButton<HoldingFilter>(
+              tooltip: '筛选',
+              icon: Icon(
+                _filter == HoldingFilter.all
+                    ? Icons.filter_list
+                    : Icons.filter_alt,
+                color: _filter == HoldingFilter.all ? null : T.accent,
+              ),
+              initialValue: _filter,
+              onSelected: (f) => setState(() => _filter = f),
+              itemBuilder: (_) => [
+                for (final f in HoldingFilter.values)
+                  PopupMenuItem(value: f, child: Text(f.label)),
+              ],
+            ),
+          if (isDesktop)
+            PopupMenuButton<HoldingSort>(
+              tooltip: '排序',
+              icon: const Icon(Icons.sort),
+              initialValue: _sort,
+              onSelected: (s) => setState(() => _sort = s),
+              itemBuilder: (_) => [
+                for (final s in HoldingSort.values)
+                  PopupMenuItem(value: s, child: Text(s.label)),
+              ],
+            ),
           IconButton(
             tooltip: '刷新行情',
             onPressed: refreshing ? null : () => _refresh(showSnack: true),
@@ -341,7 +351,7 @@ class _HoldingsPageState extends ConsumerState<HoldingsPage> {
           final rates = ref.watch(cnyRatesProvider).value ?? const {};
           final isAssets = _section == HoldingSection.assets;
           return ResponsiveShell(
-            child: Responsive.isDesktop(context)
+            child: isDesktop
                 ? HoldingsTable(
                     section: _section,
                     assets: assets,
@@ -352,27 +362,77 @@ class _HoldingsPageState extends ConsumerState<HoldingsPage> {
                     onHoldingTap: (h) => showHoldingDetailSheet(context, ref, h),
                     onHoldingMenu: (h, at) => showHoldingMenu(context, ref, h, at: at),
                   )
-                : RefreshIndicator(
-                    onRefresh: () => _refresh(showSnack: true),
-                    child: ListView(
-                      physics: const AlwaysScrollableScrollPhysics(),
-                      padding: const EdgeInsets.all(T.s3),
-                      children: [
-                      SegmentedButton<HoldingSection>(
-                        segments: const [
-                          ButtonSegment(value: HoldingSection.assets, label: Text('资产')),
-                          ButtonSegment(
-                            value: HoldingSection.liabilities,
-                            label: Text('负债'),
-                          ),
-                        ],
-                        selected: {_section},
-                        onSelectionChanged: (s) =>
-                            setState(() => _section = s.first),
-                        showSelectedIcon: false,
+                : Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      // Search box pinned below the toolbar: it no longer
+                      // fits in the AppBar on narrow screens.
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(T.s3, 0, T.s3, 0),
+                        child: TerminalTextField(
+                          controller: _searchCtrl,
+                          label: '搜索名称/代码/类型',
+                          onChanged: (v) => setState(() => _query = v),
+                        ),
                       ),
-                      const SizedBox(height: T.s3),
-                      if (isAssets) ...[
+                      Expanded(
+                        child: RefreshIndicator(
+                          onRefresh: () => _refresh(showSnack: true),
+                          child: ListView(
+                            physics: const AlwaysScrollableScrollPhysics(),
+                            padding: const EdgeInsets.all(T.s3),
+                            children: [
+                            SegmentedButton<HoldingSection>(
+                              segments: const [
+                                ButtonSegment(value: HoldingSection.assets, label: Text('资产')),
+                                ButtonSegment(
+                                  value: HoldingSection.liabilities,
+                                  label: Text('负债'),
+                                ),
+                              ],
+                              selected: {_section},
+                              onSelectionChanged: (s) =>
+                                  setState(() => _section = s.first),
+                              showSelectedIcon: false,
+                            ),
+                            const SizedBox(height: T.s3),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: DropdownButtonFormField<
+                                      HoldingFilter>(
+                                    initialValue: _filter,
+                                    isExpanded: true,
+                                    decoration: terminalDecoration('筛选'),
+                                    items: [
+                                      for (final f in HoldingFilter.values)
+                                        DropdownMenuItem(
+                                            value: f, child: Text(f.label)),
+                                    ],
+                                    onChanged: (f) => setState(
+                                        () => _filter = f ?? HoldingFilter.all),
+                                  ),
+                                ),
+                                const SizedBox(width: T.s3),
+                                Expanded(
+                                  child: DropdownButtonFormField<HoldingSort>(
+                                    initialValue: _sort,
+                                    isExpanded: true,
+                                    decoration: terminalDecoration('排序'),
+                                    items: [
+                                      for (final s in HoldingSort.values)
+                                        DropdownMenuItem(
+                                            value: s, child: Text(s.label)),
+                                    ],
+                                    onChanged: (s) => setState(
+                                        () => _sort =
+                                            s ?? HoldingSort.defaultOrder),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: T.s3),
+                            if (isAssets) ...[
                         SectionHeader(
                           label: '资产',
                           trailing: Text(
@@ -413,8 +473,11 @@ class _HoldingsPageState extends ConsumerState<HoldingsPage> {
                               onTap: () => showHoldingDetailSheet(context, ref, h),
                             ),
                       ],
+                            ],
+                          ),
+                        ),
+                      ),
                     ],
-                    ),
                   ),
           );
         },

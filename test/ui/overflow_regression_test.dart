@@ -172,6 +172,38 @@ void main() {
     expectNoOverflow(tester);
   });
 
+  testWidgets('holdings phone: search box lives in the body, not the toolbar', (tester) async {
+    final a = HoldingRow(
+      id: 1,
+      accountId: 1,
+      name: '某股票',
+      assetType: 'stock',
+      marketSource: 'manual',
+      symbol: '600000',
+      quantity: 1000,
+      costPrice: 10,
+      latestPrice: 12,
+      currency: 'CNY',
+      archived: false,
+      createdAt: DateTime(2026, 1, 1),
+      updatedAt: DateTime(2026, 1, 1),
+    );
+    final overrides = <Override>[
+      holdingsProvider.overrideWith((ref) => Stream.value([a])),
+    ];
+    await pumpPage(tester, const HoldingsPage(), const Size(360, 640), overrides: overrides);
+    expectNoOverflow(tester);
+    // The toolbar keeps the plain title; the search box sits in the body
+    // below it and spans the content width (no longer squeezed out).
+    expect(find.text('持仓'), findsOneWidget);
+    expect(find.text('搜索名称/代码/类型'), findsOneWidget);
+    final searchRect = tester.getRect(find.byType(TextField));
+    expect(searchRect.width, greaterThanOrEqualTo(280));
+    // Filter and sort moved into the body as well.
+    expect(find.text('筛选'), findsOneWidget);
+    expect(find.text('排序'), findsOneWidget);
+  });
+
   testWidgets('accounts no overflow at phone and desktop', (tester) async {
     final account = AccountRow(
       id: 1,
