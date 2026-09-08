@@ -12,6 +12,7 @@ import '../ui/pages/portfolio/portfolio_page.dart';
 import '../ui/pages/settings/settings_page.dart';
 import '../ui/shell/shell_page.dart';
 import '../ui/pages/stats/stats_page.dart';
+import '../ui/pages/transactions/transactions_page.dart';
 
 final routerProvider = Provider<GoRouter>((ref) {
   return GoRouter(
@@ -57,6 +58,10 @@ final routerProvider = Provider<GoRouter>((ref) {
           GoRoute(
             path: '/stats',
             builder: (context, state) => const StatsPage(),
+          ),
+          GoRoute(
+            path: '/transactions',
+            builder: (context, state) => const TransactionsPage(),
           ),
           GoRoute(
             path: '/alerts',

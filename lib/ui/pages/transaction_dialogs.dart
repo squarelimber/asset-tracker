@@ -32,6 +32,28 @@ Future<void> showHoldingTransactionDialog(
       })
       .toList();
 
+  // Cash holdings (amount-based only) usable as the sell/dividend credit
+  // target for a share-based holding.
+  final cashHoldings = holdings
+      .where((h) {
+        final t = AssetType.fromStorage(h.assetType);
+        return t.isAmountBased && h.id != holding.id;
+      })
+      .toList();
+
+  // Holdings usable as the funding source for a buy: cash holdings plus
+  // share-based holdings with a positive balance (e.g. a money-market fund
+  // redeemed to buy a new product). Liabilities are excluded (buying on
+  // credit is not supported as a linked deduction).
+  final fundSources = holdings
+      .where((h) {
+        final t = AssetType.fromStorage(h.assetType);
+        return h.id != holding.id &&
+            t != AssetType.liability &&
+            (t.isAmountBased || h.quantity > 0);
+      })
+      .toList();
+
   // Available transaction types for this holding.
   final available = isShare
       ? <TransactionType>[
@@ -57,7 +79,11 @@ Future<void> showHoldingTransactionDialog(
   final qtyCtrl = TextEditingController();
   final priceCtrl = TextEditingController();
   final amountCtrl = TextEditingController();
-  final cashId = ValueNotifier<int?>(moneyHoldings.isEmpty ? null : moneyHoldings.first.id);
+  final cashId = ValueNotifier<int?>(
+    isShare
+        ? (cashHoldings.isEmpty ? null : cashHoldings.first.id)
+        : (moneyHoldings.isEmpty ? null : moneyHoldings.first.id),
+  );
   final noteCtrl = TextEditingController();
 
   String? validate() {
@@ -83,6 +109,28 @@ Future<void> showHoldingTransactionDialog(
     }
     if (qtyCtrl.text.trim().isEmpty || priceCtrl.text.trim().isEmpty) {
       return '请填写数量和单价';
+    }
+    if (t == TransactionType.buy) {
+      final id = cashId.value;
+      if (id != null) {
+        for (final h in holdings) {
+          if (h.id != id) continue;
+          final st = AssetType.fromStorage(h.assetType);
+          if (st.isAmountBased) return null;
+          if (h.currency != holding.currency) {
+            return '资金来源与目标产品币种不一致';
+          }
+          final unit = h.latestPrice > 0
+              ? h.latestPrice
+              : (h.costPrice > 0 ? h.costPrice : 1.0);
+          final amount = double.tryParse(amountCtrl.text.trim()) ?? 0;
+          if (unit > 0 && h.quantity * unit + 1e-6 < amount) {
+            return '资金来源「${h.name}」可用市值不足'
+                '（可用 ${Formats.amount(h.quantity * unit)}）';
+          }
+          return null;
+        }
+      }
     }
     return null;
   }
@@ -166,44 +214,60 @@ Future<void> showHoldingTransactionDialog(
               ),
             ],
             const SizedBox(height: 12),
-            if (moneyHoldings.isNotEmpty &&
-                txnType.value != TransactionType.consume &&
-                txnType.value != TransactionType.split) ...[
-              ValueListenableBuilder<int?>(
-                valueListenable: cashId,
-                builder: (context, value, _) => ValueListenableBuilder<TransactionType>(
-                  valueListenable: txnType,
-                  builder: (context, t, _) => DropdownButtonFormField<int>(
-                    initialValue: value,
-                    decoration: terminalDecoration(counterpartyLabel(t, isShare)),
-                    items: [
-                      for (final c in moneyHoldings)
-                        DropdownMenuItem(
-                          value: c.id,
-                          child: Text(
-                            '${c.name} (${AssetType.fromStorage(c.assetType).label})',
-                            overflow: TextOverflow.ellipsis,
+            ValueListenableBuilder<TransactionType>(
+              valueListenable: txnType,
+              builder: (context, t, _) {
+                final dropdownHoldings = isShare
+                    ? (t == TransactionType.buy ? fundSources : cashHoldings)
+                    : moneyHoldings;
+                if (dropdownHoldings.isEmpty ||
+                    t == TransactionType.consume ||
+                    t == TransactionType.split) {
+                  return const SizedBox.shrink();
+                }
+                return Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    ValueListenableBuilder<int?>(
+                      valueListenable: cashId,
+                      builder: (context, value, _) => DropdownButtonFormField<int>(
+                        initialValue: value,
+                        decoration: terminalDecoration(counterpartyLabel(t, isShare)),
+                        items: [
+                          for (final c in dropdownHoldings)
+                            DropdownMenuItem(
+                              value: c.id,
+                              child: Text(
+                                _sourceItemLabel(c),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                        ],
+                        onChanged: (v) => cashId.value = v,
+                      ),
+                    ),
+                    if (isShare)
+                      ListenableBuilder(
+                        listenable: Listenable.merge([cashId, amountCtrl]),
+                        builder: (context, _) => Align(
+                          alignment: Alignment.centerLeft,
+                          child: Padding(
+                            padding: const EdgeInsets.only(top: 8),
+                            child: Text(
+                              t == TransactionType.buy
+                                  ? _buySourceHint(
+                                      cashId.value, holdings, amountCtrl.text)
+                                  : '不选则卖出回款不入账',
+                              style: T.label(size: 12, color: T.text2),
+                            ),
                           ),
                         ),
-                    ],
-                    onChanged: (v) => cashId.value = v,
-                  ),
-                ),
-              ),
-              if (isShare && txnType.value != TransactionType.dividend)
-                Padding(
-                  padding: const EdgeInsets.only(top: 8),
-                  child: Align(
-                    alignment: Alignment.centerLeft,
-                    child: Text(
-                      txnType.value == TransactionType.buy
-                          ? '不选则不联动扣款'
-                          : '不选则卖出回款不入账',
-                      style: T.label(size: 12, color: T.text2),
-                    ),
-                  ),
-                ),
-            ],
+                      ),
+                  ],
+                );
+              },
+            ),
             const SizedBox(height: 12),
             TerminalTextField(
               controller: noteCtrl,
@@ -231,37 +295,66 @@ Future<void> showHoldingTransactionDialog(
               );
               return;
             }
-            final result = await ref.read(transactionServiceProvider).record(
-              accountId: holding.accountId,
-              holdingId: (isShare || t == TransactionType.consume) ? holding.id : null,
-              type: t,
-              quantity: isShare &&
-                      t != TransactionType.dividend &&
-                      t != TransactionType.split
-                  ? qty
-                  : null,
-              price: isShare &&
-                      t != TransactionType.dividend &&
-                      t != TransactionType.split
-                  ? price
-                  : null,
-              amount: amount,
-              cashSourceId: switch (t) {
-                TransactionType.buy => cashId.value,
-                TransactionType.expense => holding.id,
-                TransactionType.transferIn => cashId.value,
-                TransactionType.transferOut => holding.id,
-                _ => null,
-              },
-              cashTargetId: switch (t) {
-                TransactionType.sell || TransactionType.dividend => cashId.value,
-                TransactionType.income => holding.id,
-                TransactionType.transferIn => holding.id,
-                TransactionType.transferOut => cashId.value,
-                _ => null,
-              },
-              note: noteCtrl.text.trim(),
-            );
+            final service = ref.read(transactionServiceProvider);
+            final sourceId = cashId.value;
+            HoldingRow? source;
+            if (sourceId != null) {
+              for (final h in holdings) {
+                if (h.id == sourceId) {
+                  source = h;
+                  break;
+                }
+              }
+            }
+            final fundedByHolding = isShare &&
+                t == TransactionType.buy &&
+                source != null &&
+                !AssetType.fromStorage(source.assetType).isAmountBased;
+            final result = fundedByHolding
+                ? await service.recordBuyFundedByHolding(
+                    sourceHoldingId: source.id,
+                    targetHoldingId: holding.id,
+                    targetQuantity: qty ?? 0,
+                    targetPrice: price,
+                    amount: amount,
+                    currency: holding.currency,
+                    note: noteCtrl.text.trim(),
+                  )
+                : await service.record(
+                    accountId: holding.accountId,
+                    holdingId: (isShare || t == TransactionType.consume)
+                        ? holding.id
+                        : null,
+                    type: t,
+                    quantity: isShare &&
+                            t != TransactionType.dividend &&
+                            t != TransactionType.split
+                        ? qty
+                        : null,
+                    price: isShare &&
+                            t != TransactionType.dividend &&
+                            t != TransactionType.split
+                        ? price
+                        : null,
+                    amount: amount,
+                    cashSourceId: switch (t) {
+                      TransactionType.buy => cashId.value,
+                      TransactionType.expense => holding.id,
+                      TransactionType.transferIn => cashId.value,
+                      TransactionType.transferOut => holding.id,
+                      _ => null,
+                    },
+                    cashTargetId: switch (t) {
+                      TransactionType.sell ||
+                      TransactionType.dividend =>
+                        cashId.value,
+                      TransactionType.income => holding.id,
+                      TransactionType.transferIn => holding.id,
+                      TransactionType.transferOut => cashId.value,
+                      _ => null,
+                    },
+                    note: noteCtrl.text.trim(),
+                  );
             if (!context.mounted) return;
             Navigator.pop(context);
             if (result.ok) {
@@ -313,6 +406,43 @@ String counterpartyLabel(TransactionType t, bool isShare) {
     TransactionType.transferOut => '资金去向持仓',
     _ => '对方持仓',
   };
+}
+
+/// Dropdown label for a funding source: cash shows its balance,
+/// share-based holdings show their current market value.
+String _sourceItemLabel(HoldingRow h) {
+  final t = AssetType.fromStorage(h.assetType);
+  final unit = h.latestPrice > 0 ? h.latestPrice : h.costPrice;
+  final available = t.isAmountBased ? h.quantity : h.quantity * unit;
+  return '${h.name} (${t.label}) · 可用 ${Formats.amount(available)}';
+}
+
+/// Hint under the buy funding-source dropdown: what will happen on save.
+String _buySourceHint(
+  int? sourceId,
+  List<HoldingRow> holdings,
+  String amountText,
+) {
+  if (sourceId == null) return '不选则不联动扣款';
+  HoldingRow? source;
+  for (final h in holdings) {
+    if (h.id == sourceId) {
+      source = h;
+      break;
+    }
+  }
+  if (source == null) return '不选则不联动扣款';
+  final t = AssetType.fromStorage(source.assetType);
+  if (t.isAmountBased) return '保存时从 ${source.name} 扣减该金额';
+  final unit = source.latestPrice > 0
+      ? source.latestPrice
+      : (source.costPrice > 0 ? source.costPrice : 1.0);
+  final amount = double.tryParse(amountText.trim()) ?? 0;
+  if (amount <= 0 || unit <= 0) {
+    return '保存时赎回 ${source.name} 对应份额用于本笔买入';
+  }
+  return '将赎回 ${source.name} 约 ${Formats.num(amount / unit)} 份'
+      '（单价 ${Formats.smartNum(unit)}）用于本笔买入';
 }
 
 void syncAmount(

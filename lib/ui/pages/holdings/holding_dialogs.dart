@@ -28,6 +28,14 @@ Value<double?> _editFxRateValue(
   return const Value<double?>.absent();
 }
 
+/// Label for a funding-source option: available balance / market value.
+String _fundingSourceLabel(HoldingRow h) {
+  final t = AssetType.fromStorage(h.assetType);
+  final unit = h.latestPrice > 0 ? h.latestPrice : h.costPrice;
+  final available = t.isAmountBased ? h.quantity : h.quantity * unit;
+  return '${h.name} (${t.label}) · 可用 ${Formats.amount(available)}';
+}
+
 Future<void> showAddHoldingDialog(BuildContext context, WidgetRef ref) async {
   final accounts = await ref.read(accountsProvider.future);
   if (accounts.isEmpty) {
@@ -56,6 +64,19 @@ Future<void> showAddHoldingDialog(BuildContext context, WidgetRef ref) async {
   final purchaseDate = ValueNotifier<DateTime?>(DateTime.now());
   final amount = ValueNotifier<double>(0);
   double? investedResult;
+
+  // Existing holdings usable as the funding source for this new one
+  // (e.g. redeem a money-market fund to buy a new product). Liabilities
+  // are excluded; share-based holdings need a positive balance.
+  final holdings = ref.read(holdingsProvider).value ?? const [];
+  final fundSources = holdings
+      .where((h) {
+        final t = AssetType.fromStorage(h.assetType);
+        return t != AssetType.liability &&
+            (t.isAmountBased || h.quantity > 0);
+      })
+      .toList();
+  final fundingSourceId = ValueNotifier<int?>(null);
 
   if (!context.mounted) return;
   await showDialog<void>(
@@ -265,6 +286,51 @@ Future<void> showAddHoldingDialog(BuildContext context, WidgetRef ref) async {
                 );
               },
             ),
+            ValueListenableBuilder<AssetType>(
+              valueListenable: assetType,
+              builder: (context, type, _) {
+                if (type == AssetType.liability || fundSources.isEmpty) {
+                  return const SizedBox.shrink();
+                }
+                return Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const SizedBox(height: 12),
+                    ValueListenableBuilder<int?>(
+                      valueListenable: fundingSourceId,
+                      builder: (context, value, _) => DropdownButtonFormField<int?>(
+                        initialValue: value,
+                        decoration: terminalDecoration('资金来源（可选）'),
+                        items: [
+                          const DropdownMenuItem<int?>(
+                            value: null,
+                            child: Text('不选（资金已在该产品中）'),
+                          ),
+                          for (final h in fundSources)
+                            DropdownMenuItem(
+                              value: h.id,
+                              child: Text(
+                                _fundingSourceLabel(h),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                        ],
+                        onChanged: (v) => fundingSourceId.value = v,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        '选择后保存时将自动从该来源赎回对应金额',
+                        style: T.label(size: 12, color: T.text2),
+                      ),
+                    ),
+                  ],
+                );
+              },
+            ),
           ],
         ),
       ),
@@ -308,13 +374,48 @@ Future<void> showAddHoldingDialog(BuildContext context, WidgetRef ref) async {
             final userPrice = double.tryParse(latestPriceCtrl.text.trim());
             final autoCny =
                 type.isMarketLinked || type == AssetType.bankWealth;
+            final finalCurrency = autoCny
+                ? 'CNY'
+                : (currencyCtrl.text.trim().toUpperCase().isEmpty
+                    ? 'CNY'
+                    : currencyCtrl.text.trim().toUpperCase());
+            // Funding source: redeem from an existing holding to fund this
+            // new one. Validated before creation so a mismatch never
+            // leaves a half state.
+            int? redemptionSourceId;
+            double redemptionAmount = 0;
+            final selectedSource = fundingSourceId.value;
+            if (selectedSource != null) {
+              for (final h in holdings) {
+                if (h.id != selectedSource) continue;
+                final st = AssetType.fromStorage(h.assetType);
+                if (st == AssetType.liability) {
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('负债不能作为资金来源')),
+                    );
+                  }
+                  return;
+                }
+                redemptionAmount = isAmount
+                    ? qty
+                    : qty * (invested ?? 0);
+                if (h.currency != finalCurrency) {
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('资金来源「${h.name}」币种与持仓币种不一致'),
+                      ),
+                    );
+                  }
+                  return;
+                }
+                redemptionSourceId = h.id;
+                break;
+              }
+            }
             int createdId;
             try {
-              final finalCurrency = autoCny
-                  ? 'CNY'
-                  : (currencyCtrl.text.trim().toUpperCase().isEmpty
-                      ? 'CNY'
-                      : currencyCtrl.text.trim().toUpperCase());
               final fx = double.tryParse(fxRateCtrl.text.trim());
               createdId = await dao.createHolding(HoldingsCompanion.insert(
                 accountId: accountId.value!,
@@ -345,6 +446,28 @@ Future<void> showAddHoldingDialog(BuildContext context, WidgetRef ref) async {
                 );
               }
               return;
+            }
+            if (redemptionSourceId != null) {
+              final redemption = await ref
+                  .read(transactionServiceProvider)
+                  .recordRedemption(
+                sourceHoldingId: redemptionSourceId,
+                amount: redemptionAmount,
+                currency: finalCurrency,
+                note: '赎回购买 $name',
+              );
+              if (!redemption.ok) {
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(
+                          '持仓已创建，但来源赎回记录失败：${redemption.message ?? ''}'),
+                      backgroundColor: T.up,
+                    ),
+                  );
+                }
+                return;
+              }
             }
             if (context.mounted) Navigator.pop(context);
 

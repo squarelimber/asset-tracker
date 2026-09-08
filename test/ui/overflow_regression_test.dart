@@ -14,6 +14,7 @@ import 'package:asset_tracker/ui/pages/calendar/earnings_calendar_page.dart';
 import 'package:asset_tracker/ui/pages/calendar/product_earnings_calendar_page.dart';
 import 'package:asset_tracker/ui/pages/settings/settings_page.dart';
 import 'package:asset_tracker/ui/pages/stats/stats_page.dart';
+import 'package:asset_tracker/ui/pages/transactions/transactions_page.dart';
 import 'package:asset_tracker/ui/pages/holdings/holdings_page.dart';
 import 'package:asset_tracker/ui/pages/portfolio/portfolio_page.dart';
 import 'package:drift/native.dart';
@@ -262,6 +263,93 @@ void main() {
     await pumpPage(tester, const SettingsPage(), const Size(360, 640));
     expectNoOverflow(tester);
     await pumpPage(tester, const SettingsPage(), const Size(1280, 800));
+    expectNoOverflow(tester);
+  });
+
+  testWidgets('transactions: no overflow at phone and desktop', (tester) async {
+    final now = DateTime(2026, 8, 27);
+    final account = AccountRow(
+      id: 1,
+      name: '测试账户',
+      type: 'general',
+      currency: 'CNY',
+      createdAt: DateTime(2026, 1, 1),
+      updatedAt: DateTime(2026, 1, 1),
+    );
+    final cash = HoldingRow(
+      id: 1,
+      accountId: 1,
+      name: '现金',
+      assetType: 'savings',
+      marketSource: 'manual',
+      quantity: 100,
+      costPrice: 900,
+      latestPrice: 1000,
+      currency: 'CNY',
+      archived: false,
+      createdAt: DateTime(2026, 1, 1),
+      updatedAt: DateTime(2026, 1, 1),
+    );
+    final fund = HoldingRow(
+      id: 2,
+      accountId: 1,
+      name: '某基金',
+      assetType: 'mutual_fund',
+      marketSource: 'manual',
+      quantity: 1000,
+      costPrice: 10,
+      latestPrice: 12,
+      currency: 'CNY',
+      archived: false,
+      createdAt: DateTime(2026, 1, 1),
+      updatedAt: DateTime(2026, 1, 1),
+    );
+    TransactionRow txn(
+      int id,
+      String type,
+      double amount, {
+      int? holdingId,
+      int? cashSource,
+      int? cashTarget,
+      double? quantity,
+      double? price,
+      String? note,
+    }) {
+      return TransactionRow(
+        id: id,
+        accountId: 1,
+        holdingId: holdingId,
+        cashSourceId: cashSource,
+        cashTargetId: cashTarget,
+        type: type,
+        quantity: quantity,
+        price: price,
+        amount: amount,
+        currency: 'CNY',
+        occurredAt: now,
+        note: note,
+        costMoved: true,
+        updatedAt: now,
+      );
+    }
+    final txns = [
+      txn(1, 'buy', 1000, holdingId: 2, cashSource: 1, quantity: 100, price: 10, note: '由 现金 出资'),
+      txn(2, 'sell', 500, holdingId: 1, quantity: 500, price: 1, note: '赎回购买 某基金'),
+      txn(3, 'dividend', 200, holdingId: 2, cashTarget: 1, note: '现金分红'),
+      txn(4, 'expense', 300, cashSource: 1, note: '手续费'),
+    ];
+    final overrides = <Override>[
+      transactionsProvider.overrideWith((ref) => Stream.value(txns)),
+      holdingsProvider.overrideWith((ref) => Stream.value([cash, fund])),
+      accountsProvider.overrideWith((ref) => Stream.value([account])),
+      cnyRatesProvider.overrideWith(
+          (ref) => Future.value(const {'CNY': 1.0})),
+      alertEventsProvider.overrideWith(
+          (ref) => Stream.value(<AlertEventRow>[])),
+    ];
+    await pumpPage(tester, const TransactionsPage(), const Size(360, 640), overrides: overrides);
+    expectNoOverflow(tester);
+    await pumpPage(tester, const TransactionsPage(), const Size(1280, 800), overrides: overrides);
     expectNoOverflow(tester);
   });
 

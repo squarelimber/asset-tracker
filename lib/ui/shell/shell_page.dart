@@ -25,7 +25,7 @@ class ShellPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (!Responsive.isDesktop(context)) return _PhoneShell(child: child);
-    // Desktop keyboard shortcuts: 1-5 switch the five main pages.
+    // Desktop keyboard shortcuts: 1-6 switch the main pages + history.
     return KeyShortcuts(
       onKeyDown: (key) {
         final i = switch (key) {
@@ -34,9 +34,14 @@ class ShellPage extends StatelessWidget {
           LogicalKeyboardKey.digit3 => 2,
           LogicalKeyboardKey.digit4 => 3,
           LogicalKeyboardKey.digit5 => 4,
+          LogicalKeyboardKey.digit6 => -2,
           _ => -1,
         };
-        if (i >= 0) context.go(_destinations[i].path);
+        if (i >= 0) {
+          context.go(_destinations[i].path);
+        } else if (i == -2) {
+          context.go('/transactions');
+        }
       },
       child: _DesktopShell(child: child),
     );
@@ -134,6 +139,14 @@ class _DesktopShell extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               children: [
                 const SizedBox(height: T.s2),
+                _RailAction(
+                  icon: Icons.receipt_long_outlined,
+                  activeIcon: Icons.receipt_long,
+                  label: '流水',
+                  selected: path.startsWith('/transactions'),
+                  onTap: () => context.go('/transactions'),
+                ),
+                const SizedBox(height: T.s1),
                 _RailAction(
                   icon: Icons.notifications_outlined,
                   activeIcon: Icons.notifications,

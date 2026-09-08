@@ -628,4 +628,313 @@ void main() {
       expect(h.costPrice, 7000);
     });
   });
+
+  group('recordBuyFundedByHolding (用已持仓产品出资买入)', () {
+    test('amount-based source: debits balance+invested, target moving average, 2 rows',
+        () async {
+      final acc = await addAccount('A');
+      final cash = await addHolding(
+        accountId: acc, name: '现金', type: AssetType.bankDeposit,
+        quantity: 5000, costPrice: 5000, latestPrice: 1,
+      );
+      final fund = await addHolding(
+        accountId: acc, name: '基金', type: AssetType.mutualFund,
+        quantity: 100, costPrice: 10, latestPrice: 12,
+      );
+      final r = await service.recordBuyFundedByHolding(
+        sourceHoldingId: cash, targetHoldingId: fund,
+        targetQuantity: 50, targetPrice: 20, amount: 1000,
+      );
+      expect(r.ok, isTrue);
+      final cashAfter = (await dao.getHolding(cash))!;
+      expect(cashAfter.quantity, 4000);
+      expect(cashAfter.costPrice, 4000); // invested moves with the balance
+      final fundAfter = (await dao.getHolding(fund))!;
+      expect(fundAfter.quantity, 150);
+      expect(fundAfter.costPrice, closeTo((100 * 10 + 1000) / 150, 1e-9));
+      // Two rows: sell (source) + buy (target), same timestamp.
+      final rows = await dao.getTransactions();
+      expect(rows, hasLength(2));
+      final sell = rows.firstWhere((t) => t.type == 'sell');
+      expect(sell.holdingId, cash);
+      expect(sell.quantity, 1000); // amount-based: quantity == amount
+      expect(sell.price, 1);
+      expect(sell.note, '赎回购买 基金');
+      final buy = rows.firstWhere((t) => t.type == 'buy');
+      expect(buy.holdingId, fund);
+      expect(buy.quantity, 50);
+      expect(buy.price, 20);
+      expect(buy.note, '由 现金 出资');
+      expect(sell.occurredAt, buy.occurredAt);
+    });
+
+    test('share-based source: reduces quantity, cost kept, unit from latestPrice',
+        () async {
+      final acc = await addAccount('A');
+      final mmf = await addHolding(
+        accountId: acc, name: '天天宝', type: AssetType.mutualFund,
+        quantity: 1000, costPrice: 1, latestPrice: 2,
+      );
+      final fund = await addHolding(
+        accountId: acc, name: '基金', type: AssetType.mutualFund,
+        quantity: 0, costPrice: 0, latestPrice: 1,
+      );
+      final r = await service.recordBuyFundedByHolding(
+        sourceHoldingId: mmf, targetHoldingId: fund,
+        targetQuantity: 100, targetPrice: 10, amount: 1000,
+      );
+      expect(r.ok, isTrue);
+      final mmfAfter = (await dao.getHolding(mmf))!;
+      expect(mmfAfter.quantity, 500); // 1000 - 1000/2
+      expect(mmfAfter.costPrice, 1); // cost unchanged
+      final fundAfter = (await dao.getHolding(fund))!;
+      expect(fundAfter.quantity, 100);
+      expect(fundAfter.costPrice, 10);
+      final sell =
+          (await dao.getTransactions()).firstWhere((t) => t.type == 'sell');
+      expect(sell.quantity, 500);
+      expect(sell.price, 2);
+    });
+
+    test('unit falls back to costPrice when latestPrice is 0', () async {
+      final acc = await addAccount('A');
+      final mmf = await addHolding(
+        accountId: acc, name: '天天宝', type: AssetType.mutualFund,
+        quantity: 100, costPrice: 4, latestPrice: 0,
+      );
+      final fund = await addHolding(
+        accountId: acc, name: '基金', type: AssetType.mutualFund,
+        quantity: 0, costPrice: 0, latestPrice: 1,
+      );
+      final r = await service.recordBuyFundedByHolding(
+        sourceHoldingId: mmf, targetHoldingId: fund,
+        targetQuantity: 10, targetPrice: 10, amount: 200,
+      );
+      expect(r.ok, isTrue);
+      expect((await dao.getHolding(mmf))!.quantity, 50); // 100 - 200/4
+      final sell =
+          (await dao.getTransactions()).firstWhere((t) => t.type == 'sell');
+      expect(sell.price, 4);
+      expect(sell.quantity, 50);
+    });
+
+    test('insufficient share-based source: rejected, no partial state', () async {
+      final acc = await addAccount('A');
+      final mmf = await addHolding(
+        accountId: acc, name: '天天宝', type: AssetType.mutualFund,
+        quantity: 100, costPrice: 1, latestPrice: 1,
+      );
+      final fund = await addHolding(
+        accountId: acc, name: '基金', type: AssetType.mutualFund,
+        quantity: 0, costPrice: 0, latestPrice: 1,
+      );
+      final r = await service.recordBuyFundedByHolding(
+        sourceHoldingId: mmf, targetHoldingId: fund,
+        targetQuantity: 10, targetPrice: 10, amount: 500,
+      );
+      expect(r.ok, isFalse);
+      expect(r.message, contains('可用市值不足'));
+      expect((await dao.getHolding(mmf))!.quantity, 100);
+      expect((await dao.getHolding(fund))!.quantity, 0);
+      expect(await dao.getTransactions(), isEmpty);
+    });
+
+    test('insufficient amount-based source: rejected, no partial state', () async {
+      final acc = await addAccount('A');
+      final cash = await addHolding(
+        accountId: acc, name: '现金', type: AssetType.bankDeposit,
+        quantity: 500, costPrice: 500, latestPrice: 1,
+      );
+      final fund = await addHolding(
+        accountId: acc, name: '基金', type: AssetType.mutualFund,
+        quantity: 0, costPrice: 0, latestPrice: 1,
+      );
+      final r = await service.recordBuyFundedByHolding(
+        sourceHoldingId: cash, targetHoldingId: fund,
+        targetQuantity: 10, targetPrice: 10, amount: 600,
+      );
+      expect(r.ok, isFalse);
+      expect(r.message, contains('余额不足'));
+      expect((await dao.getHolding(cash))!.quantity, 500);
+      expect((await dao.getHolding(fund))!.quantity, 0);
+      expect(await dao.getTransactions(), isEmpty);
+    });
+
+    test('currency mismatch: rejected', () async {
+      final acc = await addAccount('A');
+      final cash = await addHolding(
+        accountId: acc, name: '现金', type: AssetType.bankDeposit,
+        quantity: 5000, costPrice: 5000, latestPrice: 1,
+      );
+      final usd = await dao.createHolding(HoldingsCompanion.insert(
+        accountId: acc,
+        name: 'USD基金',
+        assetType: AssetType.mutualFund.storageName,
+        marketSource: Value('sina'),
+        quantity: Value(0),
+        costPrice: Value(0),
+        latestPrice: Value(1),
+        currency: Value('USD'),
+      ));
+      final r = await service.recordBuyFundedByHolding(
+        sourceHoldingId: cash, targetHoldingId: usd,
+        targetQuantity: 10, amount: 100,
+      );
+      expect(r.ok, isFalse);
+      expect(r.message, contains('币种不一致'));
+    });
+
+    test('same source and target: rejected', () async {
+      final acc = await addAccount('A');
+      final cash = await addHolding(
+        accountId: acc, name: '现金', type: AssetType.bankDeposit,
+        quantity: 5000, costPrice: 5000, latestPrice: 1,
+      );
+      final r = await service.recordBuyFundedByHolding(
+        sourceHoldingId: cash, targetHoldingId: cash,
+        targetQuantity: 10, amount: 100,
+      );
+      expect(r.ok, isFalse);
+      expect(r.message, contains('不能相同'));
+    });
+
+    test('liability as source: rejected', () async {
+      final acc = await addAccount('A');
+      final loan = await addHolding(
+        accountId: acc, name: '贷款', type: AssetType.liability,
+        quantity: 2000, costPrice: 2000, latestPrice: 1,
+      );
+      final fund = await addHolding(
+        accountId: acc, name: '基金', type: AssetType.mutualFund,
+        quantity: 0, costPrice: 0, latestPrice: 1,
+      );
+      final r = await service.recordBuyFundedByHolding(
+        sourceHoldingId: loan, targetHoldingId: fund,
+        targetQuantity: 10, amount: 100,
+      );
+      expect(r.ok, isFalse);
+      expect(r.message, contains('负债'));
+    });
+
+    test('removing the buy row rolls back the target only', () async {
+      final acc = await addAccount('A');
+      final mmf = await addHolding(
+        accountId: acc, name: '天天宝', type: AssetType.mutualFund,
+        quantity: 1000, costPrice: 1, latestPrice: 2,
+      );
+      final fund = await addHolding(
+        accountId: acc, name: '基金', type: AssetType.mutualFund,
+        quantity: 0, costPrice: 0, latestPrice: 1,
+      );
+      await service.recordBuyFundedByHolding(
+        sourceHoldingId: mmf, targetHoldingId: fund,
+        targetQuantity: 100, targetPrice: 10, amount: 1000,
+      );
+      final buy =
+          (await dao.getTransactions()).firstWhere((t) => t.type == 'buy');
+      expect((await service.remove(buy.id)).ok, isTrue);
+      final fundAfter = (await dao.getHolding(fund))!;
+      expect(fundAfter.quantity, 0);
+      expect(fundAfter.costPrice, 10); // full reversal keeps the unit cost
+      // The source stays redeemed: its sell row is untouched.
+      expect((await dao.getHolding(mmf))!.quantity, 500);
+    });
+
+    test('removing the sell row restores the source quantity', () async {
+      final acc = await addAccount('A');
+      final mmf = await addHolding(
+        accountId: acc, name: '天天宝', type: AssetType.mutualFund,
+        quantity: 1000, costPrice: 1, latestPrice: 2,
+      );
+      final fund = await addHolding(
+        accountId: acc, name: '基金', type: AssetType.mutualFund,
+        quantity: 0, costPrice: 0, latestPrice: 1,
+      );
+      await service.recordBuyFundedByHolding(
+        sourceHoldingId: mmf, targetHoldingId: fund,
+        targetQuantity: 100, targetPrice: 10, amount: 1000,
+      );
+      final sell =
+          (await dao.getTransactions()).firstWhere((t) => t.type == 'sell');
+      expect((await service.remove(sell.id)).ok, isTrue);
+      final mmfAfter = (await dao.getHolding(mmf))!;
+      expect(mmfAfter.quantity, 1000);
+      expect(mmfAfter.costPrice, 1);
+      // The target keeps its purchase.
+      expect((await dao.getHolding(fund))!.quantity, 100);
+    });
+  });
+
+  group('recordRedemption (独立赎回)', () {
+    test('amount-based: debits balance and invested, writes a sell row', () async {
+      final acc = await addAccount('A');
+      final cash = await addHolding(
+        accountId: acc, name: '现金', type: AssetType.bankDeposit,
+        quantity: 5000, costPrice: 5000, latestPrice: 1,
+      );
+      final r = await service.recordRedemption(
+        sourceHoldingId: cash, amount: 2000, note: '赎回购买 新基金',
+      );
+      expect(r.ok, isTrue);
+      final cashAfter = (await dao.getHolding(cash))!;
+      expect(cashAfter.quantity, 3000);
+      expect(cashAfter.costPrice, 3000);
+      final row = (await dao.getTransactions()).single;
+      expect(row.type, 'sell');
+      expect(row.holdingId, cash);
+      expect(row.quantity, 2000);
+      expect(row.price, 1);
+      expect(row.amount, 2000);
+      expect(row.note, '赎回购买 新基金');
+    });
+
+    test('share-based: reduces quantity, keeps cost, unit from latestPrice',
+        () async {
+      final acc = await addAccount('A');
+      final mmf = await addHolding(
+        accountId: acc, name: '天天宝', type: AssetType.mutualFund,
+        quantity: 1000, costPrice: 1, latestPrice: 2,
+      );
+      final r = await service.recordRedemption(
+        sourceHoldingId: mmf, amount: 1000,
+      );
+      expect(r.ok, isTrue);
+      final mmfAfter = (await dao.getHolding(mmf))!;
+      expect(mmfAfter.quantity, 500);
+      expect(mmfAfter.costPrice, 1);
+      final row = (await dao.getTransactions()).single;
+      expect(row.type, 'sell');
+      expect(row.quantity, 500);
+      expect(row.price, 2);
+    });
+
+    test('rejects liability', () async {
+      final acc = await addAccount('A');
+      final loan = await addHolding(
+        accountId: acc, name: '贷款', type: AssetType.liability,
+        quantity: 2000, costPrice: 2000, latestPrice: 1,
+      );
+      final r = await service.recordRedemption(
+        sourceHoldingId: loan, amount: 500,
+      );
+      expect(r.ok, isFalse);
+      expect(r.message, contains('负债'));
+      expect(await dao.getTransactions(), isEmpty);
+    });
+
+    test('rejects insufficient source without partial state', () async {
+      final acc = await addAccount('A');
+      final mmf = await addHolding(
+        accountId: acc, name: '天天宝', type: AssetType.mutualFund,
+        quantity: 100, costPrice: 1, latestPrice: 1,
+      );
+      final r = await service.recordRedemption(
+        sourceHoldingId: mmf, amount: 200,
+      );
+      expect(r.ok, isFalse);
+      expect(r.message, contains('可用市值不足'));
+      expect((await dao.getHolding(mmf))!.quantity, 100);
+      expect(await dao.getTransactions(), isEmpty);
+    });
+  });
 }

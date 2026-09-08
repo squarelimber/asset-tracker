@@ -5,7 +5,8 @@ import 'package:go_router/go_router.dart';
 import '../../app/providers.dart';
 import '../tokens.dart';
 
-/// Bell (alerts, with 24h unread badge) + gear (settings) for page AppBars.
+/// Receipt (history) + bell (alerts, with 24h unread badge) + gear
+/// (settings) for page AppBars.
 class TerminalAppBarActions extends ConsumerWidget {
   const TerminalAppBarActions({super.key});
 
@@ -18,6 +19,11 @@ class TerminalAppBarActions extends ConsumerWidget {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
+        IconButton(
+          tooltip: '交易流水',
+          icon: const Icon(Icons.receipt_long_outlined, color: T.text2),
+          onPressed: () => context.go('/transactions'),
+        ),
         IconButton(
           tooltip: '提醒',
           icon: Badge(
