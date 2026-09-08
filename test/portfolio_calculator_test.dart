@@ -233,6 +233,60 @@ void main() {
     expect(s.totalProfit, closeTo(505.5, 1e-6));
   });
 
+  test('amount-based sells contribute zero realized profit', () {
+    // 天天宝-style bank deposit: costPrice is the cumulative invested
+    // amount, not a unit cost, so a redemption of 49,999.075 @ 1.0 must
+    // not produce (1.0 - 115399.71) x 49999.075.
+    final s = calc.compute(
+      [
+        _holding(
+          id: 1,
+          type: 'bank_deposit',
+          quantity: 117338.2,
+          price: 1,
+          cost: 115399.71,
+        ),
+        _holding(id: 2, type: 'mutual_fund', quantity: 100, price: 20, cost: 10),
+      ],
+      sellTransactions: [
+        TransactionRow(
+          id: 1,
+          accountId: 1,
+          holdingId: 1,
+          cashSourceId: null,
+          cashTargetId: null,
+          type: 'sell',
+          quantity: 49999.075,
+          price: 1.0,
+          amount: 49999.075,
+          currency: 'CNY',
+          occurredAt: DateTime(2026, 9, 8),
+          note: null,
+          costMoved: true,
+          updatedAt: DateTime(2026, 9, 8),
+        ),
+        TransactionRow(
+          id: 2,
+          accountId: 1,
+          holdingId: 2,
+          cashSourceId: null,
+          cashTargetId: null,
+          type: 'sell',
+          quantity: 50,
+          price: 15,
+          amount: 750,
+          currency: 'CNY',
+          occurredAt: DateTime(2026, 9, 8),
+          note: null,
+          costMoved: true,
+          updatedAt: DateTime(2026, 9, 8),
+        ),
+      ],
+    );
+    // Only the fund sell realizes: (15 - 10) * 50 = 250.
+    expect(s.realizedProfit, closeTo(250, 1e-6));
+  });
+
   test('risk breakdown groups holdings by effective risk tier', () {
     final s = calc.compute([
       _holding(id: 1, type: 'cash', quantity: 1000, price: 1, cost: 1000),

@@ -78,6 +78,9 @@ class HoldingDetailSheet extends ConsumerWidget {
         ? (TradeStatsCalculator.realizedProfitByHolding(
             txnList,
             {holding.id: holding.costPrice},
+            // Amount-based holdings store the invested total in costPrice;
+            // their realized profit is exactly 0 (see trade_stats.dart).
+            amountBasedHoldingIds: type.isAmountBased ? {holding.id} : const {},
           )[holding.id] ??
           0)
         : 0.0;
@@ -228,7 +231,13 @@ class HoldingDetailSheet extends ConsumerWidget {
               : Column(
                   children: [
                     for (final t in list) ...[
-                      TransactionTile(txn: t, costPrice: holding.costPrice),
+                      // Amount-based holdings store the invested total in
+                      // costPrice; a per-row realized figure is not
+                      // meaningful for them (exactly 0 by construction).
+                      TransactionTile(
+                        txn: t,
+                        costPrice: type.isAmountBased ? null : holding.costPrice,
+                      ),
                       const SizedBox(height: 4),
                     ],
                   ],

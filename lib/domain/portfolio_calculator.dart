@@ -176,6 +176,9 @@ class PortfolioCalculator {
     final costByHolding = <int, double>{
       for (final h in holdings) h.id: h.costPrice,
     };
+    final typeByHolding = <int, AssetType>{
+      for (final h in holdings) h.id: AssetType.fromStorage(h.assetType),
+    };
     double rateOf(String currency) {
       final rate = cnyRates[currency.toUpperCase()];
       return (rate == null || rate <= 0) ? 1 : rate;
@@ -185,6 +188,13 @@ class PortfolioCalculator {
     for (final t in sells) {
       final holdingId = t.holdingId;
       if (holdingId == null) continue;
+      // Realized profit (price - unit cost) x quantity is only valid for
+      // share-based holdings, where costPrice is a unit cost. Amount-based
+      // holdings store the cumulative invested amount in costPrice (unit
+      // price and unit cost are both 1.0), so their realized profit is
+      // exactly 0 by construction.
+      final holdingType = typeByHolding[holdingId];
+      if (holdingType == null || holdingType.isAmountBased) continue;
       final unitCost = costByHolding[holdingId] ?? 0;
       final qty = t.quantity ?? 0;
       final price = t.price ?? 0;

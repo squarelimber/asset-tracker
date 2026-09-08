@@ -83,6 +83,12 @@ class StatsPage extends ConsumerWidget {
                   '买入后成本变动时会略有偏差。',
                   style: T.label(),
                 ),
+                const SizedBox(height: T.s2),
+                Text(
+                  '净现金流只统计实际进出现金的流水：赎回转投其他持仓、'
+                  '转账等内部划转不计入。',
+                  style: T.label(),
+                ),
               ],
             ),
           ),
