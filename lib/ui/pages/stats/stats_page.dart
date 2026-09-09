@@ -5,6 +5,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../app/providers.dart';
 import '../../../core/formats.dart';
 import '../../../core/responsive.dart';
+import '../../../data/database.dart';
+import '../../../domain/daily_earnings.dart';
 import '../../../domain/trade_stats.dart';
 import '../../components/app_bar_actions.dart';
 import '../../components/error_state.dart';
@@ -26,6 +28,11 @@ class StatsPage extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final stats = ref.watch(statsProvider);
+    // Monthly investment profit derived from the daily net-worth snapshots:
+    // principal in/out moves the cost basis along with the balance, so these
+    // are true gains (cost-basis profit), not cash flows.
+    final snapshots = ref.watch(snapshotsProvider).value ?? const [];
+    final monthlyProfit = _monthlyProfitOf(snapshots);
     return Scaffold(
       appBar: AppBar(
         title: const Text('统计'),
@@ -56,17 +63,17 @@ class StatsPage extends ConsumerWidget {
                     StatTile(label: '累计卖出', value: Formats.amount(s.soldTotal)),
                     StatTile(label: '累计收入', value: Formats.amount(s.incomeTotal)),
                     StatTile(label: '累计支出', value: Formats.amount(s.expenseTotal)),
-                    if (s.monthlyCashflow.isNotEmpty) ..._monthTiles(s),
+                    if (monthlyProfit.isNotEmpty) ..._monthTiles(monthlyProfit),
                   ],
                 ),
               const SizedBox(height: T.s4),
-              const SectionHeader(label: '月度现金流'),
-              if (s.monthlyCashflow.isEmpty)
+              const SectionHeader(label: '月度收益'),
+              if (monthlyProfit.isEmpty)
                 const TerminalCard(
                   child: Center(
                     child: Padding(
                       padding: EdgeInsets.all(T.s4),
-                      child: Text('暂无流水数据，先记一笔交易吧'),
+                      child: Text('暂无收益数据，每日打开 App 自动记录净值'),
                     ),
                   ),
                 )
@@ -74,7 +81,7 @@ class StatsPage extends ConsumerWidget {
                 TerminalCard(
                   child: SizedBox(
                     height: 220,
-                    child: _CashflowChart(months: s.monthlyCashflow),
+                    child: _MonthlyBarChart(months: monthlyProfit),
                   ),
                 ),
                 const SizedBox(height: T.s3),
@@ -85,8 +92,8 @@ class StatsPage extends ConsumerWidget {
                 ),
                 const SizedBox(height: T.s2),
                 Text(
-                  '净现金流只统计实际进出现金的流水：赎回转投其他持仓、'
-                  '转账等内部划转不计入。',
+                  '月度收益来自每日净值快照（当日收益 = 当日净增值 − 前日净增值，'
+                  '转入转出本金不计入）；盈利月份 = 当月收益为正。',
                   style: T.label(),
                 ),
               ],
@@ -102,11 +109,10 @@ class StatsPage extends ConsumerWidget {
     );
   }
 
-  /// Best / worst month and the share of profitable months, derived from
-  /// the monthly cash-flow map (a month is profitable when its net cash
-  /// flow is positive).
-  List<Widget> _monthTiles(TradeStats s) {
-    final months = s.monthlyCashflow;
+  /// Best / worst month and the share of profitable months, derived from the
+  /// monthly investment profit (a month is profitable when it actually made
+  /// money — cash flows have no bearing on profitability).
+  List<Widget> _monthTiles(Map<String, double> months) {
     var bestKey = months.keys.first;
     var worstKey = months.keys.first;
     for (final k in months.keys) {
@@ -131,11 +137,24 @@ class StatsPage extends ConsumerWidget {
       ),
     ];
   }
+
+  /// 'yyyy-MM' -> sum of that month's daily asset profits, computed from the
+  /// daily net-worth snapshots. Principal in/out moves the cost basis along
+  /// with the balance, so these are gains (not cash flows).
+  Map<String, double> _monthlyProfitOf(List<SnapshotRow> snapshots) {
+    final earnings = const DailyEarningsCalculator().compute(snapshots);
+    final byMonth = <String, double>{};
+    for (final d in earnings) {
+      final key = d.date.substring(0, 7);
+      byMonth[key] = (byMonth[key] ?? 0) + d.profit;
+    }
+    return byMonth;
+  }
 }
 
-/// Dark terminal-style bar chart of monthly net cash flow.
-class _CashflowChart extends StatelessWidget {
-  const _CashflowChart({required this.months});
+/// Dark terminal-style bar chart of monthly values (investment profit).
+class _MonthlyBarChart extends StatelessWidget {
+  const _MonthlyBarChart({required this.months});
 
   final Map<String, double> months;
 

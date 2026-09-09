@@ -1,4 +1,4 @@
-﻿import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_test/flutter_test.dart';
 
 import 'package:asset_tracker/data/database.dart';
 import 'package:asset_tracker/domain/rate_series.dart';
@@ -54,6 +54,27 @@ void main() {
     final delta = calc.rangeRatePct([
       _snap('2026-01-01', 100000, 100000), // 0%
       _snap('2026-08-08', 150000, 150000), // deposit of 50k, rate still 0%
+    ]);
+    expect(delta, closeTo(0, 1e-9));
+  });
+
+  test('range rate ignores credit-card spending (debt up, net worth down)', () {
+    // Charge 1000 on the card: net worth drops 1000, debt rises 1000, cost
+    // unchanged -> assets - cost unchanged, so the rate must stay 0%.
+    SnapshotRow withDebt(String date, double value, double cost, double liab) {
+      return SnapshotRow(
+        date: date,
+        currency: 'CNY',
+        totalValue: value,
+        totalCost: cost,
+        liabilities: liab,
+        createdAt: DateTime(2026, 1, 1),
+      );
+    }
+
+    final delta = calc.rangeRatePct([
+      withDebt('2026-01-01', 100000, 100000, 0), // 0%
+      withDebt('2026-08-08', 99000, 100000, 1000), // still 0% (assets unchanged)
     ]);
     expect(delta, closeTo(0, 1e-9));
   });

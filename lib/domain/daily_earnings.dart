@@ -13,10 +13,12 @@ class DailyEarning {
   /// Snapshot date (yyyy-MM-dd).
   final String date;
 
-  /// Daily asset return = (net worth - cost) today minus yesterday. The
-  /// snapshot's totalValue already excludes liabilities, and historical
-  /// snapshots replay the cost alongside the balance, so principal
-  /// repayments / borrowing are cash flows, not gains.
+  /// Daily asset return = (assets − cost) today minus yesterday, where
+  /// `assets = totalValue + liabilities` (net worth with the debt added
+  /// back). Liability changes — credit-card spending, borrowing, repayment —
+  /// move the debt line without touching the portfolio, so they never count
+  /// as gains or losses; principal in/out moves the cost along with the
+  /// balance and nets out the same way.
   final double profit;
 
   final double totalValue;
@@ -81,12 +83,13 @@ class YearlyEarnings {
   final profitToday = _assetProfit(today);
   final profitYesterday = _assetProfit(yesterday);
   final profit = profitToday - profitYesterday;
-  final base = yesterday.totalValue;
+  final base = yesterday.totalValue + yesterday.liabilities;
   final pct = base <= 0 ? null : profit / base;
   return (profit: profit, pct: pct);
 }
 
-double _assetProfit(SnapshotRow s) => s.totalValue - s.totalCost;
+double _assetProfit(SnapshotRow s) =>
+    (s.totalValue + s.liabilities) - s.totalCost;
 
 /// Computes per-day earnings from daily snapshots.
 ///

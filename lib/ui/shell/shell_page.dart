@@ -24,7 +24,9 @@ class ShellPage extends StatelessWidget {
 
   /// Shell-level routes that live inside the [ShellRoute] and are navigated
   /// via [GoRouter.go].  Android back gesture on these pages should navigate
-  /// back to the root page (/portfolio) rather than exiting the app.
+  /// back to the root page (/portfolio) rather than exiting the app. Pushed
+  /// routes (/earnings-calendar, /accounts/:id) and the root page itself
+  /// keep the normal pop behavior so the app can be exited from 总览.
   static final _shellPaths = {
     for (final d in _destinations) d.path,
     '/transactions',
@@ -34,11 +36,12 @@ class ShellPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Determine whether the current route is a shell-level page (no stack to
-    // pop) or a pushed route (e.g. /earnings-calendar, /accounts/:id) that
-    // has a proper back stack.
+    // Exact match (not prefix): a shell-level page has no stack to pop (back
+    // gesture -> back to /portfolio), while /accounts/:id and other pushed
+    // routes must pop normally. /portfolio itself is allowed to pop so the
+    // system back gesture / edge swipe can exit the app from the root page.
     final currentPath = GoRouterState.of(context).uri.path;
-    final canPop = !_shellPaths.any((p) => currentPath.startsWith(p));
+    final canPop = currentPath == '/portfolio' || !_shellPaths.contains(currentPath);
 
     Widget child = _shellBody(context);
     child = PopScope(

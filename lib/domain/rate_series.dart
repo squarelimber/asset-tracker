@@ -4,9 +4,11 @@ import '../data/database.dart';
 
 /// Return-rate series math (capital-gains view).
 ///
-/// The daily return rate is `(market value - invested cost) / invested cost`.
-/// Money flowing in raises both value and cost, so the rate is immune to
-/// deposits/transfers — exactly what an index comparison needs.
+/// The daily return rate is `(assets - invested cost) / invested cost`, where
+/// `assets = totalValue + liabilities` (net worth with the debt added back).
+/// Money flowing in raises both value and cost, and liability changes
+/// (credit-card spending, borrowing, repayment) do not touch the portfolio,
+/// so the rate is immune to both — exactly what an index comparison needs.
 class RateSeriesCalculator {
   const RateSeriesCalculator();
 
@@ -19,15 +21,20 @@ class RateSeriesCalculator {
   /// Return rates (%) aligned with the given snapshots.
   List<double> ratesOf(List<SnapshotRow> snapshots) {
     return [
-      for (final s in snapshots) dailyRate(s.totalValue, s.totalCost) * 100,
+      for (final s in snapshots)
+        dailyRate(s.totalValue + s.liabilities, s.totalCost) * 100,
     ];
   }
 
   /// Range return in percentage points: end rate - start rate.
   double? rangeRatePct(List<SnapshotRow> snapshots) {
     if (snapshots.length < 2) return null;
-    final start = dailyRate(snapshots.first.totalValue, snapshots.first.totalCost);
-    final end = dailyRate(snapshots.last.totalValue, snapshots.last.totalCost);
+    final start = dailyRate(
+        snapshots.first.totalValue + snapshots.first.liabilities,
+        snapshots.first.totalCost);
+    final end = dailyRate(
+        snapshots.last.totalValue + snapshots.last.liabilities,
+        snapshots.last.totalCost);
     return (end - start) * 100;
   }
 

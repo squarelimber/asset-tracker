@@ -1,4 +1,4 @@
-﻿import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_test/flutter_test.dart';
 
 import 'package:asset_tracker/data/database.dart';
 import 'package:asset_tracker/domain/range_stats.dart';
@@ -52,6 +52,28 @@ void main() {
     expect(stats!.profit, 10000);
     expect(stats.profitPct, closeTo(0.1, 1e-9));
     expect(stats.annualized, closeTo(0.1, 1e-9));
+  });
+
+  test('credit-card spending during the range is not a loss', () {
+    // Charge 1000 on the card: net worth (totalValue) drops 1000, the debt
+    // line rises 1000, cost unchanged -> assets - cost unchanged.
+    SnapshotRow withDebt(String date, double value, double cost, double liab) {
+      return SnapshotRow(
+        date: date,
+        currency: 'CNY',
+        totalValue: value,
+        totalCost: cost,
+        liabilities: liab,
+        createdAt: DateTime(2026, 1, 1),
+      );
+    }
+
+    final stats = calc.compute([
+      withDebt('2026-08-01', 100000, 90000, 0),
+      withDebt('2026-08-02', 99000, 90000, 1000),
+    ]);
+    expect(stats!.profit, 0);
+    expect(stats.profitPct, 0);
   });
 
   test('annualized over half a year roughly doubles the simple return', () {
