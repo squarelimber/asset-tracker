@@ -722,12 +722,28 @@ class _TrendChartState extends State<_TrendChart> with SingleTickerProviderState
       builder: (context, constraints) {
         // Date ticks: roughly one per 80px of plot width, at least 3.
         // plotLeft must stay in sync with the leftTitles reservedSize below.
-        // On a narrow phone the fixed 48px Y-label gutter eats a large share
-        // of the card width and shoves the plot to the right, so shrink it
-        // (and the label font) a notch there to reclaim display area.
+        // On a phone the Y gutter is sized to the widest tick label (measured
+        // with the real font) instead of a fixed 48px, so the plot starts as
+        // far left as the labels allow and the display area grows. Desktop
+        // keeps a fixed comfortable 48px gutter.
         final isPhone = Responsive.isPhone(context);
-        final plotLeft = isPhone ? 40.0 : 48.0;
-        final yLabelSize = isPhone ? 9.0 : 10.0;
+        final yLabelSize = isPhone ? 8.0 : 10.0;
+        late final double plotLeft;
+        if (!isPhone) {
+          plotLeft = 48.0;
+        } else {
+          final labelStyle = T.mono(size: yLabelSize, color: T.text3);
+          final tp = TextPainter(textDirection: TextDirection.ltr);
+          var widest = 0.0;
+          for (final tick in ticks.ticks) {
+            tp.text = TextSpan(text: valueText(tick), style: labelStyle);
+            tp.layout();
+            if (tp.width > widest) widest = tp.width;
+          }
+          // 22px floor keeps a readable gap even for tiny labels; the 44px
+          // cap prevents an oversized tick from eating the whole card.
+          plotLeft = (widest + 3.0).clamp(22.0, 44.0);
+        }
         const plotBottom = 28.0;
         final plotWidth = (constraints.maxWidth - plotLeft).clamp(0.0, double.infinity);
         final labelCount =
@@ -827,7 +843,11 @@ class _TrendChartState extends State<_TrendChart> with SingleTickerProviderState
                         if (spots.isNotEmpty) {
                           final i = spots.first.x.toInt();
                           if (i > 0 && i < list.length) {
-                            final delta = list[i].totalValue - list[i - 1].totalValue;
+                            // Asset-based delta (net worth + liabilities):
+                            // credit-card spending etc. moves the debt line,
+                            // not the portfolio, so it is not a loss.
+                            final delta = (list[i].totalValue + list[i].liabilities) -
+                                (list[i - 1].totalValue + list[i - 1].liabilities);
                             items.add(
                               LineTooltipItem(
                                 '较前日 ${hideAmounts ? Formats.masked() : '${delta >= 0 ? '+' : ''}${Formats.money(delta)}'}',

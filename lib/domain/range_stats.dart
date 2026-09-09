@@ -29,10 +29,12 @@ enum RangeOption {
 
 /// Stats for a selected snapshot range.
 ///
-/// The range profit is measured as the change in `market value - cost`
-/// between the first and last snapshot. This is unaffected by new money
-/// flowing in during the range (adding 1 yuan raises both value and cost),
-/// so it reflects actual gains instead of the net worth growth.
+/// The range profit is measured as the change in `assets - cost` between the
+/// first and last snapshot, where `assets = totalValue + liabilities` (net
+/// worth with the debt added back). It is unaffected by new money flowing in
+/// during the range (adding 1 yuan raises both value and cost) and by
+/// liability changes (credit-card spending, borrowing, repayment), so it
+/// reflects actual portfolio gains instead of net-worth movement.
 class RangeStats {
   const RangeStats({
     required this.startValue,
@@ -84,8 +86,8 @@ class RangeStatsCalculator {
         ? lastDate.difference(firstDate).inDays
         : snapshots.length;
     return RangeStats(
-      startValue: first.totalValue,
-      endValue: last.totalValue,
+      startValue: first.totalValue + first.liabilities,
+      endValue: last.totalValue + last.liabilities,
       startCost: first.totalCost,
       endCost: last.totalCost,
       days: days,

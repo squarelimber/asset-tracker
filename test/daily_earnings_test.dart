@@ -1,4 +1,4 @@
-﻿import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_test/flutter_test.dart';
 
 import 'package:asset_tracker/data/database.dart';
 import 'package:asset_tracker/domain/daily_earnings.dart';
@@ -33,6 +33,17 @@ void main() {
       _snap('2026-08-01', 100000, 100000),
       // Deposit 50k: value and cost both rise.
       _snap('2026-08-02', 150000, 150000),
+    ]);
+    expect(earnings[1].profit, closeTo(0, 1e-9));
+  });
+
+  test('credit-card spending (debt up, net worth down) is not a loss', () {
+    // Charge 1000 to the card: net worth (totalValue) drops 1000, the debt
+    // line rises 1000, cost unchanged -> assets - cost is unchanged, so the
+    // purchase must not show up as a negative gain.
+    final earnings = calc.compute([
+      _snap('2026-08-01', 100000, 90000),
+      _snap('2026-08-02', 99000, 90000, liabilities: 1000),
     ]);
     expect(earnings[1].profit, closeTo(0, 1e-9));
   });
