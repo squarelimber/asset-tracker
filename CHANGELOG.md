@@ -2,6 +2,12 @@
 
 All notable changes to Asset Tracker. Entries are condensed from the commit history; dates follow the release tags.
 
+## [0.9.1] - 2026-09-09
+
+### Fixed
+
+- 目标配比显示为天文数字: 目标占比在存储中是整百分数（40 表示 40%），但对比条组件按 0~1 比率格式化，导致显示成 4000%/3000% 等（且目标竖线被压到最右侧）。现在组装对比条目时统一换算为比率，目标显示为"40.0%"、偏差按百分点计算，附回归测试
+
 ## [0.9.0] - 2026-09-09
 
 ### Added
