@@ -55,4 +55,8 @@ app.*.map.json
 *.sqlite-wal
 /backups/
 
+# Local release artifacts (fallback builds; releases are built by CI)
+/asset-tracker-*.apk
+/asset_tracker-windows-*.zip
+
 dist/

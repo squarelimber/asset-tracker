@@ -10,12 +10,17 @@ class AllocationEntry {
     required this.color,
     required this.value,
     required this.pct,
+    this.targetPct,
   });
 
   final String label;
   final Color color;
   final double value;
   final double pct;
+
+  /// Optional target (plan) share for this slice. When set, the bar shows the
+  /// planned position as a marker so the user can rebalance toward it.
+  final double? targetPct;
 }
 
 class AllocationBars extends StatelessWidget {
@@ -80,14 +85,40 @@ class _BarList extends StatelessWidget {
                       Text(Formats.pct1(e.pct), style: T.mono(size: 12, color: T.text2)),
                     ],
                   ),
+                  if (e.targetPct != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 2),
+                      child: _DeviationText(actual: e.pct, target: e.targetPct!),
+                    ),
                   const SizedBox(height: T.s1),
                   ClipRRect(
                     borderRadius: BorderRadius.circular(3),
-                    child: LinearProgressIndicator(
-                      value: e.pct.clamp(0.0, 1.0),
-                      minHeight: 6,
-                      backgroundColor: T.surface2,
-                      valueColor: AlwaysStoppedAnimation(e.color),
+                    child: LayoutBuilder(
+                      builder: (context, constraints) {
+                        final targetX = (e.targetPct ?? 0)
+                            .clamp(0.0, 1.0)
+                            .toDouble();
+                        return Stack(
+                          children: [
+                            LinearProgressIndicator(
+                              value: e.pct.clamp(0.0, 1.0),
+                              minHeight: 6,
+                              backgroundColor: T.surface2,
+                              valueColor: AlwaysStoppedAnimation(e.color),
+                            ),
+                            if (e.targetPct != null && targetX > 0 && targetX < 1)
+                              Positioned(
+                                left: (constraints.maxWidth * targetX) - 1,
+                                top: 0,
+                                bottom: 0,
+                                child: Container(
+                                  width: 2,
+                                  color: T.text1,
+                                ),
+                              ),
+                          ],
+                        );
+                      },
                     ),
                   ),
                 ],
@@ -167,11 +198,47 @@ class _DesktopBars extends StatelessWidget {
                     const SizedBox(width: T.s1),
                     Text(e.label, style: const TextStyle(fontSize: 12, color: T.text2)),
                     const SizedBox(width: T.s1),
-                    Text(Formats.pct1(e.pct), style: T.mono(size: 12, color: T.text1)),
+                    Text(
+                      e.targetPct != null
+                          ? '${Formats.pct1(e.pct)} / 目标${Formats.pct1(e.targetPct!)}'
+                          : Formats.pct1(e.pct),
+                      style: T.mono(size: 12, color: T.text1),
+                    ),
                   ],
                 ),
               ),
           ],
+        ),
+      ],
+    );
+  }
+}
+
+/// "目标 X% 偏差 +Y.Y%" line shown under each slice when a plan exists.
+/// Deviation is the gap in percentage points; beyond ±5pp it is highlighted
+/// red (overweight) / green (underweight) to flag rebalancing.
+class _DeviationText extends StatelessWidget {
+  const _DeviationText({required this.actual, required this.target});
+
+  final double actual;
+  final double target;
+
+  @override
+  Widget build(BuildContext context) {
+    final dev = actual - target;
+    final color = dev > 0.05
+        ? T.up
+        : dev < -0.05
+            ? T.down
+            : T.text3;
+    final sign = dev >= 0 ? '+' : '';
+    return Row(
+      children: [
+        Text('目标 ${Formats.pct1(target)}', style: T.mono(size: 11, color: T.text3)),
+        const SizedBox(width: T.s1),
+        Text(
+          '偏差 $sign${Formats.pct1(dev)}',
+          style: T.mono(size: 11, color: color),
         ),
       ],
     );

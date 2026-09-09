@@ -181,10 +181,15 @@ class _HoldingsPageState extends ConsumerState<HoldingsPage> {
     }
   }
 
-  /// Search match: name, symbol, or the asset-type label (e.g. tapping
-  /// "场外基金" in the allocation card filters to mutual-fund holdings).
+  /// Search match: name, symbol, the asset-type label, or the high-level
+  /// category (e.g. tapping "基金" in the allocation card filters to every
+  /// fund-type holding — etf + 场外基金).
   bool _matchesQuery(HoldingRow h, String q) {
     final type = AssetType.fromStorage(h.assetType);
+    final cat = AssetCategory.values
+        .where((c) => c.label == q || c.storageName == q)
+        .firstOrNull;
+    if (cat != null && type.category == cat) return true;
     return h.name.toLowerCase().contains(q) ||
         (h.symbol ?? '').toLowerCase().contains(q) ||
         type.label.toLowerCase().contains(q) ||

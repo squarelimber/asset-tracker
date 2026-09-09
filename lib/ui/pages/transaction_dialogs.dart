@@ -217,9 +217,16 @@ Future<void> showHoldingTransactionDialog(
             ValueListenableBuilder<TransactionType>(
               valueListenable: txnType,
               builder: (context, t, _) {
+                // Counterparty picker: only transfer-type rows have a source
+                // / destination. Income / expense (and consume / split) are
+                // sourceless — the amount simply moves in or out of the
+                // holding itself — so no dropdown is shown for them.
                 final dropdownHoldings = isShare
                     ? (t == TransactionType.buy ? fundSources : cashHoldings)
-                    : moneyHoldings;
+                    : (t == TransactionType.transferIn ||
+                            t == TransactionType.transferOut
+                        ? moneyHoldings
+                        : <HoldingRow>[]);
                 if (dropdownHoldings.isEmpty ||
                     t == TransactionType.consume ||
                     t == TransactionType.split) {
@@ -401,7 +408,6 @@ String counterpartyLabel(TransactionType t, bool isShare) {
     };
   }
   return switch (t) {
-    TransactionType.income || TransactionType.expense => '关联对方持仓（可选）',
     TransactionType.transferIn => '资金来源持仓',
     TransactionType.transferOut => '资金去向持仓',
     _ => '对方持仓',

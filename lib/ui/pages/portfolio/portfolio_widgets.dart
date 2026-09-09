@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../app/providers.dart';
+import '../../../core/enums.dart';
 import '../../../core/formats.dart';
 import '../../../core/responsive.dart';
 import '../../../data/database.dart';
@@ -13,6 +14,7 @@ import '../../../domain/nice_ticks.dart';
 import '../../../domain/portfolio_calculator.dart';
 import '../../../domain/range_stats.dart';
 import '../../../domain/rate_series.dart';
+import '../../../domain/target_allocation.dart';
 import '../../../services/market/history_lookup.dart';
 import '../../../services/market/history_source.dart';
 import '../../../services/market/tencent_history_source.dart';
@@ -39,20 +41,28 @@ class AllocationCard extends ConsumerWidget {
       );
     }
     final total = summary.totalAssets;
+    // Aggregate the fine-grained types into the high-level allocation
+    // categories (股票/基金/黄金/债券/现金/其他) for the summary view.
+    final byCat = <AssetCategory, double>{};
+    for (final b in breakdown) {
+      byCat[b.type.category] = (byCat[b.type.category] ?? 0) + b.marketValue;
+    }
+    final plan = ref.watch(targetAllocationProvider).value ?? const <AssetCategory, double>{};
     final entries = [
-      for (final b in breakdown)
+      for (final entry in byCat.entries)
         AllocationEntry(
-          label: b.type.label,
-          color: Color.lerp(b.type.color, Colors.white, 0.15) ?? b.type.color,
-          value: b.marketValue,
-          pct: total == 0 ? 0 : b.marketValue / total,
+          label: entry.key.label,
+          color: Color.lerp(entry.key.color, Colors.white, 0.15) ?? entry.key.color,
+          value: entry.value,
+          pct: total == 0 ? 0 : entry.value / total,
+          targetPct: plan[entry.key],
         ),
-    ];
+    ]..sort((a, b) => b.value.compareTo(a.value));
     return TerminalCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const SectionHeader(label: '资产配置'),
+          const SectionHeader(label: '资产配置 · 实际/计划'),
           AllocationBars(
             entries: entries,
             amountFormat: hidden ? (_) => Formats.masked() : null,
@@ -710,7 +720,12 @@ class _TrendChartState extends State<_TrendChart> with SingleTickerProviderState
       builder: (context, constraints) {
         // Date ticks: roughly one per 80px of plot width, at least 3.
         // plotLeft must stay in sync with the leftTitles reservedSize below.
-        const plotLeft = 48.0;
+        // On a narrow phone the fixed 48px Y-label gutter eats a large share
+        // of the card width and shoves the plot to the right, so shrink it
+        // (and the label font) a notch there to reclaim display area.
+        final isPhone = Responsive.isPhone(context);
+        final plotLeft = isPhone ? 40.0 : 48.0;
+        final yLabelSize = isPhone ? 9.0 : 10.0;
         const plotBottom = 28.0;
         final plotWidth = (constraints.maxWidth - plotLeft).clamp(0.0, double.infinity);
         final labelCount =
@@ -720,7 +735,7 @@ class _TrendChartState extends State<_TrendChart> with SingleTickerProviderState
         // toolbar cleanup above frees the vertical room for it.
         // Phone: landscape rectangle — at ~280px card width, 190px keeps the
       // plot ~1.4:1 (wider than tall) instead of the old near-square 232x302.
-      final chartHeight = Responsive.isPhone(context) ? 190.0 : 280.0;
+      final chartHeight = isPhone ? 190.0 : 280.0;
         final plotSize = Size(
           (constraints.maxWidth - plotLeft).clamp(0.0, double.infinity),
           (chartHeight - plotBottom).clamp(0.0, double.infinity),
@@ -752,7 +767,7 @@ class _TrendChartState extends State<_TrendChart> with SingleTickerProviderState
                     leftTitles: AxisTitles(
                       sideTitles: SideTitles(
                         showTitles: true,
-                        reservedSize: 48,
+                        reservedSize: plotLeft,
                         interval: ticks.step,
                         // Right-align labels inside the reserved gutter so
                         // they sit flush against the plot edge — the first
@@ -762,7 +777,7 @@ class _TrendChartState extends State<_TrendChart> with SingleTickerProviderState
                           alignment: Alignment.centerRight,
                           child: Text(
                             valueText(v),
-                            style: T.mono(size: 10, color: T.text3),
+                            style: T.mono(size: yLabelSize, color: T.text3),
                           ),
                         ),
                       ),
