@@ -22,8 +22,38 @@ class ShellPage extends StatelessWidget {
     (icon: Icons.assessment_outlined, activeIcon: Icons.assessment, label: '统计', path: '/stats'),
   ];
 
+  /// Shell-level routes that live inside the [ShellRoute] and are navigated
+  /// via [GoRouter.go].  Android back gesture on these pages should navigate
+  /// back to the root page (/portfolio) rather than exiting the app.
+  static final _shellPaths = {
+    for (final d in _destinations) d.path,
+    '/transactions',
+    '/alerts',
+    '/settings',
+  };
+
   @override
   Widget build(BuildContext context) {
+    // Determine whether the current route is a shell-level page (no stack to
+    // pop) or a pushed route (e.g. /earnings-calendar, /accounts/:id) that
+    // has a proper back stack.
+    final currentPath = GoRouterState.of(context).uri.path;
+    final canPop = !_shellPaths.any((p) => currentPath.startsWith(p));
+
+    Widget child = _shellBody(context);
+    child = PopScope(
+      canPop: canPop,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop && context.mounted) {
+          context.go('/portfolio');
+        }
+      },
+      child: child,
+    );
+    return child;
+  }
+
+  Widget _shellBody(BuildContext context) {
     if (!Responsive.isDesktop(context)) return _PhoneShell(child: child);
     // Desktop keyboard shortcuts: 1-6 switch the main pages + history.
     return KeyShortcuts(

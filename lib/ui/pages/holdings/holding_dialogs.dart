@@ -181,6 +181,7 @@ Future<void> showAddHoldingDialog(BuildContext context, WidgetRef ref) async {
                         AssetType.mutualFund => '如 110022',
                         AssetType.gold => 'AU99.99（自动金价）',
                         AssetType.crypto => '如 bitcoin',
+                        AssetType.bond => '如 019742（国债）或债基代码',
                         AssetType.bankWealth =>
                           '填外汇代码如 USD 可自动汇率联动，留空手动净值',
                         _ => null,
@@ -801,6 +802,7 @@ Future<void> showEditHoldingDialog(
                 AssetType.mutualFund => 'eastmoney',
                 AssetType.gold => 'sge',
                 AssetType.crypto => 'coingecko',
+                AssetType.bond => 'manual',
                 AssetType.bankWealth =>
                   symbol.isNotEmpty ? 'forex' : 'manual',
                 AssetType.cash ||

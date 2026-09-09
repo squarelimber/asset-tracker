@@ -7,8 +7,10 @@ import 'package:flutter/material.dart' hide DataRow;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../app/providers.dart';
+import '../../../core/enums.dart';
 import '../../../core/formats.dart';
 import '../../../core/responsive.dart';
+import '../../../domain/target_allocation.dart';
 import '../../../services/alert_notification_service.dart';
 import '../../../services/backup_service.dart';
 import '../../../services/csv_export.dart';
@@ -105,6 +107,8 @@ class SettingsPage extends ConsumerWidget {
                   ),
                 ),
               ),
+              const SizedBox(height: T.s4),
+              const _TargetAllocationSection(),
               const SizedBox(height: T.s4),
               if (!kIsWeb) const _NotificationsSection(),
               if (!kIsWeb) const SizedBox(height: T.s4),
@@ -289,6 +293,122 @@ class _NotificationsSectionState extends ConsumerState<_NotificationsSection> {
               value: _enabled ?? true,
               onChanged: _enabled == null ? null : _onChanged,
             ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Editable target-allocation plan. Seeded from the persisted plan on first
+/// load; editing the sliders updates a local draft until "保存" writes it back
+/// and refreshes the allocation card's actual-vs-plan comparison.
+class _TargetAllocationSection extends ConsumerStatefulWidget {
+  const _TargetAllocationSection();
+
+  @override
+  ConsumerState<_TargetAllocationSection> createState() =>
+      _TargetAllocationSectionState();
+}
+
+class _TargetAllocationSectionState
+    extends ConsumerState<_TargetAllocationSection> {
+  Map<AssetCategory, double> _draft = {};
+  bool _seeded = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // Seed the draft once the persisted plan resolves.
+    Future.microtask(() => ref
+        .read(targetAllocationProvider)
+        .whenData((value) => setState(() => _draft = {...value})));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final plan = ref.watch(targetAllocationProvider);
+    if (!_seeded && plan.hasValue) {
+      _seeded = true;
+      _draft = {...plan.value!};
+    }
+    final total = _draft.values.fold(0.0, (a, b) => a + b);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SectionHeader(label: '目标配置（计划配比）'),
+        Text(
+          '设定各大类的目标占比，资产配置卡会对比实际与计划，偏离过大时高亮提示便于再平衡。',
+          style: T.label(),
+        ),
+        const SizedBox(height: T.s3),
+        TerminalCard(
+          child: Column(
+            children: [
+              for (final c in AssetCategory.values)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: T.s2),
+                  child: Row(
+                    children: [
+                      Icon(c.icon, size: 18, color: c.color),
+                      const SizedBox(width: T.s2),
+                      SizedBox(
+                        width: 44,
+                        child: Text(
+                          c.label,
+                          style: const TextStyle(fontSize: 13, color: T.text1),
+                        ),
+                      ),
+                      Expanded(
+                        child: Slider(
+                          value: (_draft[c] ?? 0).clamp(0.0, 100.0),
+                          min: 0,
+                          max: 100,
+                          divisions: 20,
+                          activeColor: c.color,
+                          onChanged: (v) => setState(() => _draft[c] = v),
+                        ),
+                      ),
+                      SizedBox(
+                        width: 52,
+                        child: Text(
+                          '${(_draft[c] ?? 0).round()}%',
+                          style: T.mono(size: 12, color: T.text2),
+                          textAlign: TextAlign.right,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              const SizedBox(height: T.s2),
+              Row(
+                children: [
+                  Text(
+                    '合计 ${total.round()}%',
+                    style: T.mono(
+                      size: 12,
+                      color: total.round() == 100 ? T.text2 : T.warning,
+                    ),
+                  ),
+                  const Spacer(),
+                  FilledButton(
+                    onPressed: () async {
+                      await saveTargetAllocation(
+                        ref.read(daoProvider),
+                        _draft,
+                      );
+                      ref.invalidate(targetAllocationProvider);
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('已保存目标配置')),
+                        );
+                      }
+                    },
+                    child: const Text('保存'),
+                  ),
+                ],
+              ),
+            ],
           ),
         ),
       ],

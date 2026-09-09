@@ -31,6 +31,7 @@ enum RiskLevel {
         AssetType.bankWealth =>
           RiskLevel.low,
         AssetType.gold => RiskLevel.mediumLow,
+        AssetType.bond => RiskLevel.mediumLow,
         AssetType.mutualFund => RiskLevel.medium,
         AssetType.stock || AssetType.etf || AssetType.crypto => RiskLevel.high,
         AssetType.property || AssetType.liability => RiskLevel.mediumLow,
@@ -47,6 +48,7 @@ enum AssetType {
   etf('场内基金', 'etf', Icons.candlestick_chart_outlined, Color(0xFFFFA726)),
   mutualFund('场外基金', 'mutual_fund', Icons.pie_chart_outline, Color(0xFF5C6BC0)),
   gold('积存金', 'gold', Icons.workspace_premium_outlined, Color(0xFFFFC107)),
+  bond('债券', 'bond', Icons.account_balance, Color(0xFF66BB6A)),
   crypto('加密货币', 'crypto', Icons.currency_bitcoin, Color(0xFFEC407A)),
   property('房产', 'property', Icons.home_outlined, Color(0xFF8D6E63)),
   liability('负债', 'liability', Icons.credit_card, Color(0xFF757575));
@@ -89,6 +91,41 @@ enum AssetType {
         gold => 'AU99.99',
         _ => null,
       };
+
+  /// High-level allocation category (股票/基金/黄金/债券/现金/其他), grouping
+  /// the finer asset types for the allocation view and target-allocation plan.
+  AssetCategory get category => switch (this) {
+        stock => AssetCategory.stock,
+        etf || mutualFund => AssetCategory.fund,
+        gold => AssetCategory.gold,
+        bond => AssetCategory.bond,
+        cash || bankDeposit || liquidWealth => AssetCategory.cash,
+        _ => AssetCategory.other,
+      };
+}
+
+/// Top-level asset categories used by the allocation view and the editable
+/// target-allocation plan (债券/基金/黄金/股票/现金/其他).
+enum AssetCategory {
+  stock('股票', 'stock', Icons.show_chart, Color(0xFFEF5350)),
+  fund('基金', 'fund', Icons.pie_chart_outline, Color(0xFF5C6BC0)),
+  gold('黄金', 'gold', Icons.workspace_premium_outlined, Color(0xFFFFC107)),
+  bond('债券', 'bond', Icons.account_balance, Color(0xFF66BB6A)),
+  cash('现金', 'cash', Icons.payments_outlined, Color(0xFF42A5F5)),
+  other('其他', 'other', Icons.more_horiz, Color(0xFF757575));
+
+  const AssetCategory(this.label, this.storageName, this.icon, this.color);
+
+  final String label;
+  final String storageName;
+  final IconData icon;
+  final Color color;
+
+  static AssetCategory fromStorage(String name) =>
+      AssetCategory.values.firstWhere(
+        (t) => t.storageName == name,
+        orElse: () => AssetCategory.other,
+      );
 }
 
 /// Where the latest price comes from.
