@@ -55,7 +55,9 @@ class AllocationCard extends ConsumerWidget {
           color: Color.lerp(entry.key.color, Colors.white, 0.15) ?? entry.key.color,
           value: entry.value,
           pct: total == 0 ? 0 : entry.value / total,
-          targetPct: plan[entry.key],
+          // The plan stores whole percentages (40 = 40%); the bar component
+          // works in 0..1 ratios like [pct], so convert here.
+          targetPct: (plan[entry.key] ?? 0) / 100,
         ),
     ]..sort((a, b) => b.value.compareTo(a.value));
     return TerminalCard(
