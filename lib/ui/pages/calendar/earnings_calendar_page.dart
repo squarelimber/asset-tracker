@@ -186,7 +186,7 @@ class _CalendarBody extends StatelessWidget {
             ),
           ],
             const SizedBox(height: T.s3),
-            Text('盈亏 = 当日净资产 − 前日净资产；负债变化计入当日盈亏', style: T.label()),
+            Text('盈亏 = 当日净资产 − 前日净资产；负债变动不计入当日盈亏', style: T.label()),
           ],
           ),
         ),

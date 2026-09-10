@@ -12,7 +12,7 @@ const String targetAllocationKey = 'target_allocation';
 
 /// Sensible default plan when the user has not configured one yet. The five
 /// main categories sum to 100; 房产/银行理财 default to 0 (set them in the
-/// settings page if you hold them).
+/// alerts page if you hold them).
 const Map<AssetCategory, double> defaultTargetAllocation = {
   AssetCategory.equity: 40,
   AssetCategory.bond: 25,
