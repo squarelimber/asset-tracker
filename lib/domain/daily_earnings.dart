@@ -132,7 +132,9 @@ class DailyEarningsCalculator {
     for (final d in days) {
       total += d.profit;
     }
-    final base = days.first.totalValue;
+    // Base = the month's first day's asset-side value (net worth with the
+    // debt added back), matching the asset-basis profit numerator.
+    final base = days.first.totalValue + days.first.liabilities;
     return MonthlyEarnings(
       year: year,
       month: month,
@@ -160,7 +162,11 @@ class DailyEarningsCalculator {
         .where((e) => e.date.startsWith(firstPrefix))
         .toList()
       ..sort((a, b) => a.date.compareTo(b.date));
-    final startBase = firstDays.isEmpty ? 0.0 : firstDays.first.totalValue;
+    // Base = the year's first month's starting asset-side value (same
+    // asset-basis alignment as the monthly rate).
+    final startBase = firstDays.isEmpty
+        ? 0.0
+        : firstDays.first.totalValue + firstDays.first.liabilities;
     return YearlyEarnings(
       year: year,
       total: total,

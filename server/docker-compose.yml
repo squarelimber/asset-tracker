@@ -6,7 +6,9 @@ services:
     ports:
       - "8787:8787"
     environment:
-      # Optional bearer token; clients send it in Authorization: Bearer <token>.
-      ASSET_SYNC_TOKEN: "${ASSET_SYNC_TOKEN:-}"
+      # REQUIRED bearer token (the file ships a secure default). Clients
+      # send it in Authorization: Bearer <token>; generate one with e.g.
+      # `openssl rand -hex 32`. Empty/missing ASSET_SYNC_TOKEN fails startup.
+      ASSET_SYNC_TOKEN: "${ASSET_SYNC_TOKEN:?set ASSET_SYNC_TOKEN in your .env}"
     volumes:
       - ./data:/data

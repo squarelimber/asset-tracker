@@ -349,7 +349,9 @@ Future<void> showAddHoldingDialog(BuildContext context, WidgetRef ref) async {
                           child: TerminalTextField(
                             controller: fxRateCtrl,
                             label: '买入时汇率（$ccy/CNY）',
-                            hint: '默认已填当前汇率，可改为真实买入汇率',
+                            hint: (fxRates[ccy] == null || (fxRates[ccy] ?? 0) <= 0)
+                                ? '该币种暂无自动汇率，市值将按 1:1 折算；请填写买入时汇率'
+                                : '默认已填当前汇率，可改为真实买入汇率',
                             keyboardType: const TextInputType.numberWithOptions(
                               decimal: true,
                             ),
@@ -438,18 +440,27 @@ Future<void> showAddHoldingDialog(BuildContext context, WidgetRef ref) async {
               symbol = symbol == null ? null : normalizeSinaSymbol(symbol);
             }
             // The picker's single "基金" entry is stored as 场外基金 by
-            // default; a Shanghai exchange code (5/6 prefix) resolves it to
-            // 场内基金 (etf) with the prefixed symbol. Off-exchange codes
-            // (e.g. 110022) keep the raw symbol and the eastmoney NAV.
-            // 519xxx is the off-exchange open-end fund range (交银施罗德
-            // etc.) — 沪市场内 funds occupy 500-518, so 519xxx must NOT be
-            // promoted to ETF (sina would never find the code).
+            // default; an on-exchange code resolves it to 场内基金 (etf)
+            // with the prefixed symbol. 沪市场内 funds occupy 500-518 (the
+            // 519xxx range is off-exchange open-end funds and must NOT be
+            // promoted — sina would never find the code); 深市场内 funds
+            // are 159xxx (ETF) and 16xxxx/18xxxx (LOF/封闭式). Other codes
+            // keep the raw symbol and the eastmoney NAV.
             if (type == AssetType.mutualFund &&
                 symbol != null &&
                 symbol.isNotEmpty) {
               final normalized = normalizeSinaSymbol(symbol);
-              if (normalized.startsWith('sh') &&
-                  !normalized.startsWith('sh519')) {
+              final bare = normalized.length > 2 && normalized.startsWith('sz')
+                  ? normalized.substring(2)
+                  : normalized;
+              final isOnExchange = normalized.startsWith('sh')
+                      && !normalized.startsWith('sh519') ||
+                  (normalized.startsWith('sz') &&
+                      bare.length == 6 &&
+                      (bare.startsWith('159') ||
+                          bare.startsWith('16') ||
+                          bare.startsWith('18')));
+              if (isOnExchange) {
                 type = AssetType.etf;
                 symbol = normalized;
               }
@@ -659,6 +670,12 @@ Future<void> showEditHoldingDialog(
   final fxRates = await ref.read(cnyRatesProvider.future);
   if (!context.mounted) return;
   final initialType = AssetType.fromStorage(holding.assetType);
+  // A storage name this version does not know (e.g. synced from a newer
+  // release): display it and keep it unchanged on save — silently
+  // rewriting it to the fallback type (cash) would corrupt the row and
+  // propagate the damage to every other device via sync.
+  final unknownType =
+      !AssetType.values.any((t) => t.storageName == holding.assetType);
   final typeNotifier = ValueNotifier<AssetType>(initialType);
   final accountIdNotifier = ValueNotifier<int>(holding.accountId);
   final riskLevelNotifier = ValueNotifier<String?>(holding.riskLevel);
@@ -716,6 +733,15 @@ Future<void> showEditHoldingDialog(
                   ),
                 ),
                 const SizedBox(height: 12),
+                if (unknownType)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: Text(
+                      '⚠️ 持仓类型「${holding.assetType}」来自更新版本的 App，'
+                      '当前版本无法识别。已锁定类型，以免保存时数据被降级。',
+                      style: T.label(size: 12, color: T.warning),
+                    ),
+                  ),
                 DropdownButtonFormField<AssetType>(
                   initialValue: type,
                   decoration: terminalDecoration('资产类型'),
@@ -723,9 +749,11 @@ Future<void> showEditHoldingDialog(
                     for (final t in AssetType.values)
                       DropdownMenuItem(value: t, child: Text(t.label)),
                   ],
-                  onChanged: (v) {
-                    if (v != null) setState(() => typeNotifier.value = v);
-                  },
+                  onChanged: unknownType
+                      ? null
+                      : (v) {
+                          if (v != null) setState(() => typeNotifier.value = v);
+                        },
                 ),
                 const SizedBox(height: 12),
                 DropdownButtonFormField<String>(
@@ -843,7 +871,9 @@ Future<void> showEditHoldingDialog(
                               child: TerminalTextField(
                                 controller: fxRateCtrl,
                                 label: '买入时汇率（$ccy/CNY）',
-                                hint: '默认已填当前汇率，可改为真实买入汇率',
+                                hint: (fxRates[ccy] == null || (fxRates[ccy] ?? 0) <= 0)
+                                    ? '该币种暂无自动汇率，市值将按 1:1 折算；请填写买入时汇率'
+                                    : '默认已填当前汇率，可改为真实买入汇率',
                                 keyboardType:
                                     const TextInputType.numberWithOptions(
                                   decimal: true,
@@ -895,50 +925,59 @@ Future<void> showEditHoldingDialog(
     final cost = double.tryParse(costCtrl.text.trim());
     final price = double.tryParse(priceCtrl.text.trim());
     if (!isAmount && (cost == null || price == null)) return;
-    final symbol = symbolCtrl.text.trim();
+    var symbol = symbolCtrl.text.trim();
+    // Normalize bare 6-digit A-share/ETF codes (5/6 -> sh, 0/1/3 -> sz),
+    // matching the add dialog so price_cache keys stay consistent with
+    // what MarketService writes.
+    if (!isAmount && (type == AssetType.stock || type == AssetType.etf)) {
+      symbol = normalizeSinaSymbol(symbol);
+    }
     // Market source follows the new asset type; amount-based assets are
     // manual by nature. A symbol change on a share holding with an empty
-    // source also re-derives the source.
-    final marketSource = isAmount
-        ? 'manual'
-        : MarketSource.fromStorage(holding.marketSource) == MarketSource.manual
-            ? switch (type) {
-                AssetType.stock || AssetType.etf => 'sina',
-                AssetType.mutualFund => 'eastmoney',
-                AssetType.gold => 'sge',
-                AssetType.crypto => 'coingecko',
-                // Manual 银行理财 stays manual unless the user typed an FX
-                // symbol — flipping the source would silently lock the
-                // currency back to CNY (autoCny) even though the holding is
-                // not rate-linked at all (matches the add dialog's
-                // `bankWealth when hasSymbol => 'forex'` rule).
-                AssetType.bankWealth =>
-                  symbol.isNotEmpty ? 'forex' : holding.marketSource,
-                _ => holding.marketSource,
-              }
-            : switch (type) {
-                AssetType.stock || AssetType.etf => 'sina',
-                AssetType.mutualFund => 'eastmoney',
-                AssetType.gold => 'sge',
-                AssetType.crypto => 'coingecko',
-                AssetType.bond => 'manual',
-                AssetType.futures => 'manual',
-                AssetType.bankWealth =>
-                  symbol.isNotEmpty ? 'forex' : 'manual',
-                AssetType.cash ||
-                AssetType.bankDeposit ||
-                AssetType.liquidWealth ||
-                AssetType.liability ||
-                AssetType.property =>
-                  'manual',
-              };
+    // source also re-derives the source. An unknown stored type keeps its
+    // original source untouched (see unknownType above).
+    final marketSource = unknownType
+        ? holding.marketSource
+        : isAmount
+            ? 'manual'
+            : MarketSource.fromStorage(holding.marketSource) == MarketSource.manual
+                ? switch (type) {
+                    AssetType.stock || AssetType.etf => 'sina',
+                    AssetType.mutualFund => 'eastmoney',
+                    AssetType.gold => 'sge',
+                    AssetType.crypto => 'coingecko',
+                    // Manual 银行理财 stays manual unless the user typed an FX
+                    // symbol — flipping the source would silently lock the
+                    // currency back to CNY (autoCny) even though the holding
+                    // is not rate-linked at all (matches the add dialog's
+                    // `bankWealth when hasSymbol => 'forex'` rule).
+                    AssetType.bankWealth =>
+                      symbol.isNotEmpty ? 'forex' : holding.marketSource,
+                    _ => holding.marketSource,
+                  }
+                : switch (type) {
+                    AssetType.stock || AssetType.etf => 'sina',
+                    AssetType.mutualFund => 'eastmoney',
+                    AssetType.gold => 'sge',
+                    AssetType.crypto => 'coingecko',
+                    AssetType.bond => 'manual',
+                    AssetType.futures => 'manual',
+                    AssetType.bankWealth =>
+                      symbol.isNotEmpty ? 'forex' : 'manual',
+                    AssetType.cash ||
+                    AssetType.bankDeposit ||
+                    AssetType.liquidWealth ||
+                    AssetType.liability ||
+                    AssetType.property =>
+                      'manual',
+                  };
     // Only forex-linked holdings are priced in CNY by construction; other
     // holdings keep the user-chosen currency (e.g. USD stocks stay USD).
-    final autoCny = marketSource == 'forex';
+    final autoCny = unknownType ? false : marketSource == 'forex';
     final updated = holding.copyWith(
       accountId: accountIdNotifier.value,
       name: nameCtrl.text.trim().isEmpty ? holding.name : nameCtrl.text.trim(),
-      assetType: type.storageName,
+      assetType: unknownType ? holding.assetType : type.storageName,
       marketSource: marketSource,
       quantity: qty,
       costPrice: isAmount
@@ -949,7 +988,13 @@ Future<void> showEditHoldingDialog(
       riskLevel: riskLevelNotifier.value == null
           ? const Value.absent()
           : Value(riskLevelNotifier.value),
-      symbol: !isAmount ? (symbol.isEmpty ? const Value.absent() : Value(symbol)) : const Value.absent(),
+      // An unknown stored type keeps its original symbol regardless of the
+      // fallback display form.
+      symbol: unknownType
+          ? Value(holding.symbol)
+          : !isAmount
+              ? (symbol.isEmpty ? const Value.absent() : Value(symbol))
+              : const Value.absent(),
       currency: autoCny
           ? 'CNY'
           : (currencyCtrl.text.trim().toUpperCase().isEmpty

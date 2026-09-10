@@ -9,6 +9,7 @@ import '../../../app/providers.dart';
 import '../../../core/enums.dart';
 import '../../../core/formats.dart';
 import '../../../core/responsive.dart';
+import '../../../core/symbols.dart';
 import '../../../domain/portfolio_calculator.dart';
 import '../../../services/history_backfill_service.dart';
 import '../../../services/market/market_service.dart';
@@ -25,15 +26,18 @@ import 'portfolio_widgets.dart';
 final summaryProvider = FutureProvider<PortfolioSummary>((ref) async {
   final dao = ref.watch(daoProvider);
   final holdings = await ref.watch(holdingsProvider.future);
-  final symbols = holdings
-      .map((h) => h.symbol)
-      .whereType<String>()
-      .where((s) => s.isNotEmpty)
-      .toList();
-  final cache = await dao.getCachedPrices(symbols);
+  // Price cache rows are keyed by the normalized cache symbol
+  // (cacheSymbolFor); map them back to each holding's raw symbol so
+  // bare codes entered via the edit dialog still find their row.
+  final cacheKeys = [
+    for (final h in holdings)
+      if (cacheSymbolFor(h) != null) cacheSymbolFor(h)!,
+  ];
+  final cache = await dao.getCachedPrices(cacheKeys);
   final prev = <String, double>{
-    for (final entry in cache.entries)
-      if (entry.value.prevClose != null) entry.key: entry.value.prevClose!,
+    for (final h in holdings)
+      if (h.symbol != null && cache[cacheSymbolFor(h)]?.prevClose != null)
+        h.symbol!: cache[cacheSymbolFor(h)]!.prevClose!,
   };
   // Convert non-CNY holdings into CNY using the shared FX rates.
   final cnyRates = await ref.watch(cnyRatesProvider.future);

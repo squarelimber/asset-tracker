@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import '../core/enums.dart';
+import '../core/symbols.dart';
 import '../data/database.dart';
 import 'portfolio_calculator.dart';
 
@@ -26,6 +27,7 @@ class RuleContext {
     required this.summary,
     required this.holdings,
     this.priceCache = const {},
+    this.cnyRates = const {},
     DateTime? now,
   }) : now = now ?? DateTime.now();
 
@@ -34,6 +36,10 @@ class RuleContext {
 
   /// symbol -> cached price (for per-holding daily change).
   final Map<String, PriceCacheRow> priceCache;
+
+  /// currency -> CNY rate, so foreign-currency holdings are measured
+  /// against the CNY total instead of mixing raw foreign amounts in.
+  final Map<String, double> cnyRates;
   final DateTime now;
 }
 
@@ -76,7 +82,8 @@ class ConcentrationEvaluator extends RuleEvaluator {
     final results = <AlertResult>[];
     for (final h in ctx.holdings) {
       if (AssetType.fromStorage(h.assetType) == AssetType.liability) continue;
-      final marketValue = h.quantity * h.latestPrice;
+      final marketValue =
+          h.quantity * h.latestPrice * valueRateOf(h, ctx.cnyRates);
       final ratio = marketValue / total;
       if (ratio > threshold) {
         results.add(AlertResult(
@@ -99,8 +106,6 @@ class ConcentrationEvaluator extends RuleEvaluator {
 class AssetRatioEvaluator extends RuleEvaluator {
   const AssetRatioEvaluator();
 
-  static const _equityTypes = {AssetType.stock, AssetType.etf, AssetType.mutualFund};
-
   @override
   AlertRuleType get type => AlertRuleType.assetRatio;
 
@@ -112,11 +117,13 @@ class AssetRatioEvaluator extends RuleEvaluator {
     final total = ctx.summary.totalAssets;
     if (total <= 0) return const [];
 
+    // Equity = every asset type mapped to the 权益 category (single source
+    // of truth; do not keep a local type set that can drift).
     var equity = 0.0;
     for (final h in ctx.holdings) {
       final type = AssetType.fromStorage(h.assetType);
-      if (_equityTypes.contains(type)) {
-        equity += h.quantity * h.latestPrice;
+      if (type.category == AssetCategory.equity) {
+        equity += h.quantity * h.latestPrice * valueRateOf(h, ctx.cnyRates);
       }
     }
     final ratio = equity / total;

@@ -33,12 +33,16 @@ Future<void> main(List<String> args) async {
   );
 
   final port = int.tryParse(Platform.environment['PORT'] ?? '') ?? 8787;
-  final host = Platform.environment['HOST'] ?? '127.0.0.1';
+  final hostEnv = Platform.environment['HOST'] ?? '127.0.0.1';
   final dbPath =
       Platform.environment['SYNC_DB_PATH'] ?? 'sync_state.sqlite';
   final token = Platform.environment['ASSET_SYNC_TOKEN'];
 
-  final loopback = host == '127.0.0.1' || host == 'localhost' || host == '::1';
+  // 'localhost' is not a numeric address; InternetAddress would fail to
+  // bind. Map it to the loopback literal (the bind host and the loopback
+  // check below agree either way).
+  final host = hostEnv == 'localhost' ? '127.0.0.1' : hostEnv;
+  final loopback = host == '127.0.0.1' || host == '::1';
   // Binding to all interfaces is the normal mode inside a container (the
   // container boundary plus explicit port publishing is the security model),
   // so the token requirement only applies to direct runs on a host.
@@ -49,6 +53,13 @@ Future<void> main(List<String> args) async {
       'set ASSET_SYNC_TOKEN or use HOST=127.0.0.1',
     );
     exit(1);
+  }
+  if (token == null || token.isEmpty) {
+    stderr.writeln(
+      'WARNING: running WITHOUT a bearer token — anyone who can reach '
+      'http://$host:$port can read and overwrite the whole snapshot. '
+      'Set ASSET_SYNC_TOKEN to enable authentication.',
+    );
   }
 
   final store = SyncStore(dbPath);
@@ -65,10 +76,13 @@ Future<void> main(List<String> args) async {
 
   await shelf_io.serve(handler, InternetAddress(host), port);
   stdout.writeln('asset-sync-server listening on http://$host:$port (db: $dbPath)');
-  ProcessSignal.sigint.watch().listen((_) {
+  void shutdown() {
     store.close();
     exit(0);
-  });
+  }
+  // docker stop sends SIGTERM (SIGINT only fires on interactive Ctrl+C).
+  ProcessSignal.sigint.watch().listen((_) => shutdown());
+  ProcessSignal.sigterm.watch().listen((_) => shutdown());
 }
 
 Response _handleGet(SyncStore store, Request req) {
@@ -81,14 +95,31 @@ Response _handleGet(SyncStore store, Request req) {
 
 const _maxBodyBytes = 32 * 1024 * 1024;
 
+/// Raised when the request body exceeds [_maxBodyBytes].
+class _BodyTooLarge implements Exception {
+  const _BodyTooLarge();
+}
+
+/// Raised when the body takes too long to arrive (slowloris).
+class _SlowBody implements Exception {
+  const _SlowBody();
+}
+
 Future<Response> _handlePut(SyncStore store, Request req) async {
   final String raw;
   try {
     raw = await _readLimited(req, _maxBodyBytes);
-  } on FormatException {
+  } on _BodyTooLarge {
     return Response(413, body: 'request body too large');
+  } on FormatException {
+    return Response.badRequest(body: 'body is not valid UTF-8');
   }
-  final body = jsonDecode(raw);
+  final Object? body;
+  try {
+    body = jsonDecode(raw);
+  } on FormatException {
+    return Response.badRequest(body: 'body is not valid JSON');
+  }
   if (body is! Map<String, dynamic>) {
     return Response.badRequest(body: 'expected JSON object');
   }
@@ -96,6 +127,9 @@ Future<Response> _handlePut(SyncStore store, Request req) async {
   final tombstones = body['tombstones'] ?? const [];
   if (snapshot is! Map<String, dynamic> || tombstones is! List) {
     return Response.badRequest(body: 'snapshot must be an object, tombstones a list');
+  }
+  if (body['baseRev'] != null && body['baseRev'] is! num) {
+    return Response.badRequest(body: 'baseRev must be a number');
   }
   final baseRev = (body['baseRev'] as num?)?.toInt();
   final result = store.write(snapshot, tombstones, baseRev: baseRev);
@@ -109,14 +143,19 @@ Future<Response> _handlePut(SyncStore store, Request req) async {
   return _json({'rev': result.rev});
 }
 
-/// Reads the request body, throwing [FormatException] once [maxBytes] is
-/// exceeded so clients cannot fill the disk with oversized snapshots.
+/// Reads the request body, throwing [_BodyTooLarge] once [maxBytes] is
+/// exceeded and [_SlowBody] when the body takes longer than a minute to
+/// arrive, so clients cannot fill the disk or hold a connection open.
 Future<String> _readLimited(Request req, int maxBytes) async {
   var size = 0;
+  final deadline = DateTime.now().add(const Duration(seconds: 60));
   final buffer = BytesBuilder(copy: false);
   await for (final chunk in req.read()) {
+    if (DateTime.now().isAfter(deadline)) {
+      throw const _SlowBody();
+    }
     size += chunk.length;
-    if (size > maxBytes) throw const FormatException('too large');
+    if (size > maxBytes) throw const _BodyTooLarge();
     buffer.add(chunk);
   }
   return utf8.decode(buffer.takeBytes());
@@ -133,6 +172,7 @@ Middleware _rateLimit({
   Duration window = const Duration(minutes: 1),
 }) {
   final hits = <String, List<int>>{};
+  var lastSweepMs = DateTime.now().millisecondsSinceEpoch;
   return (inner) {
     return (Request req) {
       final forwarded = req.headers['x-forwarded-for'];
@@ -141,6 +181,15 @@ Middleware _rateLimit({
               ? forwarded.split(',').first.trim()
               : 'global';
       final nowMs = DateTime.now().millisecondsSinceEpoch;
+      // Periodic sweep: remove keys whose window emptied out, so rotating
+      // or spoofed X-Forwarded-For values cannot grow the map unboundedly.
+      if (nowMs - lastSweepMs > window.inMilliseconds) {
+        lastSweepMs = nowMs;
+        hits.removeWhere((_, times) {
+          times.removeWhere((t) => nowMs - t > window.inMilliseconds);
+          return times.isEmpty;
+        });
+      }
       final times = hits.putIfAbsent(key, () => <int>[])
         ..removeWhere((t) => nowMs - t > window.inMilliseconds);
       if (times.length >= limit) {
@@ -154,16 +203,28 @@ Middleware _rateLimit({
 
 Middleware _auth(String? token) {
   if (token == null || token.isEmpty) return (inner) => inner;
+  final expected = 'Bearer $token';
   return (inner) {
     return (Request req) {
       final auth = req.headers['authorization'];
-      final expected = 'Bearer $token';
-      if (auth == null || auth != expected) {
+      if (auth == null ||
+          auth.length != expected.length ||
+          !_constantTimeEquals(auth, expected)) {
         return Response.unauthorized('unauthorized');
       }
       return inner(req);
     };
   };
+}
+
+/// Byte-wise comparison without short-circuiting on the first difference,
+/// so the token cannot be probed byte by byte through response timing.
+bool _constantTimeEquals(String a, String b) {
+  var diff = 0;
+  for (var i = 0; i < a.length; i++) {
+    diff |= a.codeUnitAt(i) ^ b.codeUnitAt(i);
+  }
+  return diff == 0;
 }
 
 Middleware _cors() {

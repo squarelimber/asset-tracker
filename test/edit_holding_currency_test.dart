@@ -125,4 +125,43 @@ void main() {
     await db.close();
     await tester.pump();
   });
+
+  testWidgets('unknown asset type is locked and preserved on save (H9)',
+      (tester) async {
+    final (db, dao, holding) =
+        await seedBankWealth(tester, marketSource: 'manual');
+    // Simulate a row synced from a newer app version with a type this
+    // build does not know.
+    final updated = holding.copyWith(
+      assetType: 'brand_new_type',
+      symbol: const Value('XYZ'),
+    );
+    await dao.updateHolding(updated);
+    final unknown = (await dao.getHolding(holding.id))!;
+
+    await tester.pumpWidget(ProviderScope(
+      overrides: [databaseProvider.overrideWithValue(db)],
+      child: MaterialApp(home: _EditHost(unknown)),
+    ));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('编辑'));
+    await tester.pumpAndSettle();
+
+    // The warning is shown and the type dropdown is locked.
+    expect(find.textContaining('已锁定类型'), findsOneWidget);
+
+    await tester.tap(find.text('保存'));
+    await tester.pumpAndSettle();
+
+    final saved = await dao.getHolding(holding.id);
+    // The type string and its symbol survive: no silent fallback-to-cash
+    // rewrite (which would propagate to every synced device).
+    expect(saved!.assetType, 'brand_new_type');
+    expect(saved.symbol, 'XYZ');
+    expect(saved.marketSource, 'manual');
+
+    await tester.pump(const Duration(milliseconds: 500));
+    await db.close();
+    await tester.pump();
+  });
 }

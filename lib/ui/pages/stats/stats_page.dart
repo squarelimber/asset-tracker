@@ -203,11 +203,12 @@ class _MonthlyBarChart extends StatelessWidget {
             sideTitles: SideTitles(
               showTitles: true,
               reservedSize: 28,
-              interval: 1 / n,
-              minIncluded: false,
-              maxIncluded: true,
+              // One title per bar: the axis spans 0..n-1 (the group x
+              // values), so a 1/n interval used to cluster every label
+              // inside the first bar's width.
+              interval: 1,
               getTitlesWidget: (value, meta) {
-                final i = (value * n).round() - 1;
+                final i = value.round();
                 if (i < 0 || i >= n) return const SizedBox.shrink();
                 return Padding(
                   padding: const EdgeInsets.only(top: 6),

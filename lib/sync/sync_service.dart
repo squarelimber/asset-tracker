@@ -144,6 +144,13 @@ class SyncService {
   }
 
   Future<void> _apply(MergeOutcome outcome) async {
+    // Mid-sync guard: the merge decided on a snapshot taken before this
+    // transaction ran. A deletion recorded locally while the sync was in
+    // flight must still win over the stale merged re-insertion (otherwise
+    // the row resurrects). A live row newer than its tombstone still wins.
+    final localTombstones = {
+      for (final t in await _dao.getTombstones()) '${t.table}|${t.rowKey}': t,
+    };
     // Delete first so a merged re-creation can re-insert freely.
     for (final table in SyncTables.all) {
       for (final key in outcome.deletedKeys[table] ?? const <String>[]) {
@@ -152,6 +159,12 @@ class SyncService {
     }
     for (final table in SyncTables.all) {
       for (final row in outcome.tables[table] ?? const <Map<String, dynamic>>[]) {
+        final tomb =
+            localTombstones['$table|${syncRowKey(table, row)}'];
+        final updatedAt = parseIso(row['updatedAt']) ?? DateTime.now();
+        if (tomb != null && !updatedAt.isAfter(tomb.deletedAt)) {
+          continue; // deleted locally after the merge snapshot: keep it deleted
+        }
         await _upsertLocalRow(table, row);
       }
     }
@@ -194,7 +207,11 @@ class SyncService {
       case SyncTables.accounts:
         final id = (row['id'] as num?)?.toInt();
         if (id == null) return;
-        if (await _dao.getAccount(id) != null) {
+        final account = await _dao.getAccount(id);
+        if (account != null) {
+          // Mid-sync guard: a local row edited while the sync was in flight
+          // (newer updatedAt) must not be rolled back by stale merged state.
+          if (account.updatedAt.isAfter(updatedAt)) return;
           await _dao.updateAccount(_rowToAccount(row), now: updatedAt);
         } else {
           await _dao.createAccount(AccountsCompanion.insert(
@@ -210,7 +227,9 @@ class SyncService {
       case SyncTables.holdings:
         final id = (row['id'] as num?)?.toInt();
         if (id == null) return;
-        if (await _dao.getHolding(id) != null) {
+        final holding = await _dao.getHolding(id);
+        if (holding != null) {
+          if (holding.updatedAt.isAfter(updatedAt)) return;
           await _dao.updateHolding(_rowToHolding(row), now: updatedAt);
         } else {
           await _dao.createHolding(HoldingsCompanion.insert(
@@ -242,37 +261,47 @@ class SyncService {
       case SyncTables.transactions:
         final id = (row['id'] as num?)?.toInt();
         if (id == null) return;
-        if (await _dao.getTransaction(id) != null) {
+        final txn = await _dao.getTransaction(id);
+        if (txn != null) {
+          if (txn.updatedAt.isAfter(updatedAt)) return;
           await _dao.updateTransaction(_rowToTransaction(row), now: updatedAt);
         } else {
-          await _dao.createTransaction(TransactionsCompanion.insert(
-            id: Value(id),
-            accountId: (row['accountId'] as num?)?.toInt() ?? 0,
-            holdingId: row['holdingId'] == null
-                ? const Value.absent()
-                : Value((row['holdingId'] as num).toInt()),
-            cashSourceId: row['cashSourceId'] == null
-                ? const Value.absent()
-                : Value((row['cashSourceId'] as num).toInt()),
-            cashTargetId: row['cashTargetId'] == null
-                ? const Value.absent()
-                : Value((row['cashTargetId'] as num).toInt()),
-            type: row['type']?.toString() ?? 'transfer_in',
-            quantity: row['quantity'] == null
-                ? const Value.absent()
-                : Value((row['quantity'] as num).toDouble()),
-            price: row['price'] == null
-                ? const Value.absent()
-                : Value((row['price'] as num).toDouble()),
-            amount: (row['amount'] as num?)?.toDouble() ?? 0,
-            currency: Value(row['currency']?.toString() ?? 'CNY'),
-            occurredAt: parseIso(row['occurredAt']) ?? DateTime.now(),
-            note: row['note'] == null ? const Value.absent() : Value(row['note'].toString()),
-            costMoved: row['costMoved'] == null
-                ? const Value.absent()
-                : Value(row['costMoved'] == true),
-            updatedAt: Value(updatedAt),
-          ));
+          // A locally recorded flow can collide with the incoming row on
+          // the business unique key (account/holding/type/time/amount)
+          // while having a different id. The two rows are equivalent by
+          // definition — skip instead of failing the whole sync round.
+          try {
+            await _dao.createTransaction(TransactionsCompanion.insert(
+              id: Value(id),
+              accountId: (row['accountId'] as num?)?.toInt() ?? 0,
+              holdingId: row['holdingId'] == null
+                  ? const Value.absent()
+                  : Value((row['holdingId'] as num).toInt()),
+              cashSourceId: row['cashSourceId'] == null
+                  ? const Value.absent()
+                  : Value((row['cashSourceId'] as num).toInt()),
+              cashTargetId: row['cashTargetId'] == null
+                  ? const Value.absent()
+                  : Value((row['cashTargetId'] as num).toInt()),
+              type: row['type']?.toString() ?? 'transfer_in',
+              quantity: row['quantity'] == null
+                  ? const Value.absent()
+                  : Value((row['quantity'] as num).toDouble()),
+              price: row['price'] == null
+                  ? const Value.absent()
+                  : Value((row['price'] as num).toDouble()),
+              amount: (row['amount'] as num?)?.toDouble() ?? 0,
+              currency: Value(row['currency']?.toString() ?? 'CNY'),
+              occurredAt: parseIso(row['occurredAt']) ?? DateTime.now(),
+              note: row['note'] == null ? const Value.absent() : Value(row['note'].toString()),
+              costMoved: row['costMoved'] == null
+                  ? const Value.absent()
+                  : Value(row['costMoved'] == true),
+              updatedAt: Value(updatedAt),
+            ));
+          } on Exception catch (e) {
+            if (!e.toString().contains('UNIQUE constraint failed')) rethrow;
+          }
         }
       case SyncTables.snapshots:
         final date = row['date']?.toString() ?? '';
@@ -289,7 +318,9 @@ class SyncService {
       case SyncTables.alertRules:
         final id = (row['id'] as num?)?.toInt();
         if (id == null) return;
-        if (await _dao.getAlertRule(id) != null) {
+        final rule = await _dao.getAlertRule(id);
+        if (rule != null) {
+          if (rule.updatedAt.isAfter(updatedAt)) return;
           await _dao.updateAlertRule(_rowToRule(row), now: updatedAt);
         } else {
           await _dao.createAlertRule(AlertRulesCompanion.insert(
@@ -305,10 +336,32 @@ class SyncService {
     }
   }
 
-  Future<void> _replaceTombstones(List<TombstoneEntry> tombstones) async {
-    await _dao.deleteAllTombstones();
-    for (final t in tombstones) {
-      await _dao.upsertTombstone(t.table, t.rowKey, deletedAt: t.deletedAt);
+  /// Merges the merged tombstone list into the local store instead of
+  /// clearing and rebuilding it: a tombstone recorded locally while the
+  /// sync was in flight (user deleted a row mid-sync) must survive.
+  /// Local-only tombstones that the merged set no longer carries were
+  /// beaten by a live row during the merge and are dropped. Tombstones
+  /// older than [gcWindow] are garbage-collected — both sides have long
+  /// converged on those deletions, and the lists otherwise only grow.
+  Future<void> _replaceTombstones(List<TombstoneEntry> merged) async {
+    final gcBefore = DateTime.now().subtract(const Duration(days: 180));
+    final incoming = merged.where((t) => t.deletedAt.isAfter(gcBefore));
+    final existing = {
+      for (final t in await _dao.getTombstones()) '${t.table}|${t.rowKey}': t,
+    };
+    for (final t in incoming) {
+      final current = existing['${t.table}|${t.rowKey}'];
+      if (current == null || t.deletedAt.isAfter(current.deletedAt)) {
+        await _dao.upsertTombstone(t.table, t.rowKey, deletedAt: t.deletedAt);
+      }
+      existing.remove('${t.table}|${t.rowKey}');
+    }
+    for (final stale in existing.values) {
+      // Keep fresh mid-sync tombstones; only drop ones older than the GC
+      // window (they refer to rows that are long gone on both sides).
+      if (stale.deletedAt.isBefore(gcBefore)) {
+        await _dao.deleteTombstoneRow(stale);
+      }
     }
   }
 

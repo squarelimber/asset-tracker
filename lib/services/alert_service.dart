@@ -1,8 +1,10 @@
 import '../core/enums.dart';
+import '../core/symbols.dart';
 import '../data/asset_dao.dart';
 import '../data/database.dart';
 import '../domain/portfolio_calculator.dart';
 import '../domain/rule_engine.dart';
+import 'market/market_service.dart';
 
 /// Runs all enabled alert rules, dedups by day, and persists fired events.
 class AlertService {
@@ -20,24 +22,39 @@ class AlertService {
     if (rules.isEmpty) return const [];
 
     final holdings = await _dao.getHoldings();
-    final symbols = holdings
-        .map((h) => h.symbol)
-        .whereType<String>()
-        .where((s) => s.isNotEmpty)
-        .toList();
-    final cache = await _dao.getCachedPrices(symbols);
+
+    // FX rates so foreign-currency holdings are measured against the CNY
+    // total (rule thresholds compare CNY-proportions).
+    final currencies =
+        holdings.map((h) => h.currency).where((c) => c != 'CNY').toSet().toList();
+    final cnyRates = currencies.isEmpty
+        ? const <String, double>{}
+        : await MarketService(_dao).loadCnyRates(currencies);
+
+    // Price cache keyed by the normalized cache symbol (cacheSymbolFor),
+    // then mapped back to the holding's raw symbol for the calculator.
+    final cacheKeys = [
+      for (final h in holdings)
+        if (cacheSymbolFor(h) != null) cacheSymbolFor(h)!,
+    ];
+    final cache = await _dao.getCachedPrices(cacheKeys);
+    final prev = <String, double>{
+      for (final h in holdings)
+        if (h.symbol != null &&
+            cache[cacheSymbolFor(h)]?.prevClose != null)
+          h.symbol!: cache[cacheSymbolFor(h)]!.prevClose!,
+    };
 
     final summary = const PortfolioCalculator().compute(
       holdings,
-      prevPriceBySymbol: {
-        for (final e in cache.entries)
-          if (e.value.prevClose != null) e.key: e.value.prevClose!,
-      },
+      prevPriceBySymbol: prev,
+      cnyRates: cnyRates,
     );
     final ctx = RuleContext(
       summary: summary,
       holdings: holdings,
       priceCache: cache,
+      cnyRates: cnyRates,
       now: current,
     );
 

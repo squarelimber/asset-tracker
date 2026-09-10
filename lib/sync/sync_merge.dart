@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 import 'sync_format.dart';
 
 /// A tombstone entry as transmitted over the wire.
@@ -18,6 +16,10 @@ class TombstoneEntry {
 
   static TombstoneEntry? fromJson(Object? value) {
     if (value is! Map<String, dynamic>) return null;
+    final table = '${value['table']}';
+    // Only entries for a known sync table participate in merges; garbage
+    // pushed by a broken client must not silently disable real deletions.
+    if (!SyncTables.all.contains(table)) return null;
     // drift DataClass.toJson emits DateTime as epoch milliseconds; the
     // wire format uses ISO-8601 — accept both.
     final raw = value['deletedAt'];
@@ -29,7 +31,7 @@ class TombstoneEntry {
     }
     if (deletedAt == null) return null;
     return TombstoneEntry(
-      table: '${value['table']}',
+      table: table,
       rowKey: '${value['rowKey']}',
       deletedAt: deletedAt,
     );
@@ -276,9 +278,34 @@ class SyncMerger {
   static bool _same(Map<String, dynamic>? a, Map<String, dynamic>? b) {
     if (a == null || b == null) return a == b;
     if (identical(a, b)) return true;
-    final aa = Map<String, dynamic>.from(a)..remove('latestPrice');
-    final bb = Map<String, dynamic>.from(b)..remove('latestPrice');
-    return jsonEncode(aa) == jsonEncode(bb);
+    final keys = <String>{...a.keys, ...b.keys}..remove('latestPrice');
+    for (final k in keys) {
+      if (!_sameValue(a[k], b[k])) return false;
+    }
+    return true;
+  }
+
+  /// JSON-independent value equality: numbers compare numerically (100.0
+  /// == 100), objects/lists compare field-wise — a serialized-form change
+  /// (key order, int vs double) no longer reads as a permanent conflict.
+  static bool _sameValue(Object? x, Object? y) {
+    if (identical(x, y)) return true;
+    if (x is num && y is num) return x.toDouble() == y.toDouble();
+    if (x is Map && y is Map) {
+      final keys = <Object?>{...x.keys, ...y.keys};
+      for (final k in keys) {
+        if (!_sameValue(x[k], y[k])) return false;
+      }
+      return true;
+    }
+    if (x is List && y is List) {
+      if (x.length != y.length) return false;
+      for (var i = 0; i < x.length; i++) {
+        if (!_sameValue(x[i], y[i])) return false;
+      }
+      return true;
+    }
+    return x == y;
   }
 
   static List<Map<String, dynamic>> _rowsOf(Map<String, dynamic> snapshot, String table) {
