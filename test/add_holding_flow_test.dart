@@ -4,7 +4,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:asset_tracker/app/providers.dart';
-import 'package:asset_tracker/core/enums.dart';
 import 'package:asset_tracker/data/asset_dao.dart';
 import 'package:asset_tracker/data/database.dart';
 import 'package:asset_tracker/ui/pages/holdings/holdings_page.dart';
@@ -75,10 +74,9 @@ void main() {
     await tester.tap(find.text('添加持仓'));
     await tester.pumpAndSettle();
 
-    // Switch the asset type to 负债 (last item in the dropdown).
-    await tester.tap(find.byType(DropdownButtonFormField<AssetType>));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('负债').last);
+    // Switch the asset type to 负债 (special picker chip next to the
+    // category chips).
+    await tester.tap(find.widgetWithText(ChoiceChip, '负债'));
     await tester.pumpAndSettle();
 
     // The balance form shows the liability label, no symbol/cost/price

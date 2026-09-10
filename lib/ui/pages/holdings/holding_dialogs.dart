@@ -36,6 +36,38 @@ String _fundingSourceLabel(HoldingRow h) {
   return '${h.name} (${t.label}) · 可用 ${Formats.amount(available)}';
 }
 
+/// Asset types offered for one category in the add-holding picker. The two
+/// fund types collapse into a single "基金" entry (resolved to 场内/场外 by
+/// the symbol at save time). [AssetType.liability] is a special entry
+/// outside the plan categories.
+List<AssetType> _typesOfCategory(AssetCategory category) {
+  switch (category) {
+    case AssetCategory.bond:
+      return const [AssetType.bond];
+    case AssetCategory.equity:
+      return const [AssetType.stock, AssetType.mutualFund];
+    case AssetCategory.gold:
+      return const [AssetType.gold];
+    case AssetCategory.commodity:
+      return const [AssetType.crypto, AssetType.futures];
+    case AssetCategory.cash:
+      return const [
+        AssetType.cash,
+        AssetType.bankDeposit,
+        AssetType.liquidWealth,
+      ];
+    case AssetCategory.property:
+      return const [AssetType.property];
+    case AssetCategory.bankWealth:
+      return const [AssetType.bankWealth];
+  }
+}
+
+/// Picker label for an asset type in the add dialog; 场内基金/场外基金 merge
+/// into a single "基金" entry so the type list stays short.
+String _typePickerLabel(AssetType t) =>
+    (t == AssetType.etf || t == AssetType.mutualFund) ? '基金' : t.label;
+
 Future<void> showAddHoldingDialog(BuildContext context, WidgetRef ref) async {
   final accounts = await ref.read(accountsProvider.future);
   if (accounts.isEmpty) {
@@ -102,14 +134,53 @@ Future<void> showAddHoldingDialog(BuildContext context, WidgetRef ref) async {
             const SizedBox(height: 12),
             ValueListenableBuilder<AssetType>(
               valueListenable: assetType,
-              builder: (context, value, _) => DropdownButtonFormField<AssetType>(
-                initialValue: value,
-                decoration: terminalDecoration('资产类型'),
-                items: [
-                  for (final t in AssetType.values)
-                    DropdownMenuItem(value: t, child: Text(t.label)),
+              builder: (context, value, _) => Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Category first, then the specific type, so the picker
+                  // stays short (7 categories + 负债 special entry).
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: [
+                      for (final c in AssetCategory.values)
+                        ChoiceChip(
+                          label: Text(c.label),
+                          selected: value != AssetType.liability &&
+                              value.category == c,
+                          visualDensity: VisualDensity.compact,
+                          onSelected: (_) {
+                            assetType.value = _typesOfCategory(c).first;
+                          },
+                        ),
+                      ChoiceChip(
+                        label: const Text('负债'),
+                        selected: value == AssetType.liability,
+                        visualDensity: VisualDensity.compact,
+                        onSelected: (_) => assetType.value = AssetType.liability,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  if (value == AssetType.liability)
+                    const Text(
+                      '负债持仓：信用卡、贷款等欠款（净资产中扣除）',
+                      style: TextStyle(fontSize: 12.5, color: T.text2),
+                    )
+                  else
+                    DropdownButtonFormField<AssetType>(
+                      initialValue: value,
+                      decoration: terminalDecoration('具体类型'),
+                      items: [
+                        for (final t in _typesOfCategory(value.category))
+                          DropdownMenuItem(
+                            value: t,
+                            child: Text(_typePickerLabel(t)),
+                          ),
+                      ],
+                      onChanged: (v) => assetType.value = v ?? value,
+                    ),
                 ],
-                onChanged: (v) => assetType.value = v ?? AssetType.stock,
               ),
             ),
             const SizedBox(height: 12),
@@ -181,6 +252,7 @@ Future<void> showAddHoldingDialog(BuildContext context, WidgetRef ref) async {
                         AssetType.mutualFund => '如 110022',
                         AssetType.gold => 'AU99.99（自动金价）',
                         AssetType.crypto => '如 bitcoin',
+                        AssetType.futures => '如 螺纹钢2405（手动净值）',
                         AssetType.bond => '如 019742（国债）或债基代码',
                         AssetType.bankWealth =>
                           '填外汇代码如 USD 可自动汇率联动，留空手动净值',
@@ -234,58 +306,44 @@ Future<void> showAddHoldingDialog(BuildContext context, WidgetRef ref) async {
               ),
             ),
             const SizedBox(height: 12),
-            ValueListenableBuilder<AssetType>(
-              valueListenable: assetType,
-              builder: (context, type, _) {
-                final autoCny = type.isMarketLinked ||
-                    type == AssetType.bankWealth;
-                if (autoCny) {
-                  return Align(
-                    alignment: Alignment.centerLeft,
-                    child: Text(
-                      '币种：人民币（行情自动折算）',
-                      style: T.label(size: 13, color: T.text2),
-                    ),
-                  );
-                }
-                return Column(
-                  children: [
-                    TerminalTextField(
-                      controller: currencyCtrl,
-                      label: '币种 (ISO 代码)',
-                      onChanged: (v) {
-                        // Pre-fill the purchase rate with the current
-                        // rate for the chosen currency.
-                        final ccy = v.trim().toUpperCase();
-                        final rate = fxRates[ccy];
-                        fxRateCtrl.text = (rate == null || rate <= 0)
-                            ? ''
-                            : rate.toString();
-                      },
-                    ),
-                    ValueListenableBuilder<TextEditingValue>(
-                      valueListenable: currencyCtrl,
-                      builder: (context, value, _) {
-                        final ccy = value.text.trim().toUpperCase();
-                        if (ccy.isEmpty || ccy == 'CNY') {
-                          return const SizedBox.shrink();
-                        }
-                        return Padding(
-                          padding: const EdgeInsets.only(top: 12),
-                          child: TerminalTextField(
-                            controller: fxRateCtrl,
-                            label: '买入时汇率（$ccy/CNY）',
-                            hint: '默认已填当前汇率，可改为真实买入汇率',
-                            keyboardType: const TextInputType.numberWithOptions(
-                              decimal: true,
-                            ),
-                          ),
-                        );
-                      },
-                    ),
-                  ],
-                );
-              },
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                TerminalTextField(
+                  controller: currencyCtrl,
+                  label: '币种 (ISO 代码)',
+                  hint: '默认人民币 CNY；外币请填 ISO 代码（如 USD），市值将按汇率折算',
+                  onChanged: (v) {
+                    // Pre-fill the purchase rate with the current
+                    // rate for the chosen currency.
+                    final ccy = v.trim().toUpperCase();
+                    final rate = fxRates[ccy];
+                    fxRateCtrl.text = (rate == null || rate <= 0)
+                        ? ''
+                        : rate.toString();
+                  },
+                ),
+                ValueListenableBuilder<TextEditingValue>(
+                  valueListenable: currencyCtrl,
+                  builder: (context, value, _) {
+                    final ccy = value.text.trim().toUpperCase();
+                    if (ccy.isEmpty || ccy == 'CNY') {
+                      return const SizedBox.shrink();
+                    }
+                    return Padding(
+                      padding: const EdgeInsets.only(top: 12),
+                      child: TerminalTextField(
+                        controller: fxRateCtrl,
+                        label: '买入时汇率（$ccy/CNY）',
+                        hint: '默认已填当前汇率，可改为真实买入汇率',
+                        keyboardType: const TextInputType.numberWithOptions(
+                          decimal: true,
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ],
             ),
             ValueListenableBuilder<AssetType>(
               valueListenable: assetType,
@@ -340,7 +398,7 @@ Future<void> showAddHoldingDialog(BuildContext context, WidgetRef ref) async {
         FilledButton(
           onPressed: () async {
             final name = nameCtrl.text.trim();
-            final type = assetType.value;
+            var type = assetType.value;
             final qty = double.tryParse(quantityCtrl.text.trim());
             final invested = double.tryParse(costPriceCtrl.text.trim());
             final isAmount = type.isAmountBased || type == AssetType.liability;
@@ -363,6 +421,19 @@ Future<void> showAddHoldingDialog(BuildContext context, WidgetRef ref) async {
             if (type == AssetType.stock || type == AssetType.etf) {
               symbol = symbol == null ? null : normalizeSinaSymbol(symbol);
             }
+            // The picker's single "基金" entry is stored as 场外基金 by
+            // default; a Shanghai exchange code (5/6 prefix) resolves it to
+            // 场内基金 (etf) with the prefixed symbol. Off-exchange codes
+            // (e.g. 110022) keep the raw symbol and the eastmoney NAV.
+            if (type == AssetType.mutualFund &&
+                symbol != null &&
+                symbol.isNotEmpty) {
+              final normalized = normalizeSinaSymbol(symbol);
+              if (normalized.startsWith('sh')) {
+                type = AssetType.etf;
+                symbol = normalized;
+              }
+            }
             final hasSymbol = symbol != null && symbol.isNotEmpty;
             final marketSource = switch (type) {
               AssetType.stock || AssetType.etf => 'sina',
@@ -373,8 +444,10 @@ Future<void> showAddHoldingDialog(BuildContext context, WidgetRef ref) async {
               _ => 'manual',
             };
             final userPrice = double.tryParse(latestPriceCtrl.text.trim());
-            final autoCny =
-                type.isMarketLinked || type == AssetType.bankWealth;
+            // Only forex-linked holdings (银行理财 with an FX symbol) are
+            // priced in CNY by construction; everything else takes the
+            // user-chosen currency so USD holdings stay USD.
+            final autoCny = marketSource == 'forex';
             final finalCurrency = autoCny
                 ? 'CNY'
                 : (currencyCtrl.text.trim().toUpperCase().isEmpty
@@ -597,7 +670,6 @@ Future<void> showEditHoldingDialog(
         final isAmountBased = type.isAmountBased;
         final isAmount = isAmountBased || type == AssetType.liability;
         final isLiability = type == AssetType.liability;
-        final autoCny = type.isMarketLinked || type == AssetType.bankWealth;
         return AlertDialog(
           title: const Text('编辑持仓'),
           content: SingleChildScrollView(
@@ -708,50 +780,43 @@ Future<void> showEditHoldingDialog(
                       : '如 400 = 400 天前买入',
                 ),
                 const SizedBox(height: 12),
-                if (autoCny)
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: Text(
-                      '币种：人民币（行情自动折算）',
-                      style: T.label(size: 13, color: T.text2),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    TerminalTextField(
+                      controller: currencyCtrl,
+                      label: '币种 (ISO 代码)',
+                      hint: '默认人民币 CNY；外币请填 ISO 代码（如 USD），市值将按汇率折算',
+                      onChanged: (v) {
+                        final ccy = v.trim().toUpperCase();
+                        final rate = fxRates[ccy];
+                        fxRateCtrl.text = (rate == null || rate <= 0)
+                            ? ''
+                            : rate.toString();
+                      },
                     ),
-                  )
-                else
-                  Column(
-                    children: [
-                      TerminalTextField(
-                        controller: currencyCtrl,
-                        label: '币种 (ISO 代码)',
-                        onChanged: (v) {
-                          final ccy = v.trim().toUpperCase();
-                          final rate = fxRates[ccy];
-                          fxRateCtrl.text = (rate == null || rate <= 0)
-                              ? ''
-                              : rate.toString();
-                        },
-                      ),
-                      ValueListenableBuilder<TextEditingValue>(
-                        valueListenable: currencyCtrl,
-                        builder: (context, value, _) {
-                          final ccy = value.text.trim().toUpperCase();
-                          if (ccy.isEmpty || ccy == 'CNY') {
-                            return const SizedBox.shrink();
-                          }
-                          return Padding(
-                            padding: const EdgeInsets.only(top: 12),
-                            child: TerminalTextField(
-                              controller: fxRateCtrl,
-                              label: '买入时汇率（$ccy/CNY）',
-                              hint: '默认已填当前汇率，可改为真实买入汇率',
-                              keyboardType: const TextInputType.numberWithOptions(
-                                decimal: true,
-                              ),
+                    ValueListenableBuilder<TextEditingValue>(
+                      valueListenable: currencyCtrl,
+                      builder: (context, value, _) {
+                        final ccy = value.text.trim().toUpperCase();
+                        if (ccy.isEmpty || ccy == 'CNY') {
+                          return const SizedBox.shrink();
+                        }
+                        return Padding(
+                          padding: const EdgeInsets.only(top: 12),
+                          child: TerminalTextField(
+                            controller: fxRateCtrl,
+                            label: '买入时汇率（$ccy/CNY）',
+                            hint: '默认已填当前汇率，可改为真实买入汇率',
+                            keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true,
                             ),
-                          );
-                        },
-                      ),
-                    ],
-                  ),
+                          ),
+                        );
+                      },
+                    ),
+                  ],
+                ),
                 const SizedBox(height: 12),
                 TerminalTextField(controller: noteCtrl, label: '备注'),
               ],
@@ -776,7 +841,6 @@ Future<void> showEditHoldingDialog(
     final type = typeNotifier.value;
     final isAmountBased = type.isAmountBased;
     final isAmount = isAmountBased || type == AssetType.liability;
-    final autoCny = type.isMarketLinked || type == AssetType.bankWealth;
     final qty = double.tryParse(quantityCtrl.text.trim());
     if (qty == null) return;
     final cost = double.tryParse(costCtrl.text.trim());
@@ -803,6 +867,7 @@ Future<void> showEditHoldingDialog(
                 AssetType.gold => 'sge',
                 AssetType.crypto => 'coingecko',
                 AssetType.bond => 'manual',
+                AssetType.futures => 'manual',
                 AssetType.bankWealth =>
                   symbol.isNotEmpty ? 'forex' : 'manual',
                 AssetType.cash ||
@@ -812,6 +877,9 @@ Future<void> showEditHoldingDialog(
                 AssetType.property =>
                   'manual',
               };
+    // Only forex-linked holdings are priced in CNY by construction; other
+    // holdings keep the user-chosen currency (e.g. USD stocks stay USD).
+    final autoCny = marketSource == 'forex';
     final updated = holding.copyWith(
       accountId: accountIdNotifier.value,
       name: nameCtrl.text.trim().isEmpty ? holding.name : nameCtrl.text.trim(),
