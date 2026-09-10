@@ -72,6 +72,12 @@ class BackupService {
     }
 
     try {
+      // One timestamp for all restored rows: an import is the latest intent,
+      // so its rows must outrank any deletion tombstone (local or on the
+      // server) — otherwise "delete → restore backup → sync" silently eats
+      // the restored data (tombstone deletedAt is always newer than a
+      // backup's row updatedAt).
+      final restoredAt = DateTime.now();
       await _dao.transaction(() async {
         for (final table in [
           _dao.deleteAllTransactions,
@@ -79,6 +85,8 @@ class BackupService {
           _dao.deleteAllAccounts,
           _dao.deleteAllSnapshots,
           _dao.deleteAllAlertRules,
+          // Stale local tombstones must not outlive the restore.
+          _dao.deleteAllTombstones,
         ]) {
           await table();
         }
@@ -92,7 +100,7 @@ class BackupService {
                 ? const Value.absent()
                 : Value(a['note'].toString()),
             createdAt: Value(_parseDate(a['createdAt']) ?? DateTime.now()),
-            updatedAt: Value(_parseDate(a['updatedAt']) ?? DateTime.now()),
+            updatedAt: Value(restoredAt),
           ));
         }
         for (final h in holdings) {
@@ -122,7 +130,7 @@ class BackupService {
                 ? const Value.absent()
                 : Value(h['note'].toString()),
             createdAt: Value(_parseDate(h['createdAt']) ?? DateTime.now()),
-            updatedAt: Value(_parseDate(h['updatedAt']) ?? DateTime.now()),
+            updatedAt: Value(restoredAt),
           ));
         }
         for (final t in transactions) {
@@ -154,7 +162,7 @@ class BackupService {
             costMoved: t['costMoved'] == null
                 ? const Value.absent()
                 : Value(t['costMoved'] == true),
-            updatedAt: Value(_parseDate(t['updatedAt']) ?? DateTime.now()),
+            updatedAt: Value(restoredAt),
           ));
         }
         for (final s in snapshots) {
@@ -175,7 +183,7 @@ class BackupService {
             params: Value(r['params']?.toString() ?? '{}'),
             enabled: Value(r['enabled'] == true),
             createdAt: Value(_parseDate(r['createdAt']) ?? DateTime.now()),
-            updatedAt: Value(_parseDate(r['updatedAt']) ?? DateTime.now()),
+            updatedAt: Value(restoredAt),
           ));
         }
       });

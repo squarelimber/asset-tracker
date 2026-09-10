@@ -53,7 +53,11 @@ class CoinGeckoSource extends MarketDataSource {
               price: price,
               currency: 'CNY',
               prevClose: changePct == null ? null : price / (1 + changePct / 100),
-              changePct: changePct,
+              // CoinGecko reports the 24h change as a percentage (1.23 =
+              // 1.23%); every other source stores a fraction, so convert
+              // before storing or the UI formats it as +123% instead of
+              // +1.23%.
+              changePct: changePct == null ? null : changePct / 100,
               change: changePct == null
                   ? null
                   : price - price / (1 + changePct / 100),

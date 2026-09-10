@@ -11,7 +11,8 @@ import '../tokens.dart';
 
 /// Dialog for recording a transaction against a specific holding.
 /// Available types follow the holding's nature:
-/// - share-based (stocks/funds/gold/wealth/crypto): buy / sell / dividend
+/// - share-based (stocks/funds/gold/wealth/crypto/bonds/futures/property):
+///   buy / sell / dividend / split
 /// - amount-based (cash/deposit/liquid wealth): income / expense /
 ///   transfer in / transfer out
 Future<void> showHoldingTransactionDialog(
@@ -21,7 +22,12 @@ Future<void> showHoldingTransactionDialog(
 ) async {
   final holdings = ref.read(holdingsProvider).value ?? const [];
   final type = AssetType.fromStorage(holding.assetType);
-  final isShare = type.isMarketLinked || type == AssetType.bankWealth;
+  // Share-like holdings trade by quantity × unit price (stocks, funds,
+  // gold, crypto, bank wealth, bonds, futures, property). Only amount-based
+  // balances and liabilities use the income/expense form. (The old
+  // market-linked || bankWealth check silently excluded the bond/futures
+  // types added in v0.9.x, leaving them no working transaction path.)
+  final isShare = !type.isAmountBased && type != AssetType.liability;
   final isLiability = type == AssetType.liability;
 
   // Money holdings usable as the counterparty for transfers.
@@ -346,7 +352,6 @@ Future<void> showHoldingTransactionDialog(
                     amount: amount,
                     cashSourceId: switch (t) {
                       TransactionType.buy => cashId.value,
-                      TransactionType.expense => holding.id,
                       TransactionType.transferIn => cashId.value,
                       TransactionType.transferOut => holding.id,
                       _ => null,
@@ -355,12 +360,19 @@ Future<void> showHoldingTransactionDialog(
                       TransactionType.sell ||
                       TransactionType.dividend =>
                         cashId.value,
-                      TransactionType.income => holding.id,
+                      // Expense debits the holding itself, mirroring income
+                      // crediting it (the service reads cashTargetId for
+                      // both; the old cashSourceId placement made every
+                      // holding-level expense fail).
+                      TransactionType.income ||
+                      TransactionType.expense =>
+                        holding.id,
                       TransactionType.transferIn => holding.id,
                       TransactionType.transferOut => cashId.value,
                       _ => null,
                     },
                     note: noteCtrl.text.trim(),
+                    currency: holding.currency,
                   );
             if (!context.mounted) return;
             Navigator.pop(context);
@@ -380,6 +392,10 @@ Future<void> showHoldingTransactionDialog(
     ),
     ),
   );
+  // Wait for the dialog's exit animation before releasing controllers,
+  // mirroring showEditHoldingDialog: a rebuild during the animation would
+  // otherwise touch a disposed controller and crash the close flow.
+  await Future<void>.delayed(const Duration(milliseconds: 350));
   qtyCtrl.dispose();
   priceCtrl.dispose();
   amountCtrl.dispose();
@@ -395,7 +411,7 @@ String sellProfitText(
   final price = double.tryParse(priceCtrl.text.trim());
   if (qty == null || price == null) return '--';
   final profit = (price - holding.costPrice) * qty;
-  return '${profit >= 0 ? '+' : ''}¥${Formats.amount(profit)}';
+  return '${profit >= 0 ? '+' : ''}${Formats.money(profit, holding.currency)}';
 }
 
 /// Label of the counterparty dropdown for the current transaction type.
@@ -579,6 +595,15 @@ Future<void> showAccountTransactionDialog(
               );
               return;
             }
+            // Record the flow in the source holding's currency so foreign
+            // income/expense rows no longer enter the stats as CNY amounts.
+            HoldingRow? srcHolding;
+            for (final h in holdings) {
+              if (h.id == sourceId.value) {
+                srcHolding = h;
+                break;
+              }
+            }
             final result = await ref.read(transactionServiceProvider).record(
               accountId: accountId,
               type: txnTypeValue,
@@ -589,6 +614,7 @@ Future<void> showAccountTransactionDialog(
                   ? targetId.value
                   : sourceId.value,
               note: noteCtrl.text.trim(),
+              currency: srcHolding?.currency ?? 'CNY',
             );
             if (!context.mounted) return;
             Navigator.pop(context);
@@ -608,6 +634,8 @@ Future<void> showAccountTransactionDialog(
     ),
     ),
   );
+  // Same exit-animation guard as above (see showHoldingTransactionDialog).
+  await Future<void>.delayed(const Duration(milliseconds: 350));
   amountCtrl.dispose();
   noteCtrl.dispose();
 }

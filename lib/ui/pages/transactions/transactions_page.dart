@@ -92,7 +92,7 @@ class _TransactionsPageState extends ConsumerState<TransactionsPage> {
       TransactionType.income =>
         t.cashTargetId == null ? null : '入账：${name(t.cashTargetId)}',
       TransactionType.expense =>
-        t.cashSourceId == null ? null : '扣款：${name(t.cashSourceId)}',
+        t.cashTargetId == null ? null : '扣款：${name(t.cashTargetId)}',
       TransactionType.transferIn =>
         t.cashSourceId == null ? null : '来源：${name(t.cashSourceId)}',
       TransactionType.transferOut =>
@@ -422,7 +422,10 @@ class _DayHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isToday = day == DateTime.now();
+    final now = DateTime.now();
+    final isToday = day.year == now.year &&
+        day.month == now.month &&
+        day.day == now.day;
     return Padding(
       padding: const EdgeInsets.only(top: T.s3, bottom: T.s2),
       child: Row(

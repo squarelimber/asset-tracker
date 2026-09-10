@@ -209,9 +209,11 @@ class SettingsPage extends ConsumerWidget {
     final allHoldings = await dao.getHoldings();
     final holdingName = {for (final h in allHoldings) h.id: h.name};
     // FX rates for converting foreign-currency holdings to CNY in the
-    // holdings export (missing rates fall back to the raw value).
-    final cnyRates =
-        ref.read(cnyRatesProvider).value ?? const <String, double>{};
+    // holdings export (missing rates fall back to the raw value). Await the
+    // future so a cold start never silently exports ×1 "CNY" values.
+    final cnyRates = await ref
+        .read(cnyRatesProvider.future)
+        .catchError((_) => const <String, double>{});
 
     final csvExport = const CsvExport();
     final content = holdings

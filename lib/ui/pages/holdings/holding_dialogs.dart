@@ -252,7 +252,7 @@ Future<void> showAddHoldingDialog(BuildContext context, WidgetRef ref) async {
                         AssetType.mutualFund => '如 110022',
                         AssetType.gold => 'AU99.99（自动金价）',
                         AssetType.crypto => '如 bitcoin',
-                        AssetType.futures => '如 螺纹钢2405（手动净值）',
+                        AssetType.futures => null,
                         AssetType.bond => '如 019742（国债）或债基代码',
                         AssetType.bankWealth =>
                           '填外汇代码如 USD 可自动汇率联动，留空手动净值',
@@ -306,44 +306,60 @@ Future<void> showAddHoldingDialog(BuildContext context, WidgetRef ref) async {
               ),
             ),
             const SizedBox(height: 12),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                TerminalTextField(
-                  controller: currencyCtrl,
-                  label: '币种 (ISO 代码)',
-                  hint: '默认人民币 CNY；外币请填 ISO 代码（如 USD），市值将按汇率折算',
-                  onChanged: (v) {
-                    // Pre-fill the purchase rate with the current
-                    // rate for the chosen currency.
-                    final ccy = v.trim().toUpperCase();
-                    final rate = fxRates[ccy];
-                    fxRateCtrl.text = (rate == null || rate <= 0)
-                        ? ''
-                        : rate.toString();
-                  },
-                ),
-                ValueListenableBuilder<TextEditingValue>(
-                  valueListenable: currencyCtrl,
-                  builder: (context, value, _) {
-                    final ccy = value.text.trim().toUpperCase();
-                    if (ccy.isEmpty || ccy == 'CNY') {
-                      return const SizedBox.shrink();
-                    }
-                    return Padding(
-                      padding: const EdgeInsets.only(top: 12),
-                      child: TerminalTextField(
-                        controller: fxRateCtrl,
-                        label: '买入时汇率（$ccy/CNY）',
-                        hint: '默认已填当前汇率，可改为真实买入汇率',
-                        keyboardType: const TextInputType.numberWithOptions(
-                          decimal: true,
-                        ),
-                      ),
-                    );
-                  },
-                ),
-              ],
+            // Forex-linked bank wealth (an FX symbol present) is valued in
+            // CNY by construction — lock the currency there (same rule as
+            // the edit dialog), so a typed currency can never be silently
+            // overwritten back to CNY on save.
+            ListenableBuilder(
+              listenable: Listenable.merge([assetType, symbolCtrl]),
+              builder: (context, _) {
+                final forexLinked = assetType.value == AssetType.bankWealth &&
+                    symbolCtrl.text.trim().isNotEmpty;
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    TerminalTextField(
+                      controller: currencyCtrl,
+                      label: forexLinked
+                          ? '币种 (ISO 代码) · 汇率联动'
+                          : '币种 (ISO 代码)',
+                      hint: forexLinked
+                          ? '该持仓按汇率联动自动折算，币种固定为 CNY（清空行情代码可解锁）'
+                          : '默认人民币 CNY；外币请填 ISO 代码（如 USD），市值将按汇率折算',
+                      enabled: !forexLinked,
+                      onChanged: (v) {
+                        // Pre-fill the purchase rate with the current
+                        // rate for the chosen currency.
+                        final ccy = v.trim().toUpperCase();
+                        final rate = fxRates[ccy];
+                        fxRateCtrl.text = (rate == null || rate <= 0)
+                            ? ''
+                            : rate.toString();
+                      },
+                    ),
+                    ValueListenableBuilder<TextEditingValue>(
+                      valueListenable: currencyCtrl,
+                      builder: (context, value, _) {
+                        final ccy = value.text.trim().toUpperCase();
+                        if (ccy.isEmpty || ccy == 'CNY') {
+                          return const SizedBox.shrink();
+                        }
+                        return Padding(
+                          padding: const EdgeInsets.only(top: 12),
+                          child: TerminalTextField(
+                            controller: fxRateCtrl,
+                            label: '买入时汇率（$ccy/CNY）',
+                            hint: '默认已填当前汇率，可改为真实买入汇率',
+                            keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true,
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ],
+                );
+              },
             ),
             ValueListenableBuilder<AssetType>(
               valueListenable: assetType,
@@ -425,11 +441,15 @@ Future<void> showAddHoldingDialog(BuildContext context, WidgetRef ref) async {
             // default; a Shanghai exchange code (5/6 prefix) resolves it to
             // 场内基金 (etf) with the prefixed symbol. Off-exchange codes
             // (e.g. 110022) keep the raw symbol and the eastmoney NAV.
+            // 519xxx is the off-exchange open-end fund range (交银施罗德
+            // etc.) — 沪市场内 funds occupy 500-518, so 519xxx must NOT be
+            // promoted to ETF (sina would never find the code).
             if (type == AssetType.mutualFund &&
                 symbol != null &&
                 symbol.isNotEmpty) {
               final normalized = normalizeSinaSymbol(symbol);
-              if (normalized.startsWith('sh')) {
+              if (normalized.startsWith('sh') &&
+                  !normalized.startsWith('sh519')) {
                 type = AssetType.etf;
                 symbol = normalized;
               }
@@ -780,42 +800,71 @@ Future<void> showEditHoldingDialog(
                       : '如 400 = 400 天前买入',
                 ),
                 const SizedBox(height: 12),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    TerminalTextField(
-                      controller: currencyCtrl,
-                      label: '币种 (ISO 代码)',
-                      hint: '默认人民币 CNY；外币请填 ISO 代码（如 USD），市值将按汇率折算',
-                      onChanged: (v) {
-                        final ccy = v.trim().toUpperCase();
-                        final rate = fxRates[ccy];
-                        fxRateCtrl.text = (rate == null || rate <= 0)
-                            ? ''
-                            : rate.toString();
-                      },
-                    ),
-                    ValueListenableBuilder<TextEditingValue>(
-                      valueListenable: currencyCtrl,
-                      builder: (context, value, _) {
-                        final ccy = value.text.trim().toUpperCase();
-                        if (ccy.isEmpty || ccy == 'CNY') {
-                          return const SizedBox.shrink();
-                        }
-                        return Padding(
-                          padding: const EdgeInsets.only(top: 12),
-                          child: TerminalTextField(
-                            controller: fxRateCtrl,
-                            label: '买入时汇率（$ccy/CNY）',
-                            hint: '默认已填当前汇率，可改为真实买入汇率',
-                            keyboardType: const TextInputType.numberWithOptions(
-                              decimal: true,
-                            ),
+                // Forex-linked bank wealth (an FX symbol present) is valued
+                // in CNY by construction, so the currency is locked there;
+                // everything else keeps the user-chosen currency editable.
+                // Reacts to the type dropdown and symbol edits so the lock
+                // can never be silently bypassed on save.
+                ListenableBuilder(
+                  listenable: Listenable.merge([typeNotifier, symbolCtrl]),
+                  builder: (context, _) {
+                    final forexLinked =
+                        typeNotifier.value == AssetType.bankWealth &&
+                            symbolCtrl.text.trim().isNotEmpty;
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        TerminalTextField(
+                          controller: currencyCtrl,
+                          label: forexLinked
+                              ? '币种 (ISO 代码) · 汇率联动'
+                              : '币种 (ISO 代码)',
+                          hint: forexLinked
+                              ? '该持仓按汇率联动自动折算，币种固定为 CNY（清空行情代码可解锁）'
+                              : '默认人民币 CNY；外币请填 ISO 代码（如 USD），市值将按汇率折算',
+                          enabled: !forexLinked,
+                          onChanged: (v) {
+                            final ccy = v.trim().toUpperCase();
+                            final rate = fxRates[ccy];
+                            fxRateCtrl.text = (rate == null || rate <= 0)
+                                ? ''
+                                : rate.toString();
+                          },
+                        ),
+                        ValueListenableBuilder<TextEditingValue>(
+                          valueListenable: currencyCtrl,
+                          builder: (context, value, _) {
+                            final ccy = value.text.trim().toUpperCase();
+                            if (ccy.isEmpty || ccy == 'CNY') {
+                              return const SizedBox.shrink();
+                            }
+                            return Padding(
+                              padding: const EdgeInsets.only(top: 12),
+                              child: TerminalTextField(
+                                controller: fxRateCtrl,
+                                label: '买入时汇率（$ccy/CNY）',
+                                hint: '默认已填当前汇率，可改为真实买入汇率',
+                                keyboardType:
+                                    const TextInputType.numberWithOptions(
+                                  decimal: true,
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                        if (!forexLinked &&
+                            currencyCtrl.text.trim().toUpperCase() !=
+                                holding.currency) ...[
+                          const SizedBox(height: 8),
+                          Text(
+                            '⚠️ 仅切换币种标签：数量 / 成本单价 / 最新净值不会自动换算，'
+                            '请确认这些字段已按新币种填写',
+                            style: T.label(size: 12, color: T.warning),
                           ),
-                        );
-                      },
-                    ),
-                  ],
+                        ],
+                      ],
+                    );
+                  },
                 ),
                 const SizedBox(height: 12),
                 TerminalTextField(controller: noteCtrl, label: '备注'),
@@ -858,7 +907,13 @@ Future<void> showEditHoldingDialog(
                 AssetType.mutualFund => 'eastmoney',
                 AssetType.gold => 'sge',
                 AssetType.crypto => 'coingecko',
-                AssetType.bankWealth => 'forex',
+                // Manual 银行理财 stays manual unless the user typed an FX
+                // symbol — flipping the source would silently lock the
+                // currency back to CNY (autoCny) even though the holding is
+                // not rate-linked at all (matches the add dialog's
+                // `bankWealth when hasSymbol => 'forex'` rule).
+                AssetType.bankWealth =>
+                  symbol.isNotEmpty ? 'forex' : holding.marketSource,
                 _ => holding.marketSource,
               }
             : switch (type) {

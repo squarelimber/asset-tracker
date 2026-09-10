@@ -90,10 +90,10 @@ class CsvExport {
     for (final t in txns) {
       final type = TransactionType.fromStorage(t.type);
       final counterparty = switch (type) {
-        TransactionType.buy || TransactionType.expense =>
+        TransactionType.buy =>
           t.cashSourceId == null ? '' : (holdingName[t.cashSourceId!] ?? ''),
         TransactionType.sell || TransactionType.dividend ||
-        TransactionType.income =>
+        TransactionType.income || TransactionType.expense =>
           t.cashTargetId == null ? '' : (holdingName[t.cashTargetId!] ?? ''),
         TransactionType.transferIn =>
           t.cashSourceId == null ? '' : (holdingName[t.cashSourceId!] ?? ''),
