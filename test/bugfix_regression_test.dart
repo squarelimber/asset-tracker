@@ -5,6 +5,7 @@ import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:asset_tracker/core/enums.dart';
+import 'package:asset_tracker/core/symbols.dart';
 import 'package:asset_tracker/data/asset_dao.dart';
 import 'package:asset_tracker/data/database.dart';
 import 'package:asset_tracker/domain/daily_earnings.dart';
@@ -17,6 +18,61 @@ import 'package:asset_tracker/services/backup_service.dart';
 /// M1/M3 (transaction guards), M5 (rate denominator), M10/M11 (target
 /// allocation), H4 (replay window), C2 (backup effective ids).
 void main() {
+  test('FX-linked holdings never double-convert their currency label', () {
+    HoldingRow fxLinked() => HoldingRow(
+          id: 1,
+          accountId: 1,
+          name: '美元理财',
+          assetType: 'bank_wealth',
+          marketSource: 'forex',
+          quantity: 10000,
+          costPrice: 7.0, // purchase-time rate
+          latestPrice: 7.1, // live rate (the unit price IS the rate)
+          currency: 'USD',
+          archived: false,
+          createdAt: DateTime(2026),
+          updatedAt: DateTime(2026),
+        );
+    final rates = {'USD': 7.1};
+    // The conversion is embedded in the unit price: no extra factor.
+    expect(valueRateOf(fxLinked(), rates), 1);
+    expect(costRateOf(fxLinked(), rates), 1);
+
+    // A market-linked USD holding still converts by currency.
+    final usdStock = HoldingRow(
+      id: 2,
+      accountId: 1,
+      name: '美股',
+      assetType: 'stock',
+      marketSource: 'sina',
+      quantity: 10,
+      costPrice: 200,
+      latestPrice: 210,
+      currency: 'USD',
+      archived: false,
+      createdAt: DateTime(2026),
+      updatedAt: DateTime(2026),
+    );
+    expect(valueRateOf(usdStock, rates), 7.1);
+
+    // Existing CNY FX-linked holdings are untouched (rate 1).
+    final cnyLinked = HoldingRow(
+      id: 3,
+      accountId: 1,
+      name: '理财',
+      assetType: 'bank_wealth',
+      marketSource: 'forex',
+      quantity: 10000,
+      costPrice: 7.0,
+      latestPrice: 7.1,
+      currency: 'CNY',
+      archived: false,
+      createdAt: DateTime(2026),
+      updatedAt: DateTime(2026),
+    );
+    expect(valueRateOf(cnyLinked, rates), 1);
+  });
+
   group('TransactionService guards', () {
     late AssetDao dao;
     late TransactionService service;
