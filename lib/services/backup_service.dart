@@ -5,6 +5,7 @@ import 'package:drift/drift.dart';
 import '../core/formats.dart';
 import '../data/asset_dao.dart';
 import '../data/database.dart';
+import '../domain/target_allocation.dart' show targetAllocationKey;
 
 /// Result of an import attempt.
 class ImportResult {
@@ -32,6 +33,10 @@ class BackupService {
     final transactions = await _dao.getTransactions();
     final snapshots = await _dao.getSnapshots();
     final rules = await _dao.getAlertRules();
+    // Carry the target-allocation plan along (it lives in the settings
+    // key-value table, which is deliberately not dumped wholesale: sync
+    // credentials etc. must not end up in a shareable file).
+    final targetAllocation = await _dao.getSetting(targetAllocationKey);
 
     return jsonEncode({
       'app': 'asset_tracker',
@@ -42,6 +47,9 @@ class BackupService {
       'transactions': transactions.map((t) => _transactionToJson(t)).toList(),
       'snapshots': snapshots.map((s) => _snapshotToJson(s)).toList(),
       'alertRules': rules.map((r) => _ruleToJson(r)).toList(),
+      'settings': targetAllocation == null
+          ? null
+          : {'target_allocation': targetAllocation},
     });
   }
 
@@ -78,6 +86,9 @@ class BackupService {
       // the restored data (tombstone deletedAt is always newer than a
       // backup's row updatedAt).
       final restoredAt = DateTime.now();
+      // Captured (and promoted) outside the closure so the settings block
+      // below can index it without a nullability check.
+      final payload = decoded;
       await _dao.transaction(() async {
         for (final table in [
           _dao.deleteAllTransactions,
@@ -85,14 +96,26 @@ class BackupService {
           _dao.deleteAllAccounts,
           _dao.deleteAllSnapshots,
           _dao.deleteAllAlertRules,
+          // Stale fired events would otherwise suppress fresh dedup of the
+          // newly imported rules.
+          _dao.deleteAllAlertEvents,
           // Stale local tombstones must not outlive the restore.
           _dao.deleteAllTombstones,
         ]) {
           await table();
         }
-        for (final a in accounts) {
+        // Explicit ids for every row: the validation model and the actual
+        // written rows must agree (a used device's real AUTOINCREMENT
+        // sequence would hand out different ids than maxExplicit+1 and
+        // silently re-link references).
+        final accountIds = _effectiveIdList(accounts);
+        final holdingIds = _effectiveIdList(holdings);
+        final transactionIds = _effectiveIdList(transactions);
+        final ruleIds = _effectiveIdList(rules);
+        for (var i = 0; i < accounts.length; i++) {
+          final a = accounts[i];
           await _dao.createAccount(AccountsCompanion.insert(
-            id: _intOrAbsent(a['id']),
+            id: _idValue(accountIds, i),
             name: a['name']?.toString() ?? '',
             type: a['type']?.toString() ?? 'cash',
             currency: Value(a['currency']?.toString() ?? 'CNY'),
@@ -103,9 +126,10 @@ class BackupService {
             updatedAt: Value(restoredAt),
           ));
         }
-        for (final h in holdings) {
+        for (var i = 0; i < holdings.length; i++) {
+          final h = holdings[i];
           await _dao.createHolding(HoldingsCompanion.insert(
-            id: _intOrAbsent(h['id']),
+            id: _idValue(holdingIds, i),
             accountId: (h['accountId'] as num?)?.toInt() ?? 0,
             name: h['name']?.toString() ?? '',
             assetType: h['assetType']?.toString() ?? 'cash',
@@ -133,9 +157,10 @@ class BackupService {
             updatedAt: Value(restoredAt),
           ));
         }
-        for (final t in transactions) {
+        for (var i = 0; i < transactions.length; i++) {
+          final t = transactions[i];
           await _dao.createTransaction(TransactionsCompanion.insert(
-            id: _intOrAbsent(t['id']),
+            id: _idValue(transactionIds, i),
             accountId: (t['accountId'] as num?)?.toInt() ?? 0,
             holdingId: t['holdingId'] == null
                 ? const Value.absent()
@@ -175,9 +200,10 @@ class BackupService {
             createdAt: Value(_parseDate(s['createdAt']) ?? DateTime.now()),
           ));
         }
-        for (final r in rules) {
+        for (var i = 0; i < rules.length; i++) {
+          final r = rules[i];
           await _dao.createAlertRule(AlertRulesCompanion.insert(
-            id: _intOrAbsent(r['id']),
+            id: _idValue(ruleIds, i),
             type: r['type']?.toString() ?? 'concentration',
             name: r['name']?.toString() ?? '',
             params: Value(r['params']?.toString() ?? '{}'),
@@ -185,6 +211,15 @@ class BackupService {
             createdAt: Value(_parseDate(r['createdAt']) ?? DateTime.now()),
             updatedAt: Value(restoredAt),
           ));
+        }
+        // Restore carried-over settings (target-allocation plan). Absent
+        // in older backups: skip, keeping the device's own settings.
+        final settings = payload['settings'];
+        if (settings is Map<String, dynamic>) {
+          final plan = settings['target_allocation'];
+          if (plan != null) {
+            await _dao.setSetting(targetAllocationKey, plan.toString());
+          }
         }
       });
     } catch (e) {
@@ -206,11 +241,10 @@ class BackupService {
   }
 
   /// Original row id from a backup entry; backups created before the id
-  /// fields were added fall back to auto-increment.
-  static Value<int> _intOrAbsent(Object? value) {
-    if (value is num) return Value(value.toInt());
-    return const Value.absent();
-  }
+  /// fields were added fall back to the synthesized id (see
+  /// [_effectiveIdList]) — import always writes the id explicitly so the
+  /// validation model and the actual rows agree.
+  static Value<int> _idValue(List<int> ids, int index) => Value(ids[index]);
 
   /// Checks that every foreign reference in the backup points at a row that
   /// is present in the same backup. A backup is a consistent snapshot of one
@@ -221,8 +255,8 @@ class BackupService {
     List<Map<String, dynamic>> holdings,
     List<Map<String, dynamic>> transactions,
   ) {
-    final accountIds = _effectiveIds(accounts);
-    final holdingIds = _effectiveIds(holdings);
+    final accountIds = _effectiveIdList(accounts).toSet();
+    final holdingIds = _effectiveIdList(holdings).toSet();
     final problems = <String>[];
     for (final h in holdings) {
       final accountId = (h['accountId'] as num?)?.toInt();
@@ -245,20 +279,22 @@ class BackupService {
     return problems;
   }
 
-  /// The id each row will have after import: its explicit backup id, or the
-  /// auto-increment value it would receive (the database is emptied first,
-  /// so auto ids continue after the largest explicit id).
-  static Set<int> _effectiveIds(List<Map<String, dynamic>> rows) {
+  /// The id each row will receive after import: its explicit backup id, or
+  /// a synthesized one continuing after the largest explicit id, assigned
+  /// in list order. Import writes these ids explicitly (AUTOINCREMENT
+  /// sequence on a used device would otherwise hand out different ids than
+  /// this model assumes, silently re-linking foreign references).
+  static List<int> _effectiveIdList(List<Map<String, dynamic>> rows) {
     var maxExplicit = 0;
     for (final r in rows) {
       final id = (r['id'] as num?)?.toInt() ?? 0;
       if (id > maxExplicit) maxExplicit = id;
     }
     var nextAuto = maxExplicit + 1;
-    return {
+    return [
       for (final r in rows)
         (r['id'] is num) ? (r['id'] as num).toInt() : nextAuto++,
-    };
+    ];
   }
 
   static DateTime? _parseDate(Object? value) {

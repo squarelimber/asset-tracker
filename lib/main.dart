@@ -24,6 +24,9 @@ Future<void> main() async {
     runApp(_FatalStartupErrorApp(error: e));
     return;
   }
+  // The history provider watches the dirty-flag settings row, so a sync
+  // that merges source rows invalidates derived snapshots this session
+  // (including the startup auto-sync) without a container handle here.
   await _autoSyncIfConfigured(AssetDao(db));
   runApp(
     ProviderScope(
@@ -39,7 +42,6 @@ Future<void> main() async {
     unawaited(_checkAlerts(AssetDao(db)));
   });
 }
-
 /// Minimal error screen shown when the database cannot be opened or
 /// migrated. The user can clear app data to start fresh.
 class _FatalStartupErrorApp extends StatelessWidget {
@@ -67,7 +69,9 @@ class _FatalStartupErrorApp extends StatelessWidget {
 }
 
 /// Background silent sync on startup when enabled in the sync settings.
-/// Runs detached so a slow server never blocks the UI.
+/// Runs detached so a slow server never blocks the UI. When the sync
+/// merges source rows it flips the history dirty flag, which
+/// [historySyncProvider] watches — derived snapshots rebuild in-session.
 Future<void> _autoSyncIfConfigured(AssetDao dao) async {
   try {
     final auto = await dao.getSetting(SyncSettingsKeys.autoSync);

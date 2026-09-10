@@ -56,7 +56,10 @@ Map<AssetCategory, double> parseTargetAllocation(String? raw) {
         continue;
       }
       final mapped = _legacyCategoryKeys[key] ?? key;
-      final category = AssetCategory.fromStorage(mapped);
+      final category = _categoryByStorage(mapped);
+      // Unknown keys are ignored (documented behavior) — never let them
+      // land on an arbitrary category via a fallback.
+      if (category == null) continue;
       if (hasLegacy) {
         // Legacy keys can land twice on one category (股票 + 基金 -> 权益):
         // sum them onto the empty migration result.
@@ -73,11 +76,50 @@ Map<AssetCategory, double> parseTargetAllocation(String? raw) {
   }
 }
 
-/// Serialize a target-allocation plan to the persisted JSON form.
+/// Exact storage-name lookup (no fallback): null for unknown keys.
+AssetCategory? _categoryByStorage(String storageName) {
+  for (final c in AssetCategory.values) {
+    if (c.storageName == storageName) return c;
+  }
+  return null;
+}
+
+/// Rounds each category to one decimal and, when the total exceeds 100%,
+/// trims the overflow off the largest category first. Slider fractions
+/// (divisions over a dynamic cap) plus rounding used to be able to persist
+/// e.g. 101%, which the editor then permanently rejected on load.
+Map<AssetCategory, double> normalizeTargetAllocation(
+  Map<AssetCategory, double> plan,
+) {
+  final out = <AssetCategory, double>{
+    for (final e in plan.entries)
+      e.key: double.parse(e.value.clamp(0.0, 100.0).toStringAsFixed(1)),
+  };
+  var total = out.values.fold(0.0, (a, b) => a + b);
+  while (total > 100.0 + 1e-9) {
+    AssetCategory? biggest;
+    for (final e in out.entries) {
+      if (e.value > 0 && (biggest == null || e.value > out[biggest]!)) {
+        biggest = e.key;
+      }
+    }
+    if (biggest == null) break;
+    final reduced = double.parse(
+      (out[biggest]! - 0.1).clamp(0.0, double.infinity).toStringAsFixed(1),
+    );
+    out[biggest] = reduced;
+    total = out.values.fold(0.0, (a, b) => a + b);
+  }
+  return out;
+}
+
+/// Serialize a target-allocation plan to the persisted JSON form (one
+/// decimal per category — slider steps are fractions, not integers).
 String encodeTargetAllocation(Map<AssetCategory, double> plan) {
   final map = {
     for (final entry in plan.entries)
-      entry.key.storageName: entry.value.roundToDouble(),
+      entry.key.storageName:
+          double.parse(entry.value.toStringAsFixed(1)),
   };
   return jsonEncode(map);
 }
@@ -92,9 +134,13 @@ final targetAllocationProvider =
 
 /// Persist a target-allocation plan. Callers invalidate
 /// [targetAllocationProvider] afterwards so dependents refresh.
+/// The plan is normalized (≤100%, one decimal) before writing.
 Future<void> saveTargetAllocation(
   AssetDao dao,
   Map<AssetCategory, double> plan,
 ) async {
-  await dao.setSetting(targetAllocationKey, encodeTargetAllocation(plan));
+  await dao.setSetting(
+    targetAllocationKey,
+    encodeTargetAllocation(normalizeTargetAllocation(plan)),
+  );
 }

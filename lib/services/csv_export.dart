@@ -1,5 +1,6 @@
 import '../core/enums.dart';
 import '../core/formats.dart';
+import '../core/symbols.dart';
 import '../data/database.dart';
 
 /// Generates CSV strings for holdings and transactions (Excel-friendly,
@@ -9,16 +10,22 @@ class CsvExport {
 
   static String _esc(String v) {
     final s = v.replaceAll('"', '""');
-    return '"$s"';
+    // Neutralize spreadsheet formula injection: a leading =/+/-/@ would
+    // execute as a formula when the export opens in Excel. Text fields
+    // only — numeric columns are formatted separately.
+    final guarded =
+        (s.isNotEmpty && '=+-@'.contains(s[0])) ? "'$s" : s;
+    return '"$guarded"';
   }
 
   static String _num(double v) => v.toStringAsFixed(4).replaceFirst(RegExp(r'\.?0+$'), '');
 
   /// Holdings CSV. [accountName] maps holding.accountId -> account name.
-  /// Market value / cost / profit are converted to CNY via [cnyRates] (a
-  /// missing rate falls back to the raw value), matching the in-app totals;
-  /// the 币种 column keeps each holding's original currency and the per-unit
-  /// figures (数量/单价/汇率) remain in that currency.
+  /// Market value converts at the current rate; cost converts at the
+  /// recorded purchase rate (costFxRate) falling back to the current rate
+  /// — the same口径 as the in-app totals (a missing rate falls back to 1).
+  /// The 币种 column keeps each holding's original currency and the
+  /// per-unit figures (数量/单价/汇率) remain in that currency.
   String holdings(
     List<HoldingRow> holdings,
     Map<int, String> accountName, {
@@ -34,13 +41,14 @@ class CsvExport {
         '账户,名称,类型,代码,数量,成本单价,最新价,币种,买入日期,市值(CNY),成本(CNY),收益(CNY)');
     for (final h in holdings) {
       final type = AssetType.fromStorage(h.assetType);
-      final rate = rateOf(h.currency);
+      final marketRate = rateOf(h.currency);
+      final costRate = costRateOf(h, cnyRates);
       final marketValueCny = (type.isAmountBased
           ? h.quantity
-          : h.quantity * h.latestPrice) * rate;
+          : h.quantity * h.latestPrice) * marketRate;
       final costCny = (type.isAmountBased
           ? (h.costPrice > 0 ? h.costPrice : h.quantity)
-          : h.quantity * h.costPrice) * rate;
+          : h.quantity * h.costPrice) * costRate;
       buf.writeln([
         _esc(accountName[h.accountId] ?? ''),
         _esc(h.name),

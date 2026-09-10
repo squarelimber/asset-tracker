@@ -112,7 +112,7 @@ class TransactionService {
       });
       return TransactionResult.success;
     } catch (e) {
-      return TransactionResult.fail('操作失败: $e');
+      return TransactionResult.fail(_recordFailMessage(e));
     }
   }
 
@@ -196,7 +196,7 @@ class TransactionService {
       });
       return TransactionResult.success;
     } catch (e) {
-      return TransactionResult.fail(_failMessage(e));
+      return TransactionResult.fail(_recordFailMessage(e));
     }
   }
 
@@ -236,7 +236,7 @@ class TransactionService {
       });
       return TransactionResult.success;
     } catch (e) {
-      return TransactionResult.fail(_failMessage(e));
+      return TransactionResult.fail(_recordFailMessage(e));
     }
   }
 
@@ -291,6 +291,23 @@ class TransactionService {
   static String _failMessage(Object e) =>
       e is ArgumentError ? e.message.toString() : '操作失败: $e';
 
+  /// Failure text for record paths: rewrites the raw UNIQUE constraint
+  /// error (identical account/holding/type/timestamp/amount row already
+  /// exists) into something a user can act on.
+  static String _recordFailMessage(Object e) {
+    if (e.toString().contains('UNIQUE constraint failed')) {
+      return '同一时间已存在完全相同的一笔流水，请微调时间或金额后重试';
+    }
+    return _failMessage(e);
+  }
+
+  void _assertSameCurrency(HoldingRow a, HoldingRow b) {
+    if (a.currency != b.currency) {
+      throw ArgumentError(
+          '币种不一致：「${a.name}」(${a.currency}) 与「${b.name}」(${b.currency})');
+    }
+  }
+
   Future<void> _applyBuy({
     required int? holdingId,
     required double? quantity,
@@ -305,6 +322,8 @@ class TransactionService {
     final totalCost = holding.quantity * holding.costPrice + amount;
     await _updateHolding(holding, quantity: newQty, costPrice: totalCost / newQty);
     if (cashSourceId != null) {
+      final source = await _getHolding(cashSourceId);
+      _assertSameCurrency(source, holding);
       await _applyCashMove(cashSourceId, -amount, invested: true);
     }
   }
@@ -328,6 +347,8 @@ class TransactionService {
     // (moving average with oldQty = 0 is just the new purchase price).
     await _updateHolding(holding, quantity: newQty);
     if (cashTargetId != null) {
+      final target = await _getHolding(cashTargetId);
+      _assertSameCurrency(target, holding);
       await _applyCashMove(cashTargetId, amount, invested: true);
     }
   }
@@ -340,6 +361,21 @@ class TransactionService {
   }) async {
     if (sourceId == null || targetId == null || amount <= 0) {
       throw ArgumentError('转账需指定源和目标持仓');
+    }
+    if (sourceId == targetId) {
+      // Moving X with itself would clamp the cost mid-way (the down-move
+      // clamps at 0, the up-move does not restore the excess) and corrupt
+      // the invested amount permanently.
+      throw ArgumentError('转账的源和目标不能是同一持仓');
+    }
+    final source = await _getHolding(sourceId);
+    final target = await _getHolding(targetId);
+    _assertSameCurrency(source, target);
+    // A plain balance cannot go below zero: no silent overdrafts.
+    final sourceType = AssetType.fromStorage(source.assetType);
+    if (sourceType.isAmountBased && source.quantity + 1e-6 < amount) {
+      throw ArgumentError(
+          '「${source.name}」余额不足（可用 ${_fmt(source.quantity)}）');
     }
     await _applyBalanceMove(sourceId, -amount, moveCost: moveCost);
     await _applyBalanceMove(targetId, amount, moveCost: moveCost);
@@ -417,6 +453,14 @@ class TransactionService {
   ///   ex-dividend price drop does not distort the return rate.
   /// A negative [amount] reverses the effect (removal).
   Future<void> _applyDividend(int? holdingId, double amount, int? cashTargetId) async {
+    if (cashTargetId == null) {
+      throw ArgumentError('需要指定现金持仓');
+    }
+    final cash = await _getHolding(cashTargetId);
+    if (holdingId != null) {
+      final holding = await _getHolding(holdingId);
+      _assertSameCurrency(holding, cash);
+    }
     await _applyCashMove(cashTargetId, amount, invested: false);
     if (holdingId == null) return;
     final holding = await _getHolding(holdingId);
@@ -505,7 +549,7 @@ class TransactionService {
           case TransactionType.consume:
             await _applyConsume(txn.holdingId, -txn.amount);
           case TransactionType.split:
-            await _applySplit(txn.holdingId, 1 / txn.amount);
+            await _reverseSplit(txn);
         }
 
         await _dao.deleteTransaction(transactionId);
@@ -555,5 +599,22 @@ class TransactionService {
     if (txn.cashTargetId != null) {
       await _applyCashMove(txn.cashTargetId, -txn.amount, invested: true);
     }
+  }
+
+  /// Reverses a split. A split rescales quantity AND unit cost, and every
+  /// later trade of the holding was recorded at the post-split scale —
+  /// deleting a non-latest split would silently rescale those later
+  /// numbers too. Like a buy reversal, require strict chronological
+  /// order first.
+  Future<void> _reverseSplit(TransactionRow txn) async {
+    final holdingId = txn.holdingId;
+    if (holdingId == null) throw ArgumentError('折算流水缺少持仓');
+    final ratio = txn.amount;
+    if (ratio <= 0) throw ArgumentError('折算流水比例无效');
+    final newer = await _dao.hasNewerTransaction(holdingId, txn.id);
+    if (newer) {
+      throw ArgumentError('该持仓存在更晚的交易，请先删除更晚的流水');
+    }
+    await _applySplit(holdingId, 1 / ratio);
   }
 }

@@ -60,11 +60,12 @@ class HistoryBackfillService {
   final Map<MarketSource, HistoryDataSource> _sources;
   MarketService? _market;
 
-  /// Marker for the cost-replay fix (historical snapshots now carry the
-  /// replayed principal as cost): triggers one atomic recompute so days
-  /// before a repayment/borrowing no longer leak the transfer into the
-  /// daily return.
-  static const _backfillV3Marker = 'backfill_v5_cost_replay';
+  /// Marker for the latest one-time full recompute. v5 replayed the cost
+  /// principal (repayment/borrowing no longer leaks into the daily
+  /// return); v6 extends the smoothed set to manually priced share assets
+  /// (bond/futures/property) and FX-linked bank wealth, so the whole
+  /// window is rebuilt once with the new interpolation semantics.
+  static const _backfillV3Marker = 'backfill_v6_manual_share_smooth';
 
   /// Backfills snapshots for dates before today.
   ///

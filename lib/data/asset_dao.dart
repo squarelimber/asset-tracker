@@ -292,16 +292,27 @@ class AssetDao {
     return _db.into(_db.snapshots).insertOnConflictUpdate(entry);
   }
 
-  /// Deletes snapshots strictly before [date] (yyyy-MM-dd).
-  Future<void> deleteSnapshotsBefore(String date) {
-    return (_db.delete(_db.snapshots)..where((t) => t.date.isSmallerThanValue(date))).go();
+  /// Deletes snapshots strictly before [date] (yyyy-MM-dd), recording a
+  /// sync tombstone per removed row so other devices do not resurrect
+  /// them from the server snapshot on the next merge.
+  Future<void> deleteSnapshotsBefore(String date) async {
+    final doomed = await (_db.select(_db.snapshots)
+          ..where((t) => t.date.isSmallerThanValue(date)))
+        .get();
+    await (_db.delete(_db.snapshots)
+          ..where((t) => t.date.isSmallerThanValue(date)))
+        .go();
+    for (final row in doomed) {
+      await upsertTombstone('snapshots', '${row.date}|${row.currency}');
+    }
   }
 
-  /// Deletes one snapshot row by its composite key.
-  Future<void> deleteSnapshot(String date, String currency) {
-    return (_db.delete(_db.snapshots)
+  /// Deletes one snapshot row by its composite key (with tombstone).
+  Future<void> deleteSnapshot(String date, String currency) async {
+    await (_db.delete(_db.snapshots)
           ..where((t) => t.date.equals(date) & t.currency.equals(currency)))
         .go();
+    await upsertTombstone('snapshots', '$date|$currency');
   }
 
   /// Bulk-inserts snapshots in one transaction (much faster than per-row).
@@ -329,6 +340,14 @@ class AssetDao {
       SettingsCompanion.insert(key: key, value: Value(value)),
     );
   }
+
+  /// Watches one settings row so providers can react to flag flips (e.g.
+  /// a startup auto-sync setting the history dirty flag after the provider
+  /// was first computed).
+  Stream<String?> watchSetting(String key) =>
+      (_db.select(_db.settings)..where((t) => t.key.equals(key)))
+          .watchSingleOrNull()
+          .map((row) => row?.value);
 
   // ---------------------------------------------------------------------------
   // Alert rules
@@ -390,6 +409,10 @@ class AssetDao {
 
   Future<int> createAlertEvent(AlertEventsCompanion entry) =>
       _db.into(_db.alertEvents).insert(entry);
+
+  /// Clears all fired events (used on backup import so stale rule ids
+  /// cannot suppress fresh dedup of newly imported rules).
+  Future<void> deleteAllAlertEvents() => _db.delete(_db.alertEvents).go();
 
   // ---------------------------------------------------------------------------
   // Sync tombstones

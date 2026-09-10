@@ -96,12 +96,23 @@ final todayEarningProvider =
   return todayEarningOf(list);
 });
 
+/// Emits whenever the history dirty flag flips (settings row watch), so
+/// the history provider can rebuild in-session after a startup sync
+/// merged source rows.
+final historyDirtyFlagProvider = StreamProvider<String?>(
+  (ref) => ref.watch(daoProvider).watchSetting(historySyncDirtyKey),
+);
+
 /// Shared history sync: backfills historical snapshots when dirty (or on
 /// the legacy first run) and refreshes today's snapshot, so the portfolio
 /// page and the earnings calendar always agree. Runs once per session;
 /// both pages watch it to trigger/refresh.
 final historySyncProvider = FutureProvider<BackfillResult?>((ref) async {
   final dao = ref.read(daoProvider);
+  // React to the dirty flag flipping: a startup auto-sync that merges
+  // source rows sets it AFTER this provider may already have computed a
+  // light pass — watching the flag rebuilds derived snapshots in-session.
+  ref.watch(historyDirtyFlagProvider);
   final dirty = await dao.getSetting(historySyncDirtyKey);
   final firstRun = await dao.getSetting(historySyncV6Key) == null;
   final result = await ref.read(historyBackfillServiceProvider).backfill(

@@ -82,14 +82,31 @@ class SyncApi {
         )
         .timeout(const Duration(seconds: 30));
     if (res.statusCode == 409) {
-      final body = jsonDecode(res.body) as Map<String, dynamic>;
-      return PushResult(ok: false, rev: (body['rev'] as num?)?.toInt() ?? 0);
+      // The server answers {"rev": N}; a proxy in the middle may answer
+      // with its own HTML error page instead — fall back to rev 0 so the
+      // caller treats this as a conflict-and-retry rather than a crash.
+      final body = _tryDecodeObject(res.body);
+      return PushResult(
+        ok: false,
+        rev: (body?['rev'] as num?)?.toInt() ?? 0,
+      );
     }
     if (res.statusCode != 200) {
       throw SyncException('上传失败 (HTTP ${res.statusCode})');
     }
     final body = jsonDecode(res.body) as Map<String, dynamic>;
     return PushResult(ok: true, rev: (body['rev'] as num?)?.toInt() ?? 0);
+  }
+
+  /// jsonDecode to a map, or null for any non-JSON/other shape (e.g. a
+  /// proxy's HTML error page returned in place of the server's answer).
+  static Map<String, dynamic>? _tryDecodeObject(String raw) {
+    try {
+      final decoded = jsonDecode(raw);
+      return decoded is Map<String, dynamic> ? decoded : null;
+    } catch (_) {
+      return null;
+    }
   }
 
   void close() => _client.close();

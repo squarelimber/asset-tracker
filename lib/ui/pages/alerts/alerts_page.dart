@@ -345,10 +345,13 @@ class _TargetAllocationSectionState
   @override
   void initState() {
     super.initState();
-    // Seed the draft once the persisted plan resolves.
+    // Seed the draft once the persisted plan resolves. Normalizing here
+    // keeps a legacy >100% plan from deadlocking the editor (sliders cap
+    // at the remainder, so an over-100 draft could never be re-saved).
     Future.microtask(() => ref
         .read(targetAllocationProvider)
-        .whenData((value) => setState(() => _draft = {...value})));
+        .whenData((value) =>
+            setState(() => _draft = normalizeTargetAllocation(value))));
   }
 
   @override
@@ -356,7 +359,7 @@ class _TargetAllocationSectionState
     final plan = ref.watch(targetAllocationProvider);
     if (!_seeded && plan.hasValue) {
       _seeded = true;
-      _draft = {...plan.value!};
+      _draft = normalizeTargetAllocation({...plan.value!});
     }
     final total = _draft.values.fold(0.0, (a, b) => a + b);
     final remaining = (100 - total).clamp(0.0, 100.0).toDouble();
@@ -387,7 +390,9 @@ class _TargetAllocationSectionState
                   const Spacer(),
                   FilledButton(
                     onPressed: () async {
-                      if (total > 100) {
+                      // Epsilon guard: binary float sums can land a hair
+                      // above 100 for an exact-100 plan.
+                      if (total > 100.0001) {
                         ScaffoldMessenger.of(context).showSnackBar(
                           const SnackBar(content: Text('目标配置合计不能超过 100%')),
                         );
@@ -448,7 +453,9 @@ class _TargetAllocationSectionState
           SizedBox(
             width: 52,
             child: Text(
-              '${(_draft[c] ?? 0).round()}%',
+              // Show the clamped value so the number matches the slider
+              // position even for legacy plans that exceed the cap.
+              '${((_draft[c] ?? 0).clamp(0.0, cap)).round()}%',
               style: T.mono(size: 12, color: T.text2),
               textAlign: TextAlign.right,
             ),

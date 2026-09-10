@@ -34,17 +34,6 @@ class DataMigrationService {
   /// holdings to cost = quantity.
   static const _transferCostMarked = 'transfer_cost_marked_v7';
 
-  /// 512480 (半导体设备ETF) did a 1:2 unit split on 2026-07-03: price
-  /// 2.70 -> 1.33, shares x2. Holdings recorded before the split still use
-  /// the old share count, which understates the market value by ~50%.
-  /// Fix quantity x2 and costPrice /2 once.
-  static const _etfSplit512480 = 'etf_split_512480_v8';
-
-  /// Rollback for v8: the user's 512480 holding was already recorded with
-  /// post-split values, so the v8 x2 fix doubled it incorrectly. Restore
-  /// the original numbers (detected by the doubled-quantity signature).
-  static const _etfSplit512480Rollback = 'etf_split_512480_rollback_v9';
-
   /// Adds the cost_fx_rate column (purchase-time exchange rate for
   /// foreign-currency cost basis) and backfills the known USD holding
   /// (汇利日盈6号A, bought at 6.95).
@@ -72,10 +61,12 @@ class DataMigrationService {
     await _migrateRiskLevelColumn();
     await _migrateLiabilityCost();
     await _migrateTransferCost();
-    await _migrateEtfSplit512480();
-    await _rollbackEtfSplit512480();
     await _migrateCostFxRate();
     await _migrateSnapshotLiabilities();
+    // The device-specific 512480 split patch (and its rollback) was
+    // removed: it doubled/renormalized every matching holding on every
+    // installation, which mis-sized small third-party positions. Devices
+    // that already ran it carry the marker and keep their result.
   }
 
   /// SQLite cannot drop a UNIQUE constraint without rebuilding the table.
@@ -90,7 +81,10 @@ class DataMigrationService {
     final marker = await _getSetting(_holdingsRebuilt);
     if (marker != null) return;
 
-    await _db.customStatement('ALTER TABLE holdings RENAME TO holdings_tmp;');
+    // Atomic: a crash mid-rebuild must not leave a half-created table
+    // behind (the DB would fail to open on the next launch).
+    await _db.transaction(() async {
+      await _db.customStatement('ALTER TABLE holdings RENAME TO holdings_tmp;');
     await _db.customStatement('''
       CREATE TABLE holdings (
         id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
@@ -130,7 +124,8 @@ class DataMigrationService {
              created_at, updated_at
       FROM holdings_tmp;
     ''');
-    await _db.customStatement('DROP TABLE holdings_tmp;');
+      await _db.customStatement('DROP TABLE holdings_tmp;');
+    });
 
     await _setSetting(_holdingsRebuilt, '${DateTime.now().millisecondsSinceEpoch}');
   }
@@ -274,67 +269,6 @@ class DataMigrationService {
     }
 
     await _setSetting(_transferCostMarked, '${DateTime.now().millisecondsSinceEpoch}');
-  }
-
-  /// One-time fix for the 512480 1:2 unit split on 2026-07-03.
-  Future<void> _migrateEtfSplit512480() async {
-    final marker = await _getSetting(_etfSplit512480);
-    if (marker != null) return;
-
-    final rows = await (_db.select(_db.holdings)
-          ..where((t) => t.symbol.equals('sh512480')))
-        .get();
-    for (final h in rows) {
-      if (h.quantity <= 0) continue;
-      final stmt = _db.update(_db.holdings)..where((t) => t.id.equals(h.id));
-      await stmt.write(
-        HoldingsCompanion(
-          quantity: Value(h.quantity * 2),
-          costPrice: Value(h.costPrice / 2),
-        ),
-      );
-    }
-
-    await _setSetting(_etfSplit512480, '${DateTime.now().millisecondsSinceEpoch}');
-    // The holdings changed; force a snapshot rebuild on the next visit so
-    // the net worth history reflects the split correctly.
-    if (rows.isNotEmpty) {
-      await _db.into(_db.settings).insertOnConflictUpdate(
-        SettingsCompanion.insert(key: 'history_sync_dirty', value: const Value('1')),
-      );
-    }
-  }
-
-  /// Undoes [v8][_migrateEtfSplit512480] for holdings that were already
-  /// recorded post-split: the doubled-quantity signature (quantity above
-  /// 150k for this ETF) identifies the rows the v8 migration touched.
-  Future<void> _rollbackEtfSplit512480() async {
-    final marker = await _getSetting(_etfSplit512480Rollback);
-    if (marker != null) return;
-
-    final rows = await (_db.select(_db.holdings)
-          ..where((t) =>
-              t.symbol.equals('sh512480') & t.quantity.isBiggerThanValue(150000)))
-        .get();
-    for (final h in rows) {
-      final stmt = _db.update(_db.holdings)..where((t) => t.id.equals(h.id));
-      await stmt.write(
-        HoldingsCompanion(
-          quantity: Value(h.quantity / 2),
-          costPrice: Value(h.costPrice * 2),
-        ),
-      );
-    }
-
-    await _setSetting(
-      _etfSplit512480Rollback,
-      '${DateTime.now().millisecondsSinceEpoch}',
-    );
-    if (rows.isNotEmpty) {
-      await _db.into(_db.settings).insertOnConflictUpdate(
-        SettingsCompanion.insert(key: 'history_sync_dirty', value: const Value('1')),
-      );
-    }
   }
 
   /// Adds the cost_fx_rate column and backfills the known USD holding's

@@ -11,6 +11,7 @@ class AllocationEntry {
     required this.value,
     required this.pct,
     this.targetPct,
+    this.selectable = true,
   });
 
   final String label;
@@ -21,6 +22,11 @@ class AllocationEntry {
   /// Optional target (plan) share for this slice. When set, the bar shows the
   /// planned position as a marker so the user can rebalance toward it.
   final double? targetPct;
+
+  /// Whether tapping the slice filters the holdings page. The merged
+  /// "其他" pseudo-slice (desktop top-5 view) has no matching category
+  /// filter, so it must not pretend to be clickable.
+  final bool selectable;
 }
 
 class AllocationBars extends StatelessWidget {
@@ -45,6 +51,7 @@ class AllocationBars extends StatelessWidget {
       color: T.text3,
       value: entries.skip(5).fold(0.0, (a, e) => a + e.value),
       pct: entries.skip(5).fold(0.0, (a, e) => a + e.pct),
+      selectable: false,
     );
     return [...entries.sublist(0, 5), other];
   }
@@ -73,7 +80,7 @@ class _BarList extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.only(bottom: T.s3),
             child: InkWell(
-              onTap: onSelect == null ? null : () => onSelect!(e),
+              onTap: (onSelect == null || !e.selectable) ? null : () => onSelect!(e),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -190,7 +197,7 @@ class _DesktopBars extends StatelessWidget {
           children: [
             for (final e in segs)
               InkWell(
-                onTap: onSelect == null ? null : () => onSelect!(e),
+                onTap: (onSelect == null || !e.selectable) ? null : () => onSelect!(e),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [

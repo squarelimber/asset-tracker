@@ -1,4 +1,4 @@
-﻿import '../core/enums.dart';
+import '../core/enums.dart';
 import '../core/formats.dart';
 import '../data/database.dart';
 
@@ -282,7 +282,11 @@ class HoldingReplay {
       result[todayKey(day)] = (curQ, curQ * curU);
       day = day.add(const Duration(days: 1));
     }
-    while (i < events.length) {
+    // The window's last day: apply only events that happen on [toDay] —
+    // events after the window must NOT leak in, otherwise the final day's
+    // position equals today's actual holdings and past years show phantom
+    // profits/losses on their last month.
+    while (i < events.length && !events[i].$1.isAfter(toDay)) {
       (curQ, curU) = _apply(events[i], curQ, curU);
       i++;
     }

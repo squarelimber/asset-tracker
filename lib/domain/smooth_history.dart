@@ -200,9 +200,22 @@ class SmoothHistoryCalculator {
         if (!t.costMoved) return 0;
         if (t.cashSourceId == h.id) return -t.amount;
         if (t.cashTargetId == h.id) return t.amount;
-      case TransactionType.buy ||
-            TransactionType.sell ||
-            TransactionType.dividend ||
+      case TransactionType.buy:
+        // Buy linkage debits the funding cash holding's invested amount
+        // (the "record buy with a funding source" flow).
+        if (t.cashSourceId == h.id) return -t.amount;
+      case TransactionType.sell:
+        // Sell proceeds credited to a cash holding move its invested
+        // amount; a redemption leg recorded on the amount-based holding
+        // itself (funded buy / standalone redemption) debits it. Ignoring
+        // these legs left the replayed balance/cost stuck at the
+        // pre-redemption level until today (visible as a cliff).
+        if (t.cashTargetId == h.id) return t.amount;
+        if (t.holdingId == h.id &&
+            AssetType.fromStorage(h.assetType).isAmountBased) {
+          return -t.amount;
+        }
+      case TransactionType.dividend ||
             TransactionType.consume ||
             TransactionType.split:
         return 0;

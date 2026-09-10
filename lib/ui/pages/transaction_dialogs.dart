@@ -30,32 +30,40 @@ Future<void> showHoldingTransactionDialog(
   final isShare = !type.isAmountBased && type != AssetType.liability;
   final isLiability = type == AssetType.liability;
 
-  // Money holdings usable as the counterparty for transfers.
+  // Money holdings usable as the counterparty for transfers. Same-currency
+  // only: a cross-currency transfer would move the same number on both
+  // sides without any conversion (corrupting the net worth).
   final moneyHoldings = holdings
       .where((h) {
         final t = AssetType.fromStorage(h.assetType);
-        return (t.isAmountBased || t == AssetType.liability) && h.id != holding.id;
+        return (t.isAmountBased || t == AssetType.liability) &&
+            h.currency == holding.currency &&
+            h.id != holding.id;
       })
       .toList();
 
   // Cash holdings (amount-based only) usable as the sell/dividend credit
-  // target for a share-based holding.
+  // target for a share-based holding. Same-currency only (the service
+  // asserts this as well).
   final cashHoldings = holdings
       .where((h) {
         final t = AssetType.fromStorage(h.assetType);
-        return t.isAmountBased && h.id != holding.id;
+        return t.isAmountBased &&
+            h.currency == holding.currency &&
+            h.id != holding.id;
       })
       .toList();
 
   // Holdings usable as the funding source for a buy: cash holdings plus
   // share-based holdings with a positive balance (e.g. a money-market fund
   // redeemed to buy a new product). Liabilities are excluded (buying on
-  // credit is not supported as a linked deduction).
+  // credit is not supported as a linked deduction), as are other currencies.
   final fundSources = holdings
       .where((h) {
         final t = AssetType.fromStorage(h.assetType);
         return h.id != holding.id &&
             t != AssetType.liability &&
+            h.currency == holding.currency &&
             (t.isAmountBased || h.quantity > 0);
       })
       .toList();
@@ -122,7 +130,14 @@ Future<void> showHoldingTransactionDialog(
         for (final h in holdings) {
           if (h.id != id) continue;
           final st = AssetType.fromStorage(h.assetType);
-          if (st.isAmountBased) return null;
+          if (st.isAmountBased) {
+            final amount = double.tryParse(amountCtrl.text.trim()) ?? 0;
+            if (h.quantity + 1e-6 < amount) {
+              return '资金来源「${h.name}」余额不足'
+                  '（可用 ${Formats.amount(h.quantity)}）';
+            }
+            return null;
+          }
           if (h.currency != holding.currency) {
             return '资金来源与目标产品币种不一致';
           }
@@ -594,6 +609,40 @@ Future<void> showAccountTransactionDialog(
                 const SnackBar(content: Text('请选择资金去向')),
               );
               return;
+            }
+            // Upfront transfer checks (mirrors the service assertions so the
+            // user gets a precise message before anything is written):
+            // same-currency only, and a cash source cannot be overdrawn.
+            if (txnTypeValue == TransactionType.transferOut) {
+              HoldingRow? src;
+              HoldingRow? tgt;
+              for (final h in holdings) {
+                if (h.id == sourceId.value) src = h;
+                if (h.id == targetId.value) tgt = h;
+              }
+              if (src != null && tgt != null && src.currency != tgt.currency) {
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                    content: Text(
+                        '转账币种不一致：「${src.name}」(${src.currency}) 与「${tgt.name}」(${tgt.currency})'),
+                    backgroundColor: T.up,
+                  ));
+                }
+                return;
+              }
+              if (src != null) {
+                final st = AssetType.fromStorage(src.assetType);
+                if (st.isAmountBased && src.quantity + 1e-6 < amount) {
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                      content: Text('「${src.name}」余额不足'
+                          '（可用 ${Formats.amount(src.quantity)}）'),
+                      backgroundColor: T.up,
+                    ));
+                  }
+                  return;
+                }
+              }
             }
             // Record the flow in the source holding's currency so foreign
             // income/expense rows no longer enter the stats as CNY amounts.
