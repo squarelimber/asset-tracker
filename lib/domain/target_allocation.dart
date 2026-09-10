@@ -11,32 +11,66 @@ import '../data/asset_dao.dart';
 const String targetAllocationKey = 'target_allocation';
 
 /// Sensible default plan when the user has not configured one yet. The five
-/// investable categories sum to 100; `其他` is intentionally omitted (0).
+/// main categories sum to 100; 房产/银行理财 default to 0 (set them in the
+/// settings page if you hold them).
 const Map<AssetCategory, double> defaultTargetAllocation = {
-  AssetCategory.stock: 40,
-  AssetCategory.fund: 30,
+  AssetCategory.equity: 40,
+  AssetCategory.bond: 25,
+  AssetCategory.cash: 20,
   AssetCategory.gold: 10,
-  AssetCategory.bond: 10,
-  AssetCategory.cash: 10,
+  AssetCategory.commodity: 5,
+};
+
+/// Legacy persisted category keys (the pre-rename six-category plan) mapped
+/// to today's categories. `其他` (other) has no meaningful split, so it is
+/// dropped. A plan containing any legacy key replaces the defaults entirely
+/// so `stock + fund` sum into `equity` instead of stacking on the default.
+const Map<String, String?> _legacyCategoryKeys = {
+  'stock': 'equity', // 股票 -> 权益
+  'fund': 'equity', // 基金 -> 权益
+  'crypto': 'commodity', // 加密货币 -> 商品
+  'other': null, // 其他 -> dropped
 };
 
 /// Parse the persisted target-allocation JSON. Missing or malformed entries
 /// fall back to [defaultTargetAllocation]; unknown categories are ignored.
 Map<AssetCategory, double> parseTargetAllocation(String? raw) {
-  final result = <AssetCategory, double>{...defaultTargetAllocation};
-  if (raw == null || raw.isEmpty) return result;
+  if (raw == null || raw.isEmpty) return {...defaultTargetAllocation};
   try {
     final decoded = jsonDecode(raw);
-    if (decoded is! Map) return result;
+    if (decoded is! Map) return {...defaultTargetAllocation};
+    final hasLegacy =
+        decoded.keys.any((k) => _legacyCategoryKeys.containsKey(k.toString()));
+    // A legacy plan is migrated wholesale (defaults are not mixed in);
+    // a current-format plan overlays the defaults as before.
+    final result = hasLegacy
+        ? <AssetCategory, double>{}
+        : <AssetCategory, double>{...defaultTargetAllocation};
     for (final entry in decoded.entries) {
-      final category = AssetCategory.fromStorage(entry.key.toString());
       final v = double.tryParse(entry.value.toString());
-      if (v != null && v.isFinite) result[category] = v;
+      if (v == null || !v.isFinite) continue;
+      final key = entry.key.toString();
+      // Legacy 'other' has no meaningful split: drop it.
+      if (_legacyCategoryKeys.containsKey(key) &&
+          _legacyCategoryKeys[key] == null) {
+        continue;
+      }
+      final mapped = _legacyCategoryKeys[key] ?? key;
+      final category = AssetCategory.fromStorage(mapped);
+      if (hasLegacy) {
+        // Legacy keys can land twice on one category (股票 + 基金 -> 权益):
+        // sum them onto the empty migration result.
+        result[category] = (result[category] ?? 0) + v;
+      } else {
+        // Current format overlays the defaults.
+        result[category] = v;
+      }
     }
+    return result;
   } catch (_) {
     // Corrupt payload: keep the defaults rather than failing the page.
+    return {...defaultTargetAllocation};
   }
-  return result;
 }
 
 /// Serialize a target-allocation plan to the persisted JSON form.

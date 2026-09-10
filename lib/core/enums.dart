@@ -32,6 +32,7 @@ enum RiskLevel {
           RiskLevel.low,
         AssetType.gold => RiskLevel.mediumLow,
         AssetType.bond => RiskLevel.mediumLow,
+        AssetType.futures => RiskLevel.high,
         AssetType.mutualFund => RiskLevel.medium,
         AssetType.stock || AssetType.etf || AssetType.crypto => RiskLevel.high,
         AssetType.property || AssetType.liability => RiskLevel.mediumLow,
@@ -50,6 +51,7 @@ enum AssetType {
   gold('积存金', 'gold', Icons.workspace_premium_outlined, Color(0xFFFFC107)),
   bond('债券', 'bond', Icons.account_balance, Color(0xFF66BB6A)),
   crypto('加密货币', 'crypto', Icons.currency_bitcoin, Color(0xFFEC407A)),
+  futures('期货', 'futures', Icons.trending_up, Color(0xFFFF7043)),
   property('房产', 'property', Icons.home_outlined, Color(0xFF8D6E63)),
   liability('负债', 'liability', Icons.credit_card, Color(0xFF757575));
 
@@ -92,27 +94,33 @@ enum AssetType {
         _ => null,
       };
 
-  /// High-level allocation category (股票/基金/黄金/债券/现金/其他), grouping
-  /// the finer asset types for the allocation view and target-allocation plan.
+  /// High-level allocation category (债券/权益/黄金/商品/现金/房产/银行理财),
+  /// grouping the finer asset types for the allocation view and the editable
+  /// target-allocation plan. Liabilities never show up in the allocation
+  /// view (they are deducted from net worth); the mapping below only exists
+  /// to keep the switch exhaustive.
   AssetCategory get category => switch (this) {
-        stock => AssetCategory.stock,
-        etf || mutualFund => AssetCategory.fund,
-        gold => AssetCategory.gold,
         bond => AssetCategory.bond,
+        stock || etf || mutualFund => AssetCategory.equity,
+        gold => AssetCategory.gold,
+        crypto || futures => AssetCategory.commodity,
         cash || bankDeposit || liquidWealth => AssetCategory.cash,
-        _ => AssetCategory.other,
+        property => AssetCategory.property,
+        bankWealth => AssetCategory.bankWealth,
+        liability => AssetCategory.cash,
       };
 }
 
 /// Top-level asset categories used by the allocation view and the editable
-/// target-allocation plan (债券/基金/黄金/股票/现金/其他).
+/// target-allocation plan (债券/权益/黄金/商品/现金/房产/银行理财).
 enum AssetCategory {
-  stock('股票', 'stock', Icons.show_chart, Color(0xFFEF5350)),
-  fund('基金', 'fund', Icons.pie_chart_outline, Color(0xFF5C6BC0)),
-  gold('黄金', 'gold', Icons.workspace_premium_outlined, Color(0xFFFFC107)),
   bond('债券', 'bond', Icons.account_balance, Color(0xFF66BB6A)),
+  equity('权益', 'equity', Icons.show_chart, Color(0xFFEF5350)),
+  gold('黄金', 'gold', Icons.workspace_premium_outlined, Color(0xFFFFC107)),
+  commodity('商品', 'commodity', Icons.currency_bitcoin, Color(0xFFEC407A)),
   cash('现金', 'cash', Icons.payments_outlined, Color(0xFF42A5F5)),
-  other('其他', 'other', Icons.more_horiz, Color(0xFF757575));
+  property('房产', 'property', Icons.home_outlined, Color(0xFF8D6E63)),
+  bankWealth('银行理财', 'bank_wealth', Icons.handshake_outlined, Color(0xFFAB47BC));
 
   const AssetCategory(this.label, this.storageName, this.icon, this.color);
 
@@ -124,7 +132,7 @@ enum AssetCategory {
   static AssetCategory fromStorage(String name) =>
       AssetCategory.values.firstWhere(
         (t) => t.storageName == name,
-        orElse: () => AssetCategory.other,
+        orElse: () => AssetCategory.bond,
       );
 }
 

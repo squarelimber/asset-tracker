@@ -15,18 +15,32 @@ class CsvExport {
   static String _num(double v) => v.toStringAsFixed(4).replaceFirst(RegExp(r'\.?0+$'), '');
 
   /// Holdings CSV. [accountName] maps holding.accountId -> account name.
-  String holdings(List<HoldingRow> holdings, Map<int, String> accountName) {
+  /// Market value / cost / profit are converted to CNY via [cnyRates] (a
+  /// missing rate falls back to the raw value), matching the in-app totals;
+  /// the 币种 column keeps each holding's original currency and the per-unit
+  /// figures (数量/单价/汇率) remain in that currency.
+  String holdings(
+    List<HoldingRow> holdings,
+    Map<int, String> accountName, {
+    Map<String, double> cnyRates = const {},
+  }) {
+    double rateOf(String currency) {
+      final r = cnyRates[currency.toUpperCase()];
+      return (r == null || r <= 0) ? 1 : r;
+    }
+
     final buf = StringBuffer('\uFEFF');
     buf.writeln(
-        '账户,名称,类型,代码,数量,成本单价,最新价,币种,买入日期,市值,成本,收益');
+        '账户,名称,类型,代码,数量,成本单价,最新价,币种,买入日期,市值(CNY),成本(CNY),收益(CNY)');
     for (final h in holdings) {
       final type = AssetType.fromStorage(h.assetType);
-      final marketValue = type.isAmountBased
+      final rate = rateOf(h.currency);
+      final marketValueCny = (type.isAmountBased
           ? h.quantity
-          : h.quantity * h.latestPrice;
-      final cost = type.isAmountBased
+          : h.quantity * h.latestPrice) * rate;
+      final costCny = (type.isAmountBased
           ? (h.costPrice > 0 ? h.costPrice : h.quantity)
-          : h.quantity * h.costPrice;
+          : h.quantity * h.costPrice) * rate;
       buf.writeln([
         _esc(accountName[h.accountId] ?? ''),
         _esc(h.name),
@@ -37,9 +51,9 @@ class CsvExport {
         _num(h.latestPrice),
         h.currency,
         h.purchaseDate == null ? '' : Formats.date(h.purchaseDate!),
-        _num(marketValue),
-        _num(cost),
-        _num(marketValue - cost),
+        _num(marketValueCny),
+        _num(costCny),
+        _num(marketValueCny - costCny),
       ].join(','));
     }
     return buf.toString();

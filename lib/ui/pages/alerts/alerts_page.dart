@@ -9,6 +9,7 @@ import '../../../core/enums.dart';
 import '../../../core/formats.dart';
 import '../../../core/responsive.dart';
 import '../../../data/database.dart';
+import '../../../domain/target_allocation.dart';
 import '../../../services/alert_service.dart';
 import '../../components/app_bar_actions.dart';
 import '../../components/data_row.dart';
@@ -16,6 +17,7 @@ import '../../components/empty_state.dart';
 import '../../components/error_state.dart';
 import '../../components/form_fields.dart';
 import '../../components/section_header.dart';
+import '../../components/terminal_card.dart';
 import '../../components/terminal_fab.dart';
 import '../../tokens.dart';
 
@@ -135,6 +137,8 @@ class _AlertsPageState extends ConsumerState<AlertsPage> {
                   onRetry: () => ref.invalidate(alertRulesProvider),
                 ),
               ),
+              const SizedBox(height: T.s4),
+              const _TargetAllocationSection(),
             ],
           ),
         ),
@@ -321,3 +325,136 @@ Color _colorFor(AlertRuleType type) => switch (type) {
       AlertRuleType.drawdown => T.up,
       AlertRuleType.cashflow => T.accent,
     };
+
+/// Editable target-allocation plan. Seeded from the persisted plan on first
+/// load; each slider caps at what the other categories leave, so the total
+/// can never exceed 100%.
+class _TargetAllocationSection extends ConsumerStatefulWidget {
+  const _TargetAllocationSection();
+
+  @override
+  ConsumerState<_TargetAllocationSection> createState() =>
+      _TargetAllocationSectionState();
+}
+
+class _TargetAllocationSectionState
+    extends ConsumerState<_TargetAllocationSection> {
+  Map<AssetCategory, double> _draft = {};
+  bool _seeded = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // Seed the draft once the persisted plan resolves.
+    Future.microtask(() => ref
+        .read(targetAllocationProvider)
+        .whenData((value) => setState(() => _draft = {...value})));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final plan = ref.watch(targetAllocationProvider);
+    if (!_seeded && plan.hasValue) {
+      _seeded = true;
+      _draft = {...plan.value!};
+    }
+    final total = _draft.values.fold(0.0, (a, b) => a + b);
+    final remaining = (100 - total).clamp(0.0, 100.0).toDouble();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SectionHeader(label: '目标配置（计划配比）'),
+        Text(
+          '设定各大类的目标占比（合计不超过 100%），资产配置卡会对比实际与计划，偏离过大时高亮提示便于再平衡。',
+          style: T.label(),
+        ),
+        const SizedBox(height: T.s3),
+        TerminalCard(
+          child: Column(
+            children: [
+              for (final c in AssetCategory.values) _sliderRow(c),
+              const SizedBox(height: T.s2),
+              Row(
+                children: [
+                  Text(
+                    '合计 ${total.round()}%'
+                    '${remaining <= 0 ? ' · 已达上限' : ' · 剩余可分配 ${remaining.round()}%'}',
+                    style: T.mono(
+                      size: 12,
+                      color: total.round() == 100 ? T.text2 : T.warning,
+                    ),
+                  ),
+                  const Spacer(),
+                  FilledButton(
+                    onPressed: () async {
+                      if (total > 100) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('目标配置合计不能超过 100%')),
+                        );
+                        return;
+                      }
+                      await saveTargetAllocation(
+                        ref.read(daoProvider),
+                        _draft,
+                      );
+                      ref.invalidate(targetAllocationProvider);
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('已保存目标配置')),
+                        );
+                      }
+                    },
+                    child: const Text('保存'),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// One category row: its slider is capped at what the other categories
+  /// leave over, so the plan total stays <= 100%.
+  Widget _sliderRow(AssetCategory c) {
+    final others = _draft.entries
+        .where((e) => e.key != c)
+        .fold(0.0, (a, e) => a + e.value);
+    final cap = (100 - others).clamp(0.0, 100.0).toDouble();
+    return Padding(
+      padding: const EdgeInsets.only(bottom: T.s2),
+      child: Row(
+        children: [
+          Icon(c.icon, size: 18, color: c.color),
+          const SizedBox(width: T.s2),
+          SizedBox(
+            width: 44,
+            child: Text(
+              c.label,
+              style: const TextStyle(fontSize: 13, color: T.text1),
+            ),
+          ),
+          Expanded(
+            child: Slider(
+              value: (_draft[c] ?? 0).clamp(0.0, cap).toDouble(),
+              min: 0,
+              max: cap,
+              divisions: 20,
+              activeColor: c.color,
+              onChanged: (v) => setState(() => _draft[c] = v),
+            ),
+          ),
+          SizedBox(
+            width: 52,
+            child: Text(
+              '${(_draft[c] ?? 0).round()}%',
+              style: T.mono(size: 12, color: T.text2),
+              textAlign: TextAlign.right,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
