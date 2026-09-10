@@ -306,10 +306,9 @@ Future<void> showAddHoldingDialog(BuildContext context, WidgetRef ref) async {
               ),
             ),
             const SizedBox(height: 12),
-            // Forex-linked bank wealth (an FX symbol present) is valued in
-            // CNY by construction — lock the currency there (same rule as
-            // the edit dialog), so a typed currency can never be silently
-            // overwritten back to CNY on save.
+            // Forex-linked bank wealth embeds the live rate in its unit
+            // price (市值=数量×汇率), so the currency field is a free label
+            // — always editable, never silently rewritten on save.
             ListenableBuilder(
               listenable: Listenable.merge([assetType, symbolCtrl]),
               builder: (context, _) {
@@ -324,9 +323,8 @@ Future<void> showAddHoldingDialog(BuildContext context, WidgetRef ref) async {
                           ? '币种 (ISO 代码) · 汇率联动'
                           : '币种 (ISO 代码)',
                       hint: forexLinked
-                          ? '该持仓按汇率联动自动折算，币种固定为 CNY（清空行情代码可解锁）'
+                          ? '单价将随汇率自动更新（单价=汇率）；币种为标记，市值=数量×汇率'
                           : '默认人民币 CNY；外币请填 ISO 代码（如 USD），市值将按汇率折算',
-                      enabled: !forexLinked,
                       onChanged: (v) {
                         // Pre-fill the purchase rate with the current
                         // rate for the chosen currency.
@@ -475,15 +473,12 @@ Future<void> showAddHoldingDialog(BuildContext context, WidgetRef ref) async {
               _ => 'manual',
             };
             final userPrice = double.tryParse(latestPriceCtrl.text.trim());
-            // Only forex-linked holdings (银行理财 with an FX symbol) are
-            // priced in CNY by construction; everything else takes the
+            // Currency is a free label even for FX-linked holdings (the
+            // rate lives in the unit price); everything else takes the
             // user-chosen currency so USD holdings stay USD.
-            final autoCny = marketSource == 'forex';
-            final finalCurrency = autoCny
+            final finalCurrency = currencyCtrl.text.trim().toUpperCase().isEmpty
                 ? 'CNY'
-                : (currencyCtrl.text.trim().toUpperCase().isEmpty
-                    ? 'CNY'
-                    : currencyCtrl.text.trim().toUpperCase());
+                : currencyCtrl.text.trim().toUpperCase();
             // Funding source: redeem from an existing holding to fund this
             // new one. Validated before creation so a mismatch never
             // leaves a half state.
@@ -828,11 +823,11 @@ Future<void> showEditHoldingDialog(
                       : '如 400 = 400 天前买入',
                 ),
                 const SizedBox(height: 12),
-                // Forex-linked bank wealth (an FX symbol present) is valued
-                // in CNY by construction, so the currency is locked there;
-                // everything else keeps the user-chosen currency editable.
-                // Reacts to the type dropdown and symbol edits so the lock
-                // can never be silently bypassed on save.
+                // Forex-linked bank wealth (an FX symbol present) embeds
+                // the live rate in its unit price, so the currency field is
+                // a free label — always editable, no forced CNY, and
+                // switching it never needs number conversion (the quantity
+                // is the foreign amount already).
                 ListenableBuilder(
                   listenable: Listenable.merge([typeNotifier, symbolCtrl]),
                   builder: (context, _) {
@@ -848,9 +843,8 @@ Future<void> showEditHoldingDialog(
                               ? '币种 (ISO 代码) · 汇率联动'
                               : '币种 (ISO 代码)',
                           hint: forexLinked
-                              ? '该持仓按汇率联动自动折算，币种固定为 CNY（清空行情代码可解锁）'
+                              ? '单价将随汇率自动更新（单价=汇率）；币种为标记，市值=数量×汇率'
                               : '默认人民币 CNY；外币请填 ISO 代码（如 USD），市值将按汇率折算',
-                          enabled: !forexLinked,
                           onChanged: (v) {
                             final ccy = v.trim().toUpperCase();
                             final rate = fxRates[ccy];
@@ -974,6 +968,8 @@ Future<void> showEditHoldingDialog(
     // Only forex-linked holdings are priced in CNY by construction; other
     // holdings keep the user-chosen currency (e.g. USD stocks stay USD).
     final autoCny = unknownType ? false : marketSource == 'forex';
+    // Currency is a free label (even for FX-linked holdings — the rate
+    // lives in the unit price), so always take the user's value.
     final updated = holding.copyWith(
       accountId: accountIdNotifier.value,
       name: nameCtrl.text.trim().isEmpty ? holding.name : nameCtrl.text.trim(),
@@ -995,11 +991,9 @@ Future<void> showEditHoldingDialog(
           : !isAmount
               ? (symbol.isEmpty ? const Value.absent() : Value(symbol))
               : const Value.absent(),
-      currency: autoCny
-          ? 'CNY'
-          : (currencyCtrl.text.trim().toUpperCase().isEmpty
-              ? holding.currency
-              : currencyCtrl.text.trim().toUpperCase()),
+      currency: currencyCtrl.text.trim().toUpperCase().isEmpty
+          ? holding.currency
+          : currencyCtrl.text.trim().toUpperCase(),
       costFxRate: _editFxRateValue(fxRateCtrl, currencyCtrl, autoCny, holding),
       note: noteCtrl.text.trim().isEmpty ? const Value.absent() : Value(noteCtrl.text.trim()),
     );

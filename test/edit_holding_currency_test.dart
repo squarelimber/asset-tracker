@@ -95,7 +95,7 @@ void main() {
     await tester.pump();
   });
 
-  testWidgets('forex-linked bank wealth: currency field is locked to CNY',
+  testWidgets('forex-linked bank wealth: currency stays user-chosen (USD)',
       (tester) async {
     final (db, dao, holding) =
         await seedBankWealth(tester, marketSource: 'forex', symbol: 'USD');
@@ -108,17 +108,19 @@ void main() {
     await tester.tap(find.text('编辑'));
     await tester.pumpAndSettle();
 
-    // Rate-linked holdings are valued in CNY by construction: the field is
-    // visibly disabled instead of silently reverting on save.
+    // The unit price of an FX-linked holding IS the rate (市值=数量×汇率),
+    // so the currency field is a free label: editable, never rewritten.
     final field = currencyField();
     expect(field, findsOneWidget);
-    expect(tester.widget<TextField>(field).enabled, isFalse);
+    expect(tester.widget<TextField>(field).enabled, isTrue);
 
+    await tester.enterText(field, 'USD');
+    await tester.pumpAndSettle();
     await tester.tap(find.text('保存'));
     await tester.pumpAndSettle();
 
     final saved = await dao.getHolding(holding.id);
-    expect(saved!.currency, 'CNY');
+    expect(saved!.currency, 'USD');
     expect(saved.marketSource, 'forex');
 
     await tester.pump(const Duration(milliseconds: 500));

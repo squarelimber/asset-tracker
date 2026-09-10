@@ -35,17 +35,26 @@ String? cacheSymbolFor(HoldingRow holding) {
 }
 
 /// CNY conversion rate for a holding's market value: the current FX rate
-/// (1 for CNY holdings).
+/// (1 for CNY holdings). FX-linked holdings (银行理财 with an FX symbol)
+/// store the live rate as their unit price, so the conversion is already
+/// embedded in `latestPrice` and no additional factor applies — their
+/// currency is a free label (e.g. USD) without double conversion.
 double valueRateOf(HoldingRow h, Map<String, double> cnyRates) {
   if (h.currency == 'CNY') return 1;
+  if (MarketSource.fromStorage(h.marketSource) == MarketSource.forex) {
+    return 1;
+  }
   return cnyRates[h.currency.toUpperCase()] ?? 1;
 }
 
 /// CNY conversion rate for a holding's cost basis: the exchange rate
 /// recorded at purchase time (costFxRate), falling back to the current
-/// rate. 1 for CNY holdings.
+/// rate. 1 for CNY holdings and FX-linked holdings (see [valueRateOf]).
 double costRateOf(HoldingRow h, Map<String, double> cnyRates) {
   if (h.currency == 'CNY') return 1;
+  if (MarketSource.fromStorage(h.marketSource) == MarketSource.forex) {
+    return 1;
+  }
   final fx = h.costFxRate;
   if (fx != null && fx > 0) return fx;
   return cnyRates[h.currency.toUpperCase()] ?? 1;
