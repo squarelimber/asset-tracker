@@ -94,8 +94,32 @@ jobs:
       - name: Verify the re-signed APK
         run: |
           BT=$(ls -1d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
-          echo "================ apksigner verify --verbose --print-certs ================"
+
+          echo "================ v3 view (full verify) ================"
           "$BT/apksigner" verify --verbose --print-certs work/resigned.apk
+
+          echo ""
+          echo "================ v2 view of the RE-SIGNED apk (--max-sdk-version 27) ================"
+          echo "must still be the LEGACY certificate, else Android <=8.1 rejects the update"
+          "$BT/apksigner" verify --print-certs --max-sdk-version 27 work/resigned.apk | head -8
+
+          echo ""
+          echo "================ v2 view of the ORIGINAL v0.9.7 apk, for comparison ================"
+          "$BT/apksigner" verify --print-certs --max-sdk-version 27 work/v097.apk | head -8
+
+          echo ""
+          echo "================ is the lineage embedded in the APK? ================"
+          "$BT/apksigner" rotate --in work/resigned.apk --out work/lineage-from-apk.bin \
+            && echo "extracted lineage: $(stat -c%s work/lineage-from-apk.bin) bytes (source lineage.bin was $(stat -c%s work/lineage.bin) bytes)" \
+            || echo "!! NO LINEAGE FOUND IN THE APK !!"
+
+          echo ""
+          echo "================ sdk levels (v1 scheme absence needs minSdk >= 24) ================"
+          "$BT/aapt2" dump badging work/resigned.apk 2>/dev/null | grep -E "^package:|sdkVersion|targetSdkVersion" || true
+
+          echo ""
+          echo "================ raw lineage bytes (first 64, hex) ================"
+          xxd -l 64 work/lineage.bin
 
       - name: Upload lineage and test APK
         uses: actions/upload-artifact@v5
