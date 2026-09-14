@@ -8,6 +8,7 @@ import 'package:go_router/go_router.dart';
 import '../../../app/providers.dart';
 import '../../../core/enums.dart';
 import '../../../core/formats.dart';
+import '../../../core/market_session.dart';
 import '../../../core/responsive.dart';
 import '../../../core/symbols.dart';
 import '../../../domain/portfolio_calculator.dart';
@@ -34,9 +35,16 @@ final summaryProvider = FutureProvider<PortfolioSummary>((ref) async {
       if (cacheSymbolFor(h) != null) cacheSymbolFor(h)!,
   ];
   final cache = await dao.getCachedPrices(cacheKeys);
+  // Only quotes whose `change` genuinely describes today may enter the
+  // prev-close map: outside the trading session (weekend, before the open)
+  // an exchange still serves the previous session's close pair, and
+  // counting it as today's move double-books that session.
+  final now = DateTime.now();
   final prev = <String, double>{
     for (final h in holdings)
-      if (h.symbol != null && cache[cacheSymbolFor(h)]?.prevClose != null)
+      if (h.symbol != null &&
+          cache[cacheSymbolFor(h)]?.prevClose != null &&
+          quoteChangeIsToday(now, MarketSource.fromStorage(h.marketSource)))
         h.symbol!: cache[cacheSymbolFor(h)]!.prevClose!,
   };
   // Convert non-CNY holdings into CNY using the shared FX rates.
@@ -85,7 +93,14 @@ class _PortfolioPageState extends ConsumerState<PortfolioPage> {
     Object? error;
     try {
       result = await ref.read(marketServiceProvider).refreshAll();
-      await ref.read(snapshotServiceProvider).ensureTodaySnapshot(force: true);
+      // Rewrite today's snapshot only when every quote came back. A failed
+      // refresh leaves the holdings on their cached prices; recomputing the
+      // day from those would persist a wrong figure — and, because a
+      // snapshot is the day's only record, it would replace a correct value
+      // with a stale one instead of merely leaving it alone.
+      if (result.allOk) {
+        await ref.read(snapshotServiceProvider).ensureTodaySnapshot(force: true);
+      }
       // FX rates may have changed with the refresh.
       ref.invalidate(cnyRatesProvider);
       // Prices are fresh: re-evaluate alert rules and notify for anything
@@ -239,12 +254,20 @@ class _KpiRow extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final hidden = ref.watch(hideAmountsProvider);
     final todayEarning = ref.watch(todayEarningProvider);
+    // Prefer today's snapshot difference: it is the same figure the
+    // earnings calendar shows on today's cell, and after a successful
+    // refresh it is derived from the very prices behind the totals above.
+    //
+    // When today's snapshot does not exist yet there is no snapshot-based
+    // "today", so fall back to the live summary rather than leaving the
+    // cell at zero: that value comes from the same holdings the totals are
+    // computed from, so the whole card still describes one moment.
     return AssetOverviewCard(
       totalAssets: summary.totalAssets,
       totalLiabilities: summary.totalLiabilities,
       netWorth: summary.netWorth,
-      todayProfit: todayEarning?.profit ?? 0.0,
-      todayPct: todayEarning?.pct,
+      todayProfit: todayEarning?.profit ?? summary.todayChange,
+      todayPct: todayEarning?.pct ?? summary.todayChangePct,
       hidden: hidden,
     );
   }

@@ -81,12 +81,37 @@ void main() {
 
     expect(result.ok, isTrue);
     expect(result.holdings, 1);
-    // Window 07-01..07-07 = 7 days, all filled.
-    expect(result.days, 7);
+    // Window 07-01..07-08 (today included) = 8 days, all filled.
+    expect(result.days, 8);
 
     final snapshots = await dao.getSnapshots();
-    expect(snapshots, hasLength(7));
+    expect(snapshots, hasLength(8));
     expect(snapshots.first.totalValue, closeTo(260, 1e-6));
+  });
+
+  test('the window includes today so the live and history paths agree', () async {
+    await seedFundHolding(purchaseDate: DateTime(2026, 7, 1), latest: 2.9);
+    final fake = _FakeHistorySource();
+    // History only covers 07-01..07-03; the fake's series therefore also
+    // stands in for the value of today (07-08, a Wednesday).
+    fake.data['110022'] = {
+      for (var d = DateTime(2026, 7, 1); !d.isAfter(DateTime(2026, 7, 3)); d = d.add(const Duration(days: 1)))
+        _FakeHistorySource.key(d): 2.6,
+    };
+
+    final service = HistoryBackfillService(dao, sources: {MarketSource.eastmoney: fake});
+    final now = DateTime(2026, 7, 8);
+    await service.backfill(now: now);
+
+    final snapshots = await dao.getSnapshots();
+    final today = snapshots.where((s) => s.date == '2026-07-08');
+    // Today used to be written by the live-quote path only and was excluded
+    // from the rebuild, which is how a disagreement between the two paths
+    // became a single-day spike. The rebuild now owns today as well, priced
+    // from the same series as every other day.
+    expect(today, hasLength(1));
+    expect(today.single.totalValue, closeTo(260, 1e-6));
+    expect((await dao.getSnapshot('2026-07-08', 'CNY'))?.date, '2026-07-08');
   });
 
   test('weekend snapshots forward-fill to the last trading day price', () async {
@@ -147,10 +172,14 @@ void main() {
     final stmt = db.update(db.snapshots)..where((t) => t.date.equals('2026-07-01'));
     await stmt.write(const SnapshotsCompanion(totalValue: Value(888)));
 
-    // Second run must NOT delete/recompute it.
+    // Second run must NOT delete/recompute the historical day (today is
+    // always re-derived, so only the non-today row is asserted here).
     await service.backfill(now: DateTime(2026, 7, 2));
     final snapshots = await dao.getSnapshots();
-    expect(snapshots.single.totalValue, 888);
+    expect(
+      snapshots.firstWhere((s) => s.date == '2026-07-01').totalValue,
+      888,
+    );
   });
 
   test('holdings are excluded before their purchase date', () async {
@@ -180,8 +209,8 @@ void main() {
     await service.backfill(now: DateTime(2026, 7, 8));
 
     final snapshots = await dao.getSnapshots();
-    // Window 06-29..07-07 = 9 days; holding exists from 07-03 -> 5 days.
-    expect(snapshots, hasLength(5));
+    // Window 06-29..07-08 = 10 days; holding exists from 07-03 -> 6 days.
+    expect(snapshots, hasLength(6));
     expect(snapshots.first.date, '2026-07-03');
     for (final s in snapshots) {
       expect(s.totalValue, closeTo(260, 1e-6));
@@ -213,7 +242,7 @@ void main() {
     };
     final service = HistoryBackfillService(dao, sources: {MarketSource.eastmoney: fake});
     await service.backfill(now: DateTime(2026, 7, 4));
-    expect(await dao.getSnapshots(), hasLength(3));
+    expect(await dao.getSnapshots(), hasLength(4));
 
     // User adds a second holding bought on 07-01 (backdated).
     await dao.createHolding(HoldingsCompanion.insert(
@@ -240,7 +269,7 @@ void main() {
     // ...but forceRebuild rewrites them including the new holding.
     await service.backfill(now: DateTime(2026, 7, 4), forceRebuild: true);
     snap = await dao.getSnapshots();
-    expect(snap, hasLength(3));
+    expect(snap, hasLength(4));
     for (final s in snap) {
       expect(s.totalValue, closeTo(560, 1e-6)); // 260 + 300
     }
@@ -326,13 +355,15 @@ void main() {
     final byDate = {for (final s in snapshots) s.date: s};
     // 7/1 (before the repayment): value and cost both carry the
     // pre-repayment principal (50000), so the transfer is not attributed
-    // a phantom gain/loss on any day. 7/3 is "today" (handled by the daily
-    // snapshot), so the backfill window ends at 7/2.
-    expect(snapshots, hasLength(2));
+    // a phantom gain/loss on any day. 7/3 is today, and is now part of the
+    // same window (it used to be written by the daily-snapshot path alone).
+    expect(snapshots, hasLength(3));
     expect(byDate['2026-07-01']!.totalValue, closeTo(50000, 1e-6));
     expect(byDate['2026-07-01']!.totalCost, closeTo(50000, 1e-6));
     expect(byDate['2026-07-02']!.totalValue, closeTo(44486, 1e-6));
     expect(byDate['2026-07-02']!.totalCost, closeTo(44486, 1e-6));
+    expect(byDate['2026-07-03']!.totalValue, closeTo(44486, 1e-6));
+    expect(byDate['2026-07-03']!.totalCost, closeTo(44486, 1e-6));
 
     // The repayment day reports zero profit.
     final earning = const DailyEarningsCalculator()
@@ -353,6 +384,10 @@ void main() {
     // than substituting the current price for every historical date.
     expect(result.ok, isFalse);
     expect(result.days, 0);
+    // The abort reason must be visible to callers: they may not rewrite
+    // today's snapshot in this state either (the quotes are equally
+    // unreliable), see HistorySyncProvider.
+    expect(result.historyUnavailable, isTrue);
     expect(result.message, contains('110022'));
     expect(result.message, contains('未写入'));
     expect(await dao.getSnapshots(), isEmpty);
@@ -371,8 +406,11 @@ void main() {
 
     expect(result.ok, isTrue);
     final snapshots = await dao.getSnapshots();
-    // Window is just 07-07 (purchase date); carried at latest price 2.9*100.
-    expect(snapshots, hasLength(1));
-    expect(snapshots.single.totalValue, closeTo(290, 1e-6));
+    // Window is 07-07 (purchase date) .. 07-08 (today); both are carried at
+    // the latest price 2.9*100.
+    expect(snapshots, hasLength(2));
+    for (final s in snapshots) {
+      expect(s.totalValue, closeTo(290, 1e-6));
+    }
   });
 }

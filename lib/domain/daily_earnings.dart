@@ -1,3 +1,4 @@
+import '../core/formats.dart';
 import '../data/database.dart';
 
 /// One day's earnings in the cost-basis view.
@@ -75,8 +76,19 @@ class YearlyEarnings {
 /// Today's earning in the snapshot view: the last snapshot's asset profit
 /// minus the previous one — the same number the earnings calendar shows on
 /// today's cell. Null when snapshots are unavailable.
-({double profit, double? pct})? todayEarningOf(List<SnapshotRow> snapshots) {
+///
+/// The last row must actually be today's ([now], wall clock by default).
+/// Without that check a day whose snapshot has not been written yet (or a
+/// device that has not synced today) reported the difference between two
+/// *earlier* days as "today's earning" — the number then belonged to
+/// yesterday while sitting next to a live-computed total, so the two
+/// figures on the same card described different moments in time.
+({double profit, double? pct})? todayEarningOf(
+  List<SnapshotRow> snapshots, {
+  DateTime? now,
+}) {
   if (snapshots.isEmpty) return null;
+  if (snapshots.last.date != todayKey(now ?? DateTime.now())) return null;
   final today = snapshots.last;
   if (snapshots.length < 2) return (profit: 0.0, pct: null);
   final yesterday = snapshots[snapshots.length - 2];

@@ -6,6 +6,7 @@ import 'package:asset_tracker/core/enums.dart';
 import 'package:asset_tracker/data/asset_dao.dart';
 import 'package:asset_tracker/data/database.dart';
 import 'package:asset_tracker/services/snapshot_service.dart';
+import 'package:asset_tracker/sync/sync_format.dart';
 
 void main() {
   late AppDatabase db;
@@ -69,5 +70,46 @@ void main() {
     await service.ensureTodaySnapshot();
 
     expect(await dao.getSnapshots(), hasLength(1));
+  });
+
+  test('a forced rewrite bumps the sync version', () async {
+    await seedFundHolding();
+    final morning = DateTime(2026, 9, 4, 9);
+    final evening = DateTime(2026, 9, 4, 19);
+    var now = morning;
+    final service = SnapshotService(dao, clock: () => now);
+
+    await service.ensureTodaySnapshot();
+    final first = (await dao.getSnapshots()).single;
+    expect(first.createdAt, morning);
+
+    // A snapshot is derived data and gets recomputed whenever the prices or
+    // holdings behind it change. `createdAt` doubles as the cross-device
+    // last-write-wins version (see SyncFormatter.snapshotToRow), so the
+    // rewrite has to move it — otherwise a corrected value can never
+    // displace the stale row it was meant to fix on another device.
+    now = evening;
+    await service.ensureTodaySnapshot(force: true);
+    final second = (await dao.getSnapshots()).single;
+    expect(second.createdAt, evening);
+    expect(second.createdAt.isAfter(first.createdAt), isTrue);
+    expect(
+      const SyncFormatter().snapshotToRow(second)['updatedAt'],
+      evening.toIso8601String(),
+    );
+  });
+
+  test('a non-forced run never overwrites an existing day', () async {
+    await seedFundHolding();
+    final service = SnapshotService(dao, clock: () => DateTime(2026, 9, 4));
+    await service.ensureTodaySnapshot();
+    // Simulate a hand-corrected value.
+    await (db.update(db.snapshots)..where((t) => t.date.equals('2026-09-04')))
+        .write(const SnapshotsCompanion(totalValue: Value(12345)));
+
+    // A refresh that failed must not rewrite the day from stale prices.
+    await service.ensureTodaySnapshot();
+
+    expect((await dao.getSnapshots()).single.totalValue, 12345);
   });
 }

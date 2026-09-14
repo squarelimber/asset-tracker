@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../app/providers.dart';
 import '../../../core/enums.dart';
 import '../../../core/formats.dart';
+import '../../../core/market_session.dart';
 import '../../../core/responsive.dart';
 import '../../../core/symbols.dart';
 import '../../../data/database.dart';
@@ -81,32 +82,41 @@ double _holdingCost(HoldingRow h) {
 }
 
 /// Today's profit for a holding from its cached quote: the cached unit
-/// price change x quantity. Returns null when the quote is missing or the
-/// cache was not written today (stale data would be misleading).
-double? todayProfitOf(PriceCacheRow? row, double quantity, {DateTime? now}) {
+/// price change x quantity.
+///
+/// Returns null when the quote is missing, when the cache was not written
+/// today, or when the quote's `change` still describes an earlier session
+/// for [source] (see `quoteChangeIsToday`) — a quote fetched on a weekend
+/// or before the open carries the previous session's move, and showing it
+/// as today's double-counts that session.
+double? todayProfitOf(
+  PriceCacheRow? row,
+  double quantity, {
+  DateTime? now,
+  MarketSource? source,
+}) {
   if (row == null || row.change == null) return null;
-  final fetched = row.fetchedAt;
   final n = now ?? DateTime.now();
-  if (fetched.year != n.year ||
-      fetched.month != n.month ||
-      fetched.day != n.day) {
-    return null;
-  }
+  if (!_isSameDay(row.fetchedAt, n)) return null;
+  if (source != null && !quoteChangeIsToday(n, source)) return null;
   return row.change! * quantity;
 }
 
 /// Today's change percentage (fraction) from the cached quote, or null.
-double? todayChangePctOf(PriceCacheRow? row, {DateTime? now}) {
+double? todayChangePctOf(
+  PriceCacheRow? row, {
+  DateTime? now,
+  MarketSource? source,
+}) {
   if (row == null || row.changePct == null) return null;
-  final fetched = row.fetchedAt;
   final n = now ?? DateTime.now();
-  if (fetched.year != n.year ||
-      fetched.month != n.month ||
-      fetched.day != n.day) {
-    return null;
-  }
+  if (!_isSameDay(row.fetchedAt, n)) return null;
+  if (source != null && !quoteChangeIsToday(n, source)) return null;
   return row.changePct;
 }
+
+bool _isSameDay(DateTime a, DateTime b) =>
+    a.year == b.year && a.month == b.month && a.day == b.day;
 
 /// CNY-converted market value of non-liability holdings.
 double assetTotalOf(List<HoldingRow> holdings, Map<String, double> rates) {
@@ -533,8 +543,9 @@ class _HoldingRowCard extends ConsumerWidget {
     final cache = ref.watch(priceCacheProvider).value ?? const <String, PriceCacheRow>{};
     final cacheSymbol = cacheSymbolFor(holding);
     final todayRow = cacheSymbol == null ? null : cache[cacheSymbol];
-    final todayProfit = todayProfitOf(todayRow, holding.quantity);
-    final todayPct = todayChangePctOf(todayRow);
+    final source = MarketSource.fromStorage(holding.marketSource);
+    final todayProfit = todayProfitOf(todayRow, holding.quantity, source: source);
+    final todayPct = todayChangePctOf(todayRow, source: source);
     final hide = ref.watch(hideAmountsProvider);
     final closed = isHoldingClosed(holding);
     final subtitle = closed

@@ -3,12 +3,15 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 import '../../core/enums.dart';
+import '../../core/gold.dart';
 import 'market_data_source.dart';
 
 /// Gold (XAU) and FX rates via Sina Finance.
 ///
-/// - Gold: `hf_XAU` London spot gold (USD/oz), converted to CNY/gram:
-///   price_cny_per_gram = usd_per_oz * usdcny / 31.1034768
+/// - Gold: `hf_XAU` London spot gold (USD/oz), converted to CNY/gram via
+///   [goldCnyPerGram]. This is the *same* conversion the gold history
+///   source ([XauGoldHistorySource]) applies, so the live quote and the
+///   backfilled series can never disagree on the instrument.
 /// - FX: `fx_s{ccy}cny` cross rates (1 ccy = x CNY).
 class GoldFxSource extends MarketDataSource {
   GoldFxSource({http.Client? client}) : _client = client ?? http.Client(), super(MarketSource.forex);
@@ -31,8 +34,6 @@ class GoldFxSource extends MarketDataSource {
     'JPY': 'fx_sjpycny',
     'CHF': 'fx_schfcny',
   };
-
-  static const _ozToGram = 31.1034768;
 
   @override
   Future<List<MarketQuote>> fetch(List<String> symbols) async {
@@ -67,12 +68,13 @@ class GoldFxSource extends MarketDataSource {
     if (xau == null || xau.isEmpty) return MarketQuote.failure(symbol, source, '金价不可用');
     final usdPerOz = xau[0];
     if (usdPerOz <= 0) return MarketQuote.failure(symbol, source, '金价异常');
-    final cnyPerGram = usdPerOz * rate[3] / _ozToGram;
-    final prevCny = xau.length > 1 && xau[1] > 0 ? xau[1] * rate[3] / _ozToGram : null;
+    final cnyPerGram = goldCnyPerGram(usdPerOz, rate[3]);
+    final prevCny =
+        xau.length > 1 && xau[1] > 0 ? goldCnyPerGram(xau[1], rate[3]) : null;
     return MarketQuote(
       symbol: symbol.toUpperCase(),
       source: source,
-      name: '黄金 (Au99.99)',
+      name: goldQuoteName,
       price: cnyPerGram,
       currency: 'CNY',
       prevClose: prevCny,

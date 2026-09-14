@@ -120,18 +120,20 @@ void main() {
   });
 
   group('todayEarningOf', () {
+    final now = DateTime(2026, 8, 16, 10);
+
     test('last snapshot profit minus the previous one', () {
       final earning = todayEarningOf([
         _snap('2026-08-15', 2100000, 2030000), // profit 70000
         _snap('2026-08-16', 2102400, 2030000), // profit 72400
-      ]);
+      ], now: now);
       expect(earning, isNotNull);
       expect(earning!.profit, closeTo(2400, 1e-9));
       expect(earning.pct, closeTo(2400 / 2100000, 1e-9));
     });
 
     test('single snapshot yields zero profit and null pct', () {
-      final earning = todayEarningOf([_snap('2026-08-16', 100000, 90000)]);
+      final earning = todayEarningOf([_snap('2026-08-16', 100000, 90000)], now: now);
       expect(earning, isNotNull);
       expect(earning!.profit, 0);
       expect(earning.pct, isNull);
@@ -141,11 +143,24 @@ void main() {
       expect(todayEarningOf(const []), isNull);
     });
 
+    test('null when the last snapshot is not today', () {
+      // The two most recent rows are two earlier days; their difference is
+      // that day's move, and reporting it as today's put a stale figure
+      // beside a live-computed total on the same card.
+      expect(
+        todayEarningOf([
+          _snap('2026-08-14', 2100000, 2030000),
+          _snap('2026-08-15', 2102400, 2030000),
+        ], now: now),
+        isNull,
+      );
+    });
+
     test('zero yesterday value yields null pct', () {
       final earning = todayEarningOf([
         _snap('2026-08-15', 0, 0),
         _snap('2026-08-16', 100, 0),
-      ]);
+      ], now: now);
       expect(earning, isNotNull);
       expect(earning!.profit, closeTo(100, 1e-9));
       expect(earning.pct, isNull);

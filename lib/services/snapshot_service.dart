@@ -9,6 +9,12 @@ import 'market/market_service.dart';
 /// Records one net-worth snapshot per day (per currency).
 /// Called on app start / after refresh; idempotent for the same day.
 /// Values are converted to CNY using current FX rates.
+///
+/// This is the *fallback* writer for today: whenever a history rebuild can
+/// run it also covers today, and re-derives it from the same price series
+/// as every earlier day. This class exists so that platforms that cannot
+/// backfill (web) and runs whose history fetch failed still get a row for
+/// today instead of an empty calendar cell.
 class SnapshotService {
   SnapshotService(
     this._dao, {
@@ -22,6 +28,11 @@ class SnapshotService {
 
   /// Ensures today's snapshot exists; recomputes it if the cached quote
   /// prices are newer than the snapshot's creation time.
+  ///
+  /// [force] rewrites an existing row. Callers must only pass it once the
+  /// quotes behind the numbers are known to be fresh — see the refresh gate
+  /// on the portfolio page — because a rewrite from stale prices replaces a
+  /// correct figure with a wrong one.
   Future<void> ensureTodaySnapshot({bool force = false}) async {
     final now = _clock();
     final dateKey = todayKey(now);
@@ -50,6 +61,13 @@ class SnapshotService {
       totalValue: summary.netWorth,
       totalCost: summary.totalCost,
       liabilities: Value(summary.totalLiabilities),
+      // Written explicitly, even though the column has a DB default: the
+      // column doubles as the cross-device last-write-wins version (see
+      // SyncFormatter.snapshotToRow) and `insertOnConflictUpdate` only
+      // updates the columns a companion actually carries. Leaving it
+      // implicit froze the version at the day's first write, so a corrected
+      // rewrite could never win the merge on another device.
+      createdAt: Value(now),
     ));
   }
 }

@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 import '../../core/enums.dart';
+import '../../core/gold.dart';
 import 'market_data_source.dart';
 
 /// Tencent (qt.gtimg.cn) quote source — CORS-friendly (`Access-Control-
@@ -176,7 +177,9 @@ class TencentQuoteSource extends MarketDataSource {
 }
 
 /// Web-only gold/fx adapter: converts gold (USD/oz via hf_XAU) and FX rates
-/// (wh*CNY) into the same CNY-per-unit quotes as [GoldFxSource].
+/// (wh*CNY) into the same CNY-per-unit quotes as [GoldFxSource], using the
+/// shared [goldCnyPerGram] conversion so both platforms and both the live
+/// and historical gold paths price the same instrument.
 class TencentGoldFxAdapter extends MarketDataSource {
   TencentGoldFxAdapter({http.Client? client})
       : _delegate = TencentQuoteSource(
@@ -198,8 +201,6 @@ class TencentGoldFxAdapter extends MarketDataSource {
     'JPY': 'whJPYCNY',
     'CHF': 'whCHFCNY',
   };
-
-  static const _ozToGram = 31.1034768;
 
   @override
   Future<List<MarketQuote>> fetch(List<String> symbols) async {
@@ -244,15 +245,15 @@ class TencentGoldFxAdapter extends MarketDataSource {
         results.add(MarketQuote.failure(g, source, '金价异常'));
         continue;
       }
-      final cnyPerGram = usdPerOz * usdRate.price / _ozToGram;
+      final cnyPerGram = goldCnyPerGram(usdPerOz, usdRate.price);
       final prevUsd = xau.prevClose;
       final prevCny = (prevUsd == null || prevUsd <= 0)
           ? null
-          : prevUsd * usdRate.price / _ozToGram;
+          : goldCnyPerGram(prevUsd, usdRate.price);
       results.add(MarketQuote(
         symbol: g.toUpperCase(),
         source: source,
-        name: '黄金 (Au99.99)',
+        name: goldQuoteName,
         price: cnyPerGram,
         currency: 'CNY',
         prevClose: prevCny,

@@ -1,24 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../core/market_session.dart';
 import '../tokens.dart';
-
-/// A-share trading session derived from the local clock.
-///
-/// No holiday calendar is consulted: a holiday still reads as 未开盘/已收盘.
-enum MarketSession { preOpen, open, lunch, closed, weekend }
-
-MarketSession aShareSession([DateTime? now]) {
-  final n = now ?? DateTime.now();
-  if (n.weekday == DateTime.saturday || n.weekday == DateTime.sunday) {
-    return MarketSession.weekend;
-  }
-  final t = n.hour * 60 + n.minute;
-  if (t >= 9 * 60 + 30 && t < 11 * 60 + 30) return MarketSession.open;
-  if (t >= 13 * 60 && t < 15 * 60) return MarketSession.open;
-  if (t < 9 * 60 + 30) return MarketSession.preOpen;
-  if (t < 13 * 60) return MarketSession.lunch;
-  return MarketSession.closed;
-}
 
 /// Compact chip showing the current A-share session (交易中 / 午休 / 未开盘 /
 /// 已收盘 / 休市). Pass [session] to pin a value (e.g. in tests).

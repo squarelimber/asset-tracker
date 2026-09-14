@@ -31,7 +31,7 @@ class ProductEarningsService {
             {
               MarketSource.eastmoney: EastmoneyHistorySource(),
               MarketSource.sina: TencentHistorySource(),
-              MarketSource.sge: AuGoldHistorySource(),
+              MarketSource.sge: XauGoldHistorySource(),
             } {
     _market = market;
   }

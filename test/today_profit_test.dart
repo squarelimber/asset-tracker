@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:asset_tracker/core/enums.dart';
 import 'package:asset_tracker/core/symbols.dart';
 import 'package:asset_tracker/data/database.dart';
 import 'package:asset_tracker/ui/pages/holdings/holdings_page.dart';
@@ -105,6 +106,57 @@ void main() {
         fetchedAt: DateTime.now().subtract(const Duration(days: 2)),
       );
       expect(todayChangePctOf(stale), isNull);
+    });
+  });
+
+  group('quote change attribution', () {
+    // 2026-09-12 = Saturday, 09-13 = Sunday, 09-14 = Monday.
+    test('a weekend quote still describes Friday, not today', () {
+      final saturday = DateTime(2026, 9, 12, 10);
+      final row = _cache(change: 1.5, changePct: 0.015, fetchedAt: saturday);
+
+      // The exchange keeps serving Friday's close pair all weekend; showing
+      // it as Saturday's move double-counts Friday's session.
+      expect(
+        todayProfitOf(row, 200, now: saturday, source: MarketSource.sina),
+        isNull,
+      );
+      expect(
+        todayChangePctOf(row, now: saturday, source: MarketSource.sina),
+        isNull,
+      );
+      // Gold and FX stop over the weekend too.
+      expect(
+        todayProfitOf(row, 200, now: saturday, source: MarketSource.sge),
+        isNull,
+      );
+      // Crypto keeps trading, so its change is genuinely Saturday's.
+      expect(
+        todayProfitOf(row, 200, now: saturday, source: MarketSource.coingecko),
+        300.0,
+      );
+    });
+
+    test('a weekday quote fetched before the open is not today\'s either', () {
+      final preOpen = DateTime(2026, 9, 14, 8);
+      final row = _cache(change: 1.5, fetchedAt: preOpen);
+      expect(
+        todayProfitOf(row, 200, now: preOpen, source: MarketSource.sina),
+        isNull,
+      );
+
+      final open = DateTime(2026, 9, 14, 14);
+      final fresh = _cache(change: 1.5, fetchedAt: open);
+      expect(
+        todayProfitOf(fresh, 200, now: open, source: MarketSource.sina),
+        300.0,
+      );
+    });
+
+    test('the session gate is opt-in for callers without a source', () {
+      final saturday = DateTime(2026, 9, 12, 10);
+      final row = _cache(change: 1.5, fetchedAt: saturday);
+      expect(todayProfitOf(row, 200, now: saturday), 300.0);
     });
   });
 

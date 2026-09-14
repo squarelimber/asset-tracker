@@ -93,8 +93,11 @@ class HoldingDetailSheet extends ConsumerWidget {
     final cache = ref.watch(priceCacheProvider).value ?? const <String, PriceCacheRow>{};
     final cacheSymbol = cacheSymbolFor(holding);
     final todayRow = cacheSymbol == null ? null : cache[cacheSymbol];
-    final todayProfit = isClosed ? null : todayProfitOf(todayRow, holding.quantity);
-    final todayPct = todayChangePctOf(todayRow);
+    final source = MarketSource.fromStorage(holding.marketSource);
+    final todayProfit = isClosed
+        ? null
+        : todayProfitOf(todayRow, holding.quantity, source: source);
+    final todayPct = todayChangePctOf(todayRow, source: source);
     return ListView(
       controller: scrollController,
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 32),

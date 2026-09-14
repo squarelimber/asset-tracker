@@ -18,12 +18,20 @@ class BackfillResult {
     required this.days,
     required this.holdings,
     this.message,
+    this.historyUnavailable = false,
   });
 
   final bool ok;
   final int days;
   final int holdings;
   final String? message;
+
+  /// True when the run was aborted because one or more holding price
+  /// histories could not be fetched. Callers must not treat this as a
+  /// harmless "nothing to do": in this state no snapshot was written, so
+  /// derived figures must not be rewritten from the current (possibly
+  /// stale) quotes either.
+  final bool historyUnavailable;
 }
 
 /// Backfills historical daily net-worth snapshots from each holding's
@@ -33,9 +41,18 @@ class BackfillResult {
 /// Data sources:
 /// - Mutual funds: Eastmoney NAV history
 /// - Stocks / ETFs / LOFs: Sina daily K-line
-/// - Gold accumulation: Shanghai gold futures (AU0) history
+/// - Gold accumulation: London spot gold history converted to CNY/gram
+///   (the same instrument and conversion as the live gold quote)
 /// Manual-NAV assets (bank wealth etc.) are carried at their latest price
 /// across the backfill window (they only change when the user updates them).
+///
+/// The window **includes today**. Today used to be excluded (the loop
+/// stopped before `todayDate`) and written by a separate live-quote path
+/// instead, which meant any disagreement between the two valuation paths
+/// landed on exactly one day — today — and showed up as a large fake daily
+/// return. Re-deriving today from the same series makes the two paths agree
+/// by construction: the last day of the rebuild and the day before it are
+/// computed by one code path.
 ///
 /// Recomputation is atomic: new snapshots are fully computed first, then
 /// swapped in a single transaction. The UI therefore never shows a gap
@@ -51,7 +68,7 @@ class HistoryBackfillService {
               // Tencent qfq (adjusted) klines keep unit splits/ex-rights
               // continuous over time, so backfilled history has no jumps.
               MarketSource.sina: TencentHistorySource(),
-              MarketSource.sge: AuGoldHistorySource(),
+              MarketSource.sge: XauGoldHistorySource(),
             } {
     _market = market;
   }
@@ -65,7 +82,11 @@ class HistoryBackfillService {
   /// return); v6 extends the smoothed set to manually priced share assets
   /// (bond/futures/property) and FX-linked bank wealth, so the whole
   /// window is rebuilt once with the new interpolation semantics.
-  static const _backfillV3Marker = 'backfill_v6_manual_share_smooth';
+  /// v7 rebuilds once more for the gold instrument fix (London spot instead
+  /// of the Shanghai futures contract) and for including today in the
+  /// window — devices that already ran v6 hold gold history derived from
+  /// the other instrument and need the corrected series.
+  static const _backfillV3Marker = 'backfill_v7_gold_spot_and_today';
 
   /// Backfills snapshots for dates before today.
   ///
@@ -187,6 +208,7 @@ class HistoryBackfillService {
         ok: false,
         days: 0,
         holdings: 0,
+        historyUnavailable: true,
         message:
             '历史净值获取失败（${failedSymbols.join('、')}），本次未写入任何快照，'
             '请检查网络后重试',
@@ -195,14 +217,20 @@ class HistoryBackfillService {
 
     final firstTimeRebuild = await _dao.getSetting(_backfillV3Marker) == null;
     final needFullRebuild = forceRebuild || firstTimeRebuild;
-    final existingDates = needFullRebuild
-        ? <String>{}
-        : (await _dao.getSnapshots()).map((s) => s.date).toSet();
+    final existingDates = <String>{};
+    if (!needFullRebuild) {
+      existingDates.addAll((await _dao.getSnapshots()).map((s) => s.date));
+    }
+    // Today is always recomputed, even when only the missing days are being
+    // filled: it is the day the live path wrote first, and re-deriving it
+    // from the same series is what keeps the two valuation paths in
+    // agreement. Every other existing day is left alone on a light run.
+    existingDates.remove(todayKey(todayDate));
 
-    // Compute the full window day by day.
+    // Compute the full window day by day, today included.
     var day = DateTime(earliest.year, earliest.month, earliest.day);
     final rows = <SnapshotRow>[];
-    while (day.isBefore(todayDate)) {
+    while (!day.isAfter(todayDate)) {
       final key = todayKey(day);
       if (existingDates.contains(key)) {
         day = day.add(const Duration(days: 1));

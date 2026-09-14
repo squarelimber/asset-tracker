@@ -89,7 +89,7 @@ class HoldingDetailService {
               // Tencent qfq (adjusted) klines keep unit splits/ex-rights
               // continuous, matching the backfill service.
               MarketSource.sina: TencentHistorySource(),
-              MarketSource.sge: AuGoldHistorySource(),
+              MarketSource.sge: XauGoldHistorySource(),
             };
 
   final AssetDao _dao;

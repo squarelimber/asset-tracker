@@ -88,12 +88,14 @@ const historySyncV6Key = 'history_sync_v6';
 
 /// Today's earning in the snapshot (calendar) view: today's snapshot
 /// profit (value - cost) minus yesterday's, matching the earnings
-/// calendar's today cell. Null when snapshots are unavailable.
+/// calendar's today cell. Null when today's snapshot is missing — see
+/// [todayEarningOf], which refuses to relabel an earlier day's move as
+/// today's.
 final todayEarningProvider =
     Provider<({double profit, double? pct})?>((ref) {
   final list = ref.watch(snapshotsProvider).value;
   if (list == null) return null;
-  return todayEarningOf(list);
+  return todayEarningOf(list, now: DateTime.now());
 });
 
 /// Emits whenever the history dirty flag flips (settings row watch), so
@@ -126,7 +128,16 @@ final historySyncProvider = FutureProvider<BackfillResult?>((ref) async {
   }
   // Refresh today's snapshot so the calendar's today matches the
   // dashboard's live summary.
-  await ref.read(snapshotServiceProvider).ensureTodaySnapshot(force: true);
+  //
+  // Skipped when the run was aborted because a price history could not be
+  // fetched: in that state the quotes behind today's figures are not
+  // trustworthy either, and rewriting the day would overwrite whatever was
+  // already recorded with a stale derivation. A platform that simply has no
+  // backfill (web) still gets its snapshot — only the fetch-failure abort
+  // sets [BackfillResult.historyUnavailable].
+  if (!result.historyUnavailable) {
+    await ref.read(snapshotServiceProvider).ensureTodaySnapshot(force: true);
+  }
   return result;
 });
 

@@ -96,6 +96,11 @@ class SyncFormatter {
         'totalCost': s.totalCost,
         'liabilities': s.liabilities,
         'createdAt': s.createdAt.toIso8601String(),
+        // Snapshots have no separate updatedAt column; `createdAt` is
+        // rewritten on every recompute (see the Snapshots table) and is
+        // therefore the merge version. Writers must set it explicitly —
+        // a missing value would leave a corrected day unable to displace
+        // the stale row it was meant to fix.
         'updatedAt': s.createdAt.toIso8601String(),
       };
 

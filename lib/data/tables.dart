@@ -101,6 +101,14 @@ class Snapshots extends Table {
   /// principal repayments/borrowing from the return (cash-flow, not gain).
   RealColumn get liabilities => real().withDefault(const Constant(0))();
 
+  /// Last time this day's value was (re)derived.
+  ///
+  /// Doubles as the cross-device last-write-wins version for snapshots
+  /// (`SyncFormatter.snapshotToRow` maps it to `updatedAt`), so it must be
+  /// written explicitly on every recompute: a snapshot is derived data and
+  /// is rewritten whenever the underlying prices or holdings change, and
+  /// that correction has to be able to win the merge. Leaving the column
+  /// default in place froze the version at the day's first write.
   DateTimeColumn get createdAt => dateTime().withDefault(currentDateAndTime)();
 
   @override
