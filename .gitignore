@@ -34,6 +34,9 @@ migrate_working_dir/
 /build/
 /coverage/
 
+# Flutter tool's per-machine state file
+.flutter_tool_state
+
 # Symbolication related
 app.*.symbols
 
