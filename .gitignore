@@ -58,6 +58,11 @@ app.*.map.json
 *.sqlite-wal
 /backups/
 
+# Release signing material. Never commit these: CI writes them from repository
+# secrets before building (see .github/workflows/release.yml).
+/android/key.properties
+/android/release/*.keystore
+
 # Local release artifacts (fallback builds; releases are built by CI)
 /asset-tracker-*.apk
 /asset_tracker-windows-*.zip

@@ -11,6 +11,11 @@ name: Release
 #
 # Release notes are taken from the matching "## [X.Y.Z]" section of
 # CHANGELOG.md (the tag must correspond to a changelog entry).
+#
+# Signing: APKs are signed with two keys. Gradle signs with the legacy keystore,
+# then apksigner re-signs with the current key plus a proof-of-rotation lineage,
+# so the signing key could be rotated without asking anyone to uninstall first.
+# Both keys are injected from repository secrets and never live in the tree.
 
 on:
   push:
@@ -44,11 +49,74 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
+      # Gradle needs a keystore to produce a release build at all. Both keys
+      # come from repository secrets: the legacy one because it was published
+      # in this public repository's history and must never be committed again,
+      # and the current one because it now carries the v3 identity.
+      - name: Materialise signing keys
+        env:
+          LEGACY_KEYSTORE_B64: ${{ secrets.ANDROID_LEGACY_KEYSTORE_B64 }}
+          LEGACY_PASSWORD: ${{ secrets.ANDROID_LEGACY_PASSWORD }}
+          LEGACY_ALIAS: ${{ secrets.ANDROID_LEGACY_ALIAS }}
+          SIGNING_KEY_B64: ${{ secrets.ANDROID_SIGNING_KEY_PK8_B64 }}
+          SIGNING_CERT_B64: ${{ secrets.ANDROID_SIGNING_CERT_PEM_B64 }}
+          LINEAGE_B64: ${{ secrets.ANDROID_LINEAGE_B64 }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/signing" android/release
+          printf '%s' "$LEGACY_KEYSTORE_B64" | base64 -d > android/release/asset-tracker-release.keystore
+          printf '%s' "$SIGNING_KEY_B64" | base64 -d > "$RUNNER_TEMP/signing/signing.pk8"
+          printf '%s' "$SIGNING_CERT_B64" | base64 -d > "$RUNNER_TEMP/signing/signing.crt"
+          printf '%s' "$LINEAGE_B64" | base64 -d > "$RUNNER_TEMP/signing/lineage.bin"
+          cat > android/key.properties <<EOF
+          storeFile=../release/asset-tracker-release.keystore
+          storePassword=${LEGACY_PASSWORD}
+          keyAlias=${LEGACY_ALIAS}
+          keyPassword=${LEGACY_PASSWORD}
+          EOF
+
       - name: Build release APKs (split per ABI)
         run: flutter build apk --release --split-per-abi
 
       - name: Build universal release APK
         run: flutter build apk --release
+
+      # Gradle signs every APK with the legacy key. Re-signing adds the v3 block
+      # that names the current key and carries the signing certificate lineage,
+      # so Android 9+ accepts the new identity as the successor of the old one
+      # and updates in place. Android 7.0-8.1 keeps reading the v2 block, which
+      # still carries the legacy key, so those devices update in place as well.
+      #
+      # --rotation-min-sdk-version 28 is not optional: build-tools 33 and later
+      # otherwise emit only a v3.1 block, which only Android 13+ understands,
+      # leaving Android 9-12 on the legacy identity.
+      - name: Re-sign APKs with proof-of-rotation
+        env:
+          LEGACY_PASSWORD: ${{ secrets.ANDROID_LEGACY_PASSWORD }}
+          LEGACY_ALIAS: ${{ secrets.ANDROID_LEGACY_ALIAS }}
+        run: |
+          set -euo pipefail
+          BT=$(ls -1d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          APKS=(
+            build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
+            build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk
+            build/app/outputs/flutter-apk/app-release.apk
+          )
+          for apk in "${APKS[@]}"; do
+            echo "re-signing $apk"
+            "$BT/apksigner" sign \
+              --ks android/release/asset-tracker-release.keystore \
+              --ks-key-alias "$LEGACY_ALIAS" \
+              --ks-pass "pass:$LEGACY_PASSWORD" \
+              --key-pass "pass:$LEGACY_PASSWORD" \
+              --next-signer \
+              --key "$RUNNER_TEMP/signing/signing.pk8" \
+              --cert "$RUNNER_TEMP/signing/signing.crt" \
+              --lineage "$RUNNER_TEMP/signing/lineage.bin" \
+              --rotation-min-sdk-version 28 \
+              "$apk"
+          done
+          python3 tools/check_apk_rotation.py "${APKS[@]}"
 
       - name: Package APKs
         run: |

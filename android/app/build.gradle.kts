@@ -6,11 +6,14 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
-// Release signing: a dedicated keystore committed to this private repo
-// (android/release/asset-tracker-release.keystore + android/key.properties)
-// so every release APK is signed with the SAME certificate. Without this,
-// Flutter falls back to the per-machine debug keystore and each build gets
-// a different signature, which makes Android reject in-place updates
+// Release signing. The keystore is NOT part of this repository: CI writes
+// android/key.properties and android/release/asset-tracker-release.keystore
+// from repository secrets before building. Gradle signs with that legacy key
+// so every APK keeps a v2 signature that older devices recognise, and
+// release.yml then re-signs with apksigner to add the current key and its
+// proof-of-rotation lineage in the v3 block.
+// A stable signature is required either way: without it Flutter falls back to
+// the per-machine debug keystore and Android rejects in-place updates
 // ("an app with a conflicting signature has been installed").
 val keystoreProperties = Properties()
 val keystorePropertiesFile = rootProject.file("key.properties")
