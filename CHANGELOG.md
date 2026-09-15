@@ -2,6 +2,19 @@
 
 All notable changes to Asset Tracker. Entries are condensed from the commit history; dates follow the release tags.
 
+## [0.9.8] - 2026-09-15
+
+### Security
+
+- **Android 发布签名密钥轮换（免卸载）**: 旧 keystore 与其口令此前被提交进这个公开仓库，现已视为泄露。新密钥为 RSA-4096，发布包改为**带签名谱系（proof-of-rotation）**的双签名——v1/v2 块仍由旧密钥签（Android 7.0–8.1 的签名校验不变，照常覆盖升级），v3/v3.1 块由新密钥签并携带"新密钥继承自旧密钥"的谱系证明，因此 **Android 9+ 直接认可新身份，无需卸载重装**。已在装有旧签名的设备上实测覆盖安装成功
+- 签名材料改为只从 CI secrets 注入（旧 keystore、新密钥、口令、谱系共 6 项），仓库与提交历史中不再存在任何密钥文件
+- 新增 `tools/check_apk_rotation.py`: 发布构建在上传前校验每个 APK 是否带谱系，缺失即构建失败，避免悄悄发出未正确签名的包
+
+### Notes
+
+- 泄露的密钥文件已从**全部历史提交与 tag** 中移除，历史 sha 因此被重写（所有 tag 已重新指向内容相同的新提交）；旧密钥仍保留在 CI secret 中，仅用于继续为旧设备提供 v2 签名
+- 从任意旧版本**直接覆盖安装即可**，无需卸载
+
 ## [0.9.7] - 2026-09-14
 
 ### Fixed

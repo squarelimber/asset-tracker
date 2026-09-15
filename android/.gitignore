@@ -7,9 +7,7 @@ gradle-wrapper.jar
 GeneratedPluginRegistrant.java
 .cxx/
 
-# This repo is PRIVATE and deliberately commits its release keystore +
-# key.properties so every CI build signs with the same certificate
-# (stable in-place updates; see app/build.gradle.kts). If this repo is
-# ever made public, move the keystore to a secret FIRST.
-!key.properties
-!release/asset-tracker-release.keystore
+# Release signing material is NOT committed. CI writes android/key.properties
+# and android/release/*.keystore from repository secrets before building, so
+# every release is signed with a stable, verifiable identity without keeping
+# any key in the tree (see app/build.gradle.kts and the root .gitignore).
