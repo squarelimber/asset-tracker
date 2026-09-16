@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -13,6 +14,7 @@ import '../../../services/alert_notification_service.dart';
 import '../../../services/backup_service.dart';
 import '../../../services/csv_export.dart';
 import '../../../services/file_export.dart';
+import '../../../services/history_backfill_service.dart';
 import '../../components/app_bar_actions.dart';
 import '../../components/data_row.dart';
 import '../../components/section_header.dart';
@@ -62,6 +64,16 @@ class SettingsPage extends ConsumerWidget {
                       trailing: const SizedBox.shrink(),
                       onTap: () => _import(context, ref),
                     ),
+                    // Derived-data repair, kept inside the existing card so it
+                    // adds a row rather than another section/button block.
+                    if (!kIsWeb)
+                      DataRow(
+                        leading: const Icon(Icons.restart_alt),
+                        title: '重建历史快照',
+                        subtitle: const Text('用收盘价与当日净值重算历史，修正盘中写入的偏差'),
+                        trailing: const SizedBox.shrink(),
+                        onTap: () => _rebuildHistory(context, ref),
+                      ),
                   ],
                 ),
               ),
@@ -109,15 +121,32 @@ class SettingsPage extends ConsumerWidget {
               if (!kIsWeb) const _NotificationsSection(),
               if (!kIsWeb) const SizedBox(height: T.s4),
               const SectionHeader(label: '关于'),
-              const DataRow(
-                leading: Icon(Icons.info_outline, size: 20),
-                title: 'Asset Tracker',
-                subtitle: Text(
-                  '本地优先的开源资产追踪工具\n'
-                  'MIT License · github.com/squarelimber/asset-tracker\n'
-                  '本应用仅供参考，不构成投资建议',
+              TerminalCard(
+                child: Column(
+                  children: [
+                    const DataRow(
+                      leading: Icon(Icons.info_outline, size: 20),
+                      title: 'Asset Tracker',
+                      subtitle: Text(
+                        '本地优先的开源资产追踪工具\n'
+                        'MIT License · github.com/squarelimber/asset-tracker\n'
+                        '本应用仅供参考，不构成投资建议',
+                      ),
+                      trailing: SizedBox.shrink(),
+                    ),
+                    // Installed build id (e.g. 0.9.9+35) — the first thing a
+                    // bug report needs, and the one figure this page cannot
+                    // derive from the local database.
+                    DataRow(
+                      leading: const Icon(Icons.tag, size: 20),
+                      title: '当前版本',
+                      subtitle: Text(
+                        ref.watch(appVersionProvider).valueOrNull ?? '读取中…',
+                      ),
+                      trailing: const SizedBox.shrink(),
+                    ),
+                  ],
                 ),
-                trailing: SizedBox.shrink(),
               ),
             ],
           ),
@@ -192,6 +221,81 @@ class SettingsPage extends ConsumerWidget {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(result.message),
+        backgroundColor: result.ok ? null : T.up,
+      ),
+    );
+  }
+
+  /// Rebuilds the whole snapshot history from the historical series.
+  ///
+  /// Snapshots are written twice for any given day: the backfill derives them
+  /// from closing prices (and each day's published NAV), while the live path
+  /// rewrites today from intraday quotes. A day whose last write happened
+  /// mid-session stays frozen at that intraday value, which skews its own
+  /// return and — worse — the next day's, since the daily return is the
+  /// difference of two snapshots. This entry point re-derives everything from
+  /// the historical series, which is the only way to repair days that are
+  /// already recorded.
+  Future<void> _rebuildHistory(BuildContext context, WidgetRef ref) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('重建历史快照'),
+        content: const Text(
+          '将联网重新抓取历史收盘价与基金净值，重算全部历史净值快照。\n\n'
+          '盘中刷新时写下的偏差快照会被修正，收益日历与总览的当日收益随之回到正确数值。'
+          '需要数秒，期间请保持网络畅通。',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('开始重建'),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true || !context.mounted) return;
+
+    final navigator = Navigator.of(context, rootNavigator: true);
+    unawaited(showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const _RebuildProgressDialog(),
+    ));
+
+    BackfillResult result;
+    try {
+      result = await ref
+          .read(historyBackfillServiceProvider)
+          .backfill(forceRebuild: true);
+      // Mirror the portfolio page's refresh gate: pull fresh quotes first and
+      // only then rewrite today, so every figure — history and today alike —
+      // ends up derived from verified-fresh data. A failed refresh simply
+      // leaves the day the backfill just wrote in place.
+      if (result.ok && !result.historyUnavailable) {
+        final refresh = await ref.read(marketServiceProvider).refreshAll();
+        if (refresh.allOk) {
+          await ref.read(snapshotServiceProvider).ensureTodaySnapshot(force: true);
+        }
+        ref.invalidate(cnyRatesProvider);
+      }
+    } catch (error) {
+      result = BackfillResult(
+        ok: false,
+        days: 0,
+        holdings: 0,
+        message: '重建失败：$error',
+      );
+    }
+    if (navigator.mounted) navigator.pop();
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(result.message ?? (result.ok ? '历史快照已重建' : '重建未完成')),
         backgroundColor: result.ok ? null : T.up,
       ),
     );
@@ -298,6 +402,30 @@ class _NotificationsSectionState extends ConsumerState<_NotificationsSection> {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// Blocking progress indicator for the manual history rebuild. Not dismissible:
+/// a rebuild that is interrupted mid-flight is exactly how days end up frozen
+/// on intraday prices.
+class _RebuildProgressDialog extends StatelessWidget {
+  const _RebuildProgressDialog();
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      content: Row(
+        children: [
+          const SizedBox(
+            width: 20,
+            height: 20,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+          const SizedBox(width: T.s3),
+          Expanded(child: Text('正在重建历史快照…', style: T.label())),
+        ],
+      ),
     );
   }
 }

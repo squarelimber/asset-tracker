@@ -1,4 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 
 import '../core/history_sync.dart';
 import '../core/symbols.dart';
@@ -21,6 +22,27 @@ final databaseProvider = Provider<AppDatabase>((ref) => AppDatabase());
 /// Privacy toggle: hides monetary amounts on the portfolio page.
 /// Defaults to hidden; resets on every launch (not persisted).
 final hideAmountsProvider = StateProvider<bool>((ref) => true);
+
+/// Identity of the installed build, e.g. `0.9.9+35`; `未知` when the platform
+/// cannot report it. Shown in Settings → 关于 so a bug report can state exactly
+/// which build it came from.
+///
+/// Read from the platform package instead of a compiled-in constant: a
+/// constant would be a second source of truth for the version, free to drift
+/// from what is actually installed.
+final appVersionProvider = FutureProvider<String>((ref) async {
+  try {
+    final info = await PackageInfo.fromPlatform();
+    return info.buildNumber.isEmpty
+        ? info.version
+        : '${info.version}+${info.buildNumber}';
+  } catch (_) {
+    // No platform channel (widget tests) or no package metadata (a web host
+    // that does not serve version.json): fall back instead of failing the
+    // whole settings page.
+    return '未知';
+  }
+});
 
 /// Data access layer.
 final daoProvider = Provider<AssetDao>((ref) => AssetDao(ref.watch(databaseProvider)));
@@ -135,7 +157,16 @@ final historySyncProvider = FutureProvider<BackfillResult?>((ref) async {
   // already recorded with a stale derivation. A platform that simply has no
   // backfill (web) still gets its snapshot — only the fetch-failure abort
   // sets [BackfillResult.historyUnavailable].
-  if (!result.historyUnavailable) {
+  //
+  // Also skipped when the backfill already wrote today from the historical
+  // series. [SnapshotService.ensureTodaySnapshot] documents that `force` may
+  // only be passed once the quotes behind the numbers are known to be fresh,
+  // and this code path performs no market refresh at all: forcing here would
+  // rebuild today from whatever quotes happen to be cached, replacing a
+  // figure that is consistent with every earlier day. The refresh-gated
+  // writer on the portfolio page already covers today as soon as a real
+  // refresh succeeds.
+  if (!result.historyUnavailable && !result.wroteToday) {
     await ref.read(snapshotServiceProvider).ensureTodaySnapshot(force: true);
   }
   return result;

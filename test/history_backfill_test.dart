@@ -83,6 +83,8 @@ void main() {
     expect(result.holdings, 1);
     // Window 07-01..07-08 (today included) = 8 days, all filled.
     expect(result.days, 8);
+    // The run owns today, so callers may skip the live-quote fallback writer.
+    expect(result.wroteToday, isTrue);
 
     final snapshots = await dao.getSnapshots();
     expect(snapshots, hasLength(8));
@@ -388,6 +390,7 @@ void main() {
     // today's snapshot in this state either (the quotes are equally
     // unreliable), see HistorySyncProvider.
     expect(result.historyUnavailable, isTrue);
+    expect(result.wroteToday, isFalse);
     expect(result.message, contains('110022'));
     expect(result.message, contains('未写入'));
     expect(await dao.getSnapshots(), isEmpty);
@@ -412,5 +415,157 @@ void main() {
     for (final s in snapshots) {
       expect(s.totalValue, closeTo(290, 1e-6));
     }
+  });
+
+  group('a day frozen by the live path is re-derived', () {
+    /// A day is written twice: the backfill prices it from the closing
+    /// series, then the live path overwrites it from intraday quotes when the
+    /// user refreshes. A day whose last write happened mid-session stays
+    /// frozen at that value, and because the daily return is the difference
+    /// of two snapshots, it understates the *next* day as well.
+    /// Re-deriving today alone (the pre-fix behaviour) never repaired it.
+
+    Future<Map<String, double>> series(DateTime from, DateTime to) async => {
+          for (var d = from; !d.isAfter(to); d = d.add(const Duration(days: 1)))
+            _FakeHistorySource.key(d): 2.6,
+        };
+
+    test('on the next launch, so the following day returns to normal',
+        () async {
+      await seedFundHolding(purchaseDate: DateTime(2026, 7, 1), latest: 2.9);
+      final fake = _FakeHistorySource();
+      fake.data['110022'] = await series(DateTime(2026, 7, 1), DateTime(2026, 7, 8));
+      final service =
+          HistoryBackfillService(dao, sources: {MarketSource.eastmoney: fake});
+
+      // First launch on 07-07 (a Tuesday). The backfill derives the day at
+      // the closing 2.6, then a mid-session refresh freezes it at 2.9.
+      await service.backfill(now: DateTime(2026, 7, 7));
+      await dao.upsertSnapshot(SnapshotsCompanion.insert(
+        date: '2026-07-07',
+        currency: const Value('CNY'),
+        totalValue: 290,
+        totalCost: 250,
+        createdAt: Value(DateTime(2026, 7, 7, 13, 45)),
+      ));
+
+      // Next launch on 07-08. With only today re-derived the frozen 07-07
+      // stayed put and 07-08 reported 260 - 290 = -30 instead of 0.
+      await service.backfill(now: DateTime(2026, 7, 8));
+
+      final snapshots = await dao.getSnapshots();
+      expect(
+        snapshots.firstWhere((s) => s.date == '2026-07-07').totalValue,
+        closeTo(260, 1e-6),
+        reason: 'the intraday-frozen day must go back on the closing series',
+      );
+      final earning = const DailyEarningsCalculator()
+          .compute(snapshots)
+          .firstWhere((e) => e.date == '2026-07-08');
+      expect(earning.profit, closeTo(0, 1e-6));
+    });
+
+    test('even after a long gap between launches', () async {
+      await seedFundHolding(purchaseDate: DateTime(2026, 7, 1), latest: 2.9);
+      final fake = _FakeHistorySource();
+      fake.data['110022'] =
+          await series(DateTime(2026, 7, 1), DateTime(2026, 7, 11));
+      final service =
+          HistoryBackfillService(dao, sources: {MarketSource.eastmoney: fake});
+
+      // Launch on 07-03, then the live path freezes the day mid-session.
+      await service.backfill(now: DateTime(2026, 7, 3));
+      await dao.upsertSnapshot(SnapshotsCompanion.insert(
+        date: '2026-07-03',
+        currency: const Value('CNY'),
+        totalValue: 290,
+        totalCost: 250,
+        createdAt: Value(DateTime(2026, 7, 3, 13, 45)),
+      ));
+
+      // The app is not opened again until 07-11. A fixed "today + yesterday"
+      // window would skip 07-03 entirely; anchoring the window on the
+      // previous run's date re-derives the whole span instead.
+      await service.backfill(now: DateTime(2026, 7, 11));
+
+      final snapshots = await dao.getSnapshots();
+      expect(snapshots, hasLength(11)); // 07-01 .. 07-11
+      expect(
+        snapshots.firstWhere((s) => s.date == '2026-07-03').totalValue,
+        closeTo(260, 1e-6),
+      );
+    });
+
+    test('but a day before the previous run is still left alone', () async {
+      await seedFundHolding(purchaseDate: DateTime(2026, 7, 1), latest: 2.9);
+      final fake = _FakeHistorySource();
+      fake.data['110022'] = await series(DateTime(2026, 7, 1), DateTime(2026, 7, 4));
+      final service =
+          HistoryBackfillService(dao, sources: {MarketSource.eastmoney: fake});
+
+      await service.backfill(now: DateTime(2026, 7, 4));
+      // A user edit that must survive the next light run: 07-02 predates the
+      // anchor (07-04), so it is not part of the repaired span.
+      final stmt = db.update(db.snapshots)
+        ..where((t) => t.date.equals('2026-07-02'));
+      await stmt.write(const SnapshotsCompanion(totalValue: Value(777)));
+
+      await service.backfill(now: DateTime(2026, 7, 4));
+
+      final snapshots = await dao.getSnapshots();
+      expect(
+        snapshots.firstWhere((s) => s.date == '2026-07-02').totalValue,
+        777,
+      );
+    });
+  });
+
+  group('a light run with no previous-run anchor', () {
+    /// The first launch after the anchored window shipped: the one-off
+    /// rebuild marker is already set and `backfill_last_run` was never
+    /// written, so there is nothing to anchor to. Collapsing to "today only"
+    /// here would leave a frozen day in place on exactly the devices that are
+    /// most likely to be carrying one.
+
+    test('falls back to a fixed week, repairing inside and sparing outside',
+        () async {
+      await dao.setSetting('backfill_v7_gold_spot_and_today', '1');
+      await seedFundHolding(purchaseDate: DateTime(2026, 7, 1), latest: 2.9);
+      final fake = _FakeHistorySource();
+      fake.data['110022'] = {
+        for (var d = DateTime(2026, 7, 1);
+            !d.isAfter(DateTime(2026, 7, 16));
+            d = d.add(const Duration(days: 1)))
+          _FakeHistorySource.key(d): 2.6,
+      };
+
+      Future<void> seedDay(String date, double value) => dao.upsertSnapshot(
+            SnapshotsCompanion.insert(
+              date: date,
+              currency: const Value('CNY'),
+              totalValue: value,
+              totalCost: 250,
+            ),
+          );
+      // 07-13 was frozen mid-session by the live path and sits inside the
+      // fallback week; 07-09 is exactly on the boundary (today - 7) and is
+      // also inside; 07-08 is one day past it and must survive untouched.
+      await seedDay('2026-07-08', 999);
+      await seedDay('2026-07-09', 888);
+      await seedDay('2026-07-13', 290);
+
+      final service =
+          HistoryBackfillService(dao, sources: {MarketSource.eastmoney: fake});
+      await service.backfill(now: DateTime(2026, 7, 16));
+
+      final byDate = {for (final s in await dao.getSnapshots()) s.date: s};
+      expect(byDate, hasLength(16)); // 07-01 .. 07-16
+      expect(byDate['2026-07-13']!.totalValue, closeTo(260, 1e-6),
+          reason: 'a frozen day inside the fallback week must be re-derived');
+      expect(byDate['2026-07-09']!.totalValue, closeTo(260, 1e-6),
+          reason: 'the boundary day (today - 7) is inside the window');
+      expect(byDate['2026-07-08']!.totalValue, 999,
+          reason: 'a day past the fallback week is left alone');
+    });
   });
 }

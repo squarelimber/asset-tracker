@@ -19,6 +19,7 @@ class BackfillResult {
     required this.holdings,
     this.message,
     this.historyUnavailable = false,
+    this.wroteToday = false,
   });
 
   final bool ok;
@@ -32,6 +33,14 @@ class BackfillResult {
   /// derived figures must not be rewritten from the current (possibly
   /// stale) quotes either.
   final bool historyUnavailable;
+
+  /// True when this run wrote a row for today by re-deriving it from the
+  /// same price series as every earlier day. Callers may then skip the
+  /// live-quote fallback writer: that writer rebuilds today from whatever
+  /// quotes happen to be cached, and [SnapshotService.ensureTodaySnapshot]
+  /// documents that it must only be forced once those quotes are known to
+  /// be fresh — which this code path cannot promise (no refresh has run).
+  final bool wroteToday;
 }
 
 /// Backfills historical daily net-worth snapshots from each holding's
@@ -53,6 +62,19 @@ class BackfillResult {
 /// return. Re-deriving today from the same series makes the two paths agree
 /// by construction: the last day of the rebuild and the day before it are
 /// computed by one code path.
+///
+/// A light run also re-derives **every day since the previous run**, not
+/// just today. The live path writes each day from intraday quotes, and a
+/// day frozen that way is only repaired by re-deriving it from the
+/// historical series; recomputing today alone left the previously frozen
+/// day in place forever, so its inflated close-to-close baseline kept
+/// understating the *next* day's return on every subsequent device (the
+/// 2026-09-15 → 2026-09-16 "today's earning is far too small" bug: the day
+/// before was written at 13:45 and never revisited). The window is
+/// anchored to [_lastRunKey] rather than a fixed "today + yesterday", so a
+/// gap of any length (app not opened for a while) is fully repaired too. On
+/// the first run after this window shipped the anchor does not exist yet, so
+/// the window falls back to [_firstRunLookbackDays] — see that constant.
 ///
 /// Recomputation is atomic: new snapshots are fully computed first, then
 /// swapped in a single transaction. The UI therefore never shows a gap
@@ -87,6 +109,22 @@ class HistoryBackfillService {
   /// window — devices that already ran v6 hold gold history derived from
   /// the other instrument and need the corrected series.
   static const _backfillV3Marker = 'backfill_v7_gold_spot_and_today';
+
+  /// Date (yyyy-MM-dd) of the previous successful run. A light run re-derives
+  /// every day from this date through today, because any of them may have
+  /// been overwritten by the live-quote path in the meantime and needs to be
+  /// put back on the historical series.
+  static const _lastRunKey = 'backfill_last_run';
+
+  /// How far back a light run reaches when [_lastRunKey] is absent — the
+  /// first launch after this window shipped, or after a restore that dropped
+  /// the setting. Defaulting to "today only" would leave a day the live path
+  /// froze on intraday quotes permanently wrong, which is exactly the bug the
+  /// window exists to repair; the devices installing this build are the ones
+  /// most likely to be carrying such a day. Seven days covers a weekend plus
+  /// holidays, and a longer backfill is cheap (one day-by-day pass over the
+  /// same price series).
+  static const _firstRunLookbackDays = 7;
 
   /// Backfills snapshots for dates before today.
   ///
@@ -220,12 +258,29 @@ class HistoryBackfillService {
     final existingDates = <String>{};
     if (!needFullRebuild) {
       existingDates.addAll((await _dao.getSnapshots()).map((s) => s.date));
+      // Re-derive today and everything since the previous run. Today is the
+      // day the live path wrote first; the earlier days are the ones it wrote
+      // on previous launches and may have frozen mid-session (see the class
+      // doc). Every other existing day is left alone on a light run.
+      //
+      // With no recorded previous run there is nothing to anchor to, so reach
+      // back a fixed span rather than defaulting to today alone — otherwise
+      // the first launch after upgrading re-derives just one day and leaves a
+      // frozen day (the bug being repaired) in place for good.
+      final lastRun = _parseDay(await _dao.getSetting(_lastRunKey));
+      var reopenFrom = lastRun ??
+          DateTime(
+            todayDate.year,
+            todayDate.month,
+            todayDate.day - _firstRunLookbackDays,
+          );
+      if (reopenFrom.isAfter(todayDate)) reopenFrom = todayDate;
+      for (var d = reopenFrom;
+          !d.isAfter(todayDate);
+          d = d.add(const Duration(days: 1))) {
+        existingDates.remove(todayKey(d));
+      }
     }
-    // Today is always recomputed, even when only the missing days are being
-    // filled: it is the day the live path wrote first, and re-deriving it
-    // from the same series is what keeps the two valuation paths in
-    // agreement. Every other existing day is left alone on a light run.
-    existingDates.remove(todayKey(todayDate));
 
     // Compute the full window day by day, today included.
     var day = DateTime(earliest.year, earliest.month, earliest.day);
@@ -311,12 +366,29 @@ class HistoryBackfillService {
     if (firstTimeRebuild) {
       await _dao.setSetting(_backfillV3Marker, '${current.millisecondsSinceEpoch}');
     }
+    // Remember where the next light run must re-derive from. Written only
+    // after the swap succeeded, so an aborted run leaves the previous anchor
+    // in place and the same days are retried on the next launch.
+    await _dao.setSetting(_lastRunKey, todayKey(todayDate));
 
     return BackfillResult(
       ok: true,
       days: rows.length,
       holdings: coveredHoldings,
+      wroteToday: rows.any((r) => r.date == todayKey(todayDate)),
       message: rows.isEmpty ? '历史净值已是最新' : '已回填 ${rows.length} 天历史净值',
     );
+  }
+
+  /// Parses a yyyy-MM-dd setting value; null when absent or malformed.
+  static DateTime? _parseDay(String? value) {
+    if (value == null) return null;
+    final parts = value.split('-');
+    if (parts.length != 3) return null;
+    final year = int.tryParse(parts[0]);
+    final month = int.tryParse(parts[1]);
+    final day = int.tryParse(parts[2]);
+    if (year == null || month == null || day == null) return null;
+    return DateTime(year, month, day);
   }
 }
