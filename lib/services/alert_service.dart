@@ -1,3 +1,5 @@
+import 'package:drift/drift.dart' show Value;
+
 import '../core/enums.dart';
 import '../core/symbols.dart';
 import '../data/asset_dao.dart';
@@ -71,6 +73,13 @@ class AlertService {
           ruleId: rule.id,
           title: result.title,
           message: result.message,
+          // Stamp the evaluated clock, not the column default. The default
+          // records the *real* time, while the dedup window above is derived
+          // from [current]; when a caller injects `now` (tests, and any
+          // historical replay) the two disagree, the event lands outside its
+          // own dedup window, and the same rule fires again for a day it has
+          // already fired on.
+          triggeredAt: Value(current),
         ));
         newEvents.add(AlertEventRow(
           id: event,
