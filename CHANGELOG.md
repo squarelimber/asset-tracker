@@ -2,6 +2,17 @@
 
 All notable changes to Asset Tracker. Entries are condensed from the commit history; dates follow the release tags.
 
+## [0.9.10] - 2026-09-16
+
+### Fixed
+
+- **点「重建历史快照」后应用陷入无限刷新循环（0.9.9 引入的回归）**: 回填每次运行都会把「上次运行日」写入设置表，而 drift 在设置表**任何一行**被写入时都会重新发射正在被监视的那一行；`historySyncProvider` 恰好一边监视「历史待重算」标志、一边调用回填，于是它自己触发自己——提示条不停弹出「已回填 1 天历史净值」，收益日历反复重载，且每一轮都会重新联网抓取全部持仓的历史行情。现在被监视的设置流会丢弃重复值（`watchSetting` 的 `distinct()`），回填也只在锚点日确实变化时才写入
+- 该循环不会损坏数据（每轮写入的值都相同），但会持续消耗流量与电量，遇到时请先强制停止应用
+
+### Notes
+
+- 回归测试新增 `test/settings_watch_test.dart`，锁定这条契约：写入其它设置项不得触发发射、重写相同值不得触发发射、自身值变化仍须发射、监视标志的 provider 写别的设置不得重跑自己。移除 `distinct()` 后其中 3 条立即失败（provider 循环用例实测 `Expected: <40> Actual: <80>`），即直接把该自激复现出来，因此这些测试是真实防线
+
 ## [0.9.9] - 2026-09-16
 
 ### Fixed
