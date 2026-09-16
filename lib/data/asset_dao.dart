@@ -344,10 +344,22 @@ class AssetDao {
   /// Watches one settings row so providers can react to flag flips (e.g.
   /// a startup auto-sync setting the history dirty flag after the provider
   /// was first computed).
+  ///
+  /// The `distinct()` is load-bearing, not cosmetic. Drift re-runs the query
+  /// and emits on **any** write to the settings table — including writes to
+  /// other keys — and Riverpod re-executes a dependent provider for every
+  /// emission even when the value is identical. Without the dedupe, a
+  /// provider that watches a flag and also writes some *other* setting
+  /// re-triggers itself forever. Seen 2026-09-16: the backfill started
+  /// recording its last-run anchor, and `historySyncProvider` — which
+  /// watches the dirty flag and calls the backfill — span in a loop, so the
+  /// app flooded "已回填 1 天历史净值" snackbars and the earnings calendar
+  /// reloaded endlessly.
   Stream<String?> watchSetting(String key) =>
       (_db.select(_db.settings)..where((t) => t.key.equals(key)))
           .watchSingleOrNull()
-          .map((row) => row?.value);
+          .map((row) => row?.value)
+          .distinct();
 
   // ---------------------------------------------------------------------------
   // Alert rules

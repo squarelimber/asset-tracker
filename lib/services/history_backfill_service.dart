@@ -256,6 +256,10 @@ class HistoryBackfillService {
     final firstTimeRebuild = await _dao.getSetting(_backfillV3Marker) == null;
     final needFullRebuild = forceRebuild || firstTimeRebuild;
     final existingDates = <String>{};
+    // Anchor recorded by the previous run. Null on a full rebuild (every day
+    // is re-derived, so there is nothing to anchor against) and on a first
+    // run, which is also when the fixed fallback window below applies.
+    DateTime? lastRun;
     if (!needFullRebuild) {
       existingDates.addAll((await _dao.getSnapshots()).map((s) => s.date));
       // Re-derive today and everything since the previous run. Today is the
@@ -267,7 +271,7 @@ class HistoryBackfillService {
       // back a fixed span rather than defaulting to today alone — otherwise
       // the first launch after upgrading re-derives just one day and leaves a
       // frozen day (the bug being repaired) in place for good.
-      final lastRun = _parseDay(await _dao.getSetting(_lastRunKey));
+      lastRun = _parseDay(await _dao.getSetting(_lastRunKey));
       var reopenFrom = lastRun ??
           DateTime(
             todayDate.year,
@@ -369,7 +373,16 @@ class HistoryBackfillService {
     // Remember where the next light run must re-derive from. Written only
     // after the swap succeeded, so an aborted run leaves the previous anchor
     // in place and the same days are retried on the next launch.
-    await _dao.setSetting(_lastRunKey, todayKey(todayDate));
+    //
+    // Skipped when the anchor already holds today. Re-writing it would not
+    // change the data, but it is not a no-op for anything watching the
+    // settings table: drift emits on every write to it, and this line runs on
+    // every light pass — which is exactly how the backfill used to spin its
+    // own caller (see [AssetDao.watchSetting]).
+    final anchor = todayKey(todayDate);
+    if (lastRun == null || todayKey(lastRun) != anchor) {
+      await _dao.setSetting(_lastRunKey, anchor);
+    }
 
     return BackfillResult(
       ok: true,
