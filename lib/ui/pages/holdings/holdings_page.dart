@@ -123,7 +123,7 @@ double assetTotalOf(List<HoldingRow> holdings, Map<String, double> rates) {
   return holdings.fold(0.0, (sum, h) {
     final type = AssetType.fromStorage(h.assetType);
     if (type == AssetType.liability) return sum;
-    final rate = rates[h.currency.toUpperCase()] ?? 1;
+    final rate = valueRateOf(h, rates);
     return sum +
         (type.isAmountBased ? h.quantity : h.quantity * h.latestPrice) * rate;
   });
@@ -133,7 +133,7 @@ double assetTotalOf(List<HoldingRow> holdings, Map<String, double> rates) {
 double liabilityTotalOf(List<HoldingRow> holdings, Map<String, double> rates) {
   return holdings.fold(0.0, (sum, h) {
     if (AssetType.fromStorage(h.assetType) != AssetType.liability) return sum;
-    final rate = rates[h.currency.toUpperCase()] ?? 1;
+    final rate = valueRateOf(h, rates);
     return sum + h.quantity * rate;
   });
 }

@@ -109,11 +109,6 @@ class HoldingDetailService {
     final cached = _cache[key];
     if (cached != null) return cached;
 
-    double rateOf(String currency) {
-      final rate = cnyRates[currency.toUpperCase()];
-      return (rate == null || rate <= 0) ? 1 : rate;
-    }
-
     final holdings = await _dao.getHoldings();
     if (holdings.isEmpty) return null;
 
@@ -204,7 +199,7 @@ class HoldingDetailService {
         }
         value = h.quantity * price;
       }
-      final rate = rateOf(h.currency);
+      final rate = valueRateOf(h, cnyRates);
       // Cost converts at the recorded purchase rate when available.
       final cost = (type.isAmountBased
               ? (h.costPrice > 0 ? h.costPrice : h.quantity)

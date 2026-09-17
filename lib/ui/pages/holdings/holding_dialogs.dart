@@ -313,7 +313,7 @@ Future<void> showAddHoldingDialog(BuildContext context, WidgetRef ref) async {
               listenable: Listenable.merge([assetType, symbolCtrl]),
               builder: (context, _) {
                 final forexLinked = assetType.value == AssetType.bankWealth &&
-                    symbolCtrl.text.trim().isNotEmpty;
+                    isFxCurrencyCode(symbolCtrl.text);
                 return Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -464,14 +464,20 @@ Future<void> showAddHoldingDialog(BuildContext context, WidgetRef ref) async {
               }
             }
             final hasSymbol = symbol != null && symbol.isNotEmpty;
+            // `forex` means "priced by a currency rate" — only a
+            // 银行理财 whose *code* is a currency (e.g. USD) qualifies.
+            // A product code (Y05A9W10006A) has no live quote: it is a
+            // manual holding that converts by FX like any other foreign one.
             final marketSource = switch (type) {
               AssetType.stock || AssetType.etf => 'sina',
               AssetType.mutualFund => 'eastmoney',
               AssetType.gold => 'sge',
               AssetType.crypto => 'coingecko',
-              AssetType.bankWealth when hasSymbol => 'forex',
+              AssetType.bankWealth when isFxCurrencyCode(symbol) => 'forex',
               _ => 'manual',
             };
+            final rateLinked =
+                marketSource == 'forex' && isFxCurrencyCode(symbol);
             final userPrice = double.tryParse(latestPriceCtrl.text.trim());
             // Currency is a free label even for FX-linked holdings (the
             // rate lives in the unit price); everything else takes the
@@ -530,9 +536,10 @@ Future<void> showAddHoldingDialog(BuildContext context, WidgetRef ref) async {
                         : 1) // liability: unit price 1, cost = balance
                     : (invested ?? 0)),
                 latestPrice: Value(isAmount ? 1 : (userPrice ?? 0)),
-                costFxRate: finalCurrency != 'CNY' && fx != null && fx > 0
-                    ? Value(fx)
-                    : const Value.absent(),
+                costFxRate:
+                    finalCurrency != 'CNY' && !rateLinked && fx != null && fx > 0
+                        ? Value(fx)
+                        : const Value.absent(),
                 purchaseDate: Value(purchaseDate.value),
                 riskLevel: riskLevel.value == null
                     ? const Value.absent()
@@ -823,17 +830,19 @@ Future<void> showEditHoldingDialog(
                       : '如 400 = 400 天前买入',
                 ),
                 const SizedBox(height: 12),
-                // Forex-linked bank wealth (an FX symbol present) embeds
-                // the live rate in its unit price, so the currency field is
-                // a free label — always editable, no forced CNY, and
-                // switching it never needs number conversion (the quantity
-                // is the foreign amount already).
+                // Rate-linked bank wealth (the *code* is a currency, e.g.
+                // USD) embeds the live rate in its unit price, so the
+                // currency field is a free label — always editable, no
+                // forced CNY, and switching it never needs number
+                // conversion (the quantity is the foreign amount already).
+                // A product code (Y05A9W10006A) is NOT rate-linked: it is an
+                // ordinary foreign-currency holding that converts by FX.
                 ListenableBuilder(
                   listenable: Listenable.merge([typeNotifier, symbolCtrl]),
                   builder: (context, _) {
                     final forexLinked =
                         typeNotifier.value == AssetType.bankWealth &&
-                            symbolCtrl.text.trim().isNotEmpty;
+                            isFxCurrencyCode(symbolCtrl.text);
                     return Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -940,13 +949,12 @@ Future<void> showEditHoldingDialog(
                     AssetType.mutualFund => 'eastmoney',
                     AssetType.gold => 'sge',
                     AssetType.crypto => 'coingecko',
-                    // Manual 银行理财 stays manual unless the user typed an FX
-                    // symbol — flipping the source would silently lock the
-                    // currency back to CNY (autoCny) even though the holding
-                    // is not rate-linked at all (matches the add dialog's
-                    // `bankWealth when hasSymbol => 'forex'` rule).
-                    AssetType.bankWealth =>
-                      symbol.isNotEmpty ? 'forex' : holding.marketSource,
+                    // Manual 银行理财 stays manual unless the code is a
+                    // currency — only then is the unit price the rate
+                    // (isFxLinked); a product code keeps manual pricing.
+                    AssetType.bankWealth => isFxCurrencyCode(symbol)
+                        ? 'forex'
+                        : holding.marketSource,
                     _ => holding.marketSource,
                   }
                 : switch (type) {
@@ -957,7 +965,7 @@ Future<void> showEditHoldingDialog(
                     AssetType.bond => 'manual',
                     AssetType.futures => 'manual',
                     AssetType.bankWealth =>
-                      symbol.isNotEmpty ? 'forex' : 'manual',
+                      isFxCurrencyCode(symbol) ? 'forex' : 'manual',
                     AssetType.cash ||
                     AssetType.bankDeposit ||
                     AssetType.liquidWealth ||
@@ -967,9 +975,16 @@ Future<void> showEditHoldingDialog(
                   };
     // Only forex-linked holdings are priced in CNY by construction; other
     // holdings keep the user-chosen currency (e.g. USD stocks stay USD).
-    final autoCny = unknownType ? false : marketSource == 'forex';
-    // Currency is a free label (even for FX-linked holdings — the rate
-    // lives in the unit price), so always take the user's value.
+    // Only a currency code makes the unit price BE the rate (see
+    // isFxLinked): there the purchase rate already lives in the unit price,
+    // so the cost-fx-rate field stays empty. A product code (a USD NAV
+    // product) is an ordinary foreign holding and keeps its recorded
+    // purchase rate — dropping it would silently re-convert the cost at
+    // today's rate on every save.
+    final autoCny =
+        unknownType ? false : marketSource == 'forex' && isFxCurrencyCode(symbol);
+    // Currency is a free label (even for rate-linked holdings), so always
+    // take the user's value.
     final updated = holding.copyWith(
       accountId: accountIdNotifier.value,
       name: nameCtrl.text.trim().isEmpty ? holding.name : nameCtrl.text.trim(),

@@ -18,13 +18,15 @@ import 'package:asset_tracker/services/backup_service.dart';
 /// M1/M3 (transaction guards), M5 (rate denominator), M10/M11 (target
 /// allocation), H4 (replay window), C2 (backup effective ids).
 void main() {
-  test('FX-linked holdings never double-convert their currency label', () {
+  test('rate-linked holdings never double-convert their currency label', () {
     HoldingRow fxLinked() => HoldingRow(
           id: 1,
           accountId: 1,
           name: '美元理财',
           assetType: 'bank_wealth',
           marketSource: 'forex',
+          // The code IS the currency: the live rate is the unit price.
+          symbol: 'USD',
           quantity: 10000,
           costPrice: 7.0, // purchase-time rate
           latestPrice: 7.1, // live rate (the unit price IS the rate)
@@ -37,6 +39,28 @@ void main() {
     // The conversion is embedded in the unit price: no extra factor.
     expect(valueRateOf(fxLinked(), rates), 1);
     expect(costRateOf(fxLinked(), rates), 1);
+
+    // A bank-wealth product quoted by its product code is NOT rate-linked
+    // (its unit price is a USD NAV), so it converts by FX like any other
+    // foreign holding — see test/fx_conversion_test.dart.
+    final productCode = HoldingRow(
+      id: 4,
+      accountId: 4,
+      name: '汇利日盈6号A',
+      assetType: 'bank_wealth',
+      marketSource: 'forex',
+      symbol: 'Y05A9W10006A',
+      quantity: 13083.68,
+      costPrice: 1.098739,
+      latestPrice: 1.11833,
+      costFxRate: 6.95,
+      currency: 'USD',
+      archived: false,
+      createdAt: DateTime(2026),
+      updatedAt: DateTime(2026),
+    );
+    expect(valueRateOf(productCode, rates), 7.1);
+    expect(costRateOf(productCode, rates), 6.95);
 
     // A market-linked USD holding still converts by currency.
     final usdStock = HoldingRow(

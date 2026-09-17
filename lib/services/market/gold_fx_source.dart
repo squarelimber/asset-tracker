@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 
 import '../../core/enums.dart';
 import '../../core/gold.dart';
+import '../../core/symbols.dart';
 import 'market_data_source.dart';
 
 /// Gold (XAU) and FX rates via Sina Finance.
@@ -23,17 +24,10 @@ class GoldFxSource extends MarketDataSource {
   /// Aliases accepted for gold holdings.
   static const _goldAliases = {'XAU', 'AU99.99', 'AU9999', 'GOLD'};
 
-  /// Supported currency codes -> Sina FX symbol.
-  static const _fxSymbols = {
-    'USD': 'fx_susdcny',
-    'EUR': 'fx_seurcny',
-    'HKD': 'fx_shkdcny',
-    'GBP': 'fx_sgbpcny',
-    'AUD': 'fx_saudcny',
-    'CAD': 'fx_scadcny',
-    'JPY': 'fx_sjpycny',
-    'CHF': 'fx_schfcny',
-  };
+  /// Supported currency codes -> Sina FX symbol. Shared with
+  /// [isFxCurrencyCode]/[isFxLinked] so the quote feed and the conversion
+  /// rule can never disagree on which symbols are rates.
+  static const _fxSymbols = fxCurrencySymbols;
 
   @override
   Future<List<MarketQuote>> fetch(List<String> symbols) async {

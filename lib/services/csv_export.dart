@@ -21,27 +21,22 @@ class CsvExport {
   static String _num(double v) => v.toStringAsFixed(4).replaceFirst(RegExp(r'\.?0+$'), '');
 
   /// Holdings CSV. [accountName] maps holding.accountId -> account name.
-  /// Market value converts at the current rate; cost converts at the
-  /// recorded purchase rate (costFxRate) falling back to the current rate
-  /// — the same口径 as the in-app totals (a missing rate falls back to 1).
-  /// The 币种 column keeps each holding's original currency and the
-  /// per-unit figures (数量/单价/汇率) remain in that currency.
+  /// Market value converts at the current rate ([valueRateOf]); cost converts
+  /// at the recorded purchase rate (costFxRate) falling back to the current
+  /// rate ([costRateOf]) — the same口径 as the in-app totals (a missing rate
+  /// falls back to 1). The 币种 column keeps each holding's original currency
+  /// and the per-unit figures (数量/单价) remain in that currency.
   String holdings(
     List<HoldingRow> holdings,
     Map<int, String> accountName, {
     Map<String, double> cnyRates = const {},
   }) {
-    double rateOf(String currency) {
-      final r = cnyRates[currency.toUpperCase()];
-      return (r == null || r <= 0) ? 1 : r;
-    }
-
     final buf = StringBuffer('\uFEFF');
     buf.writeln(
         '账户,名称,类型,代码,数量,成本单价,最新价,币种,买入日期,市值(CNY),成本(CNY),收益(CNY)');
     for (final h in holdings) {
       final type = AssetType.fromStorage(h.assetType);
-      final marketRate = rateOf(h.currency);
+      final marketRate = valueRateOf(h, cnyRates);
       final costRate = costRateOf(h, cnyRates);
       final marketValueCny = (type.isAmountBased
           ? h.quantity

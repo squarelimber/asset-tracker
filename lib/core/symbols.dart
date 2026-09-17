@@ -34,27 +34,57 @@ String? cacheSymbolFor(HoldingRow holding) {
   return source == MarketSource.sina ? normalizeSinaSymbol(raw) : raw;
 }
 
+/// Currency codes with a live FX quote (Sina `fx_s{ccy}cny`, see
+/// `GoldFxSource`). A holding whose *code* is one of these has an exchange
+/// rate as its symbol — the only case where a unit price can legitimately
+/// BE the rate. Single source of truth: the market source reuses this map.
+const fxCurrencySymbols = <String, String>{
+  'USD': 'fx_susdcny',
+  'EUR': 'fx_seurcny',
+  'HKD': 'fx_shkdcny',
+  'GBP': 'fx_sgbpcny',
+  'AUD': 'fx_saudcny',
+  'CAD': 'fx_scadcny',
+  'JPY': 'fx_sjpycny',
+  'CHF': 'fx_schfcny',
+};
+
+/// Whether [symbol] is a supported FX currency code (e.g. `USD`), as opposed
+/// to a product code (e.g. `Y05A9W10006A`, `JY040214`).
+bool isFxCurrencyCode(String? symbol) =>
+    symbol != null && fxCurrencySymbols.containsKey(symbol.trim().toUpperCase());
+
+/// Whether the holding is *rate-linked*: a 银行理财 whose code is a currency
+/// (e.g. `USD`) is priced by the live exchange rate, so the CNY conversion
+/// is already embedded in `latestPrice` (市值 = 数量 × 汇率) and no second
+/// factor may be applied — its currency is a free label.
+///
+/// Bank-wealth products quoted by their *product* code are NOT rate-linked
+/// even though they carry `forex` as their market source (that source is
+/// just the "no live NAV feed, priced manually" marker for 银行理财): the
+/// unit price is a foreign-currency NAV (e.g. 1.118 USD), so both the market
+/// value and the cost convert by FX like any other foreign holding.
+bool isFxLinked(HoldingRow h) {
+  if (MarketSource.fromStorage(h.marketSource) != MarketSource.forex) {
+    return false;
+  }
+  return isFxCurrencyCode(h.symbol);
+}
+
 /// CNY conversion rate for a holding's market value: the current FX rate
-/// (1 for CNY holdings). FX-linked holdings (银行理财 with an FX symbol)
-/// store the live rate as their unit price, so the conversion is already
-/// embedded in `latestPrice` and no additional factor applies — their
-/// currency is a free label (e.g. USD) without double conversion.
+/// (1 for CNY holdings and rate-linked holdings, see [isFxLinked]).
 double valueRateOf(HoldingRow h, Map<String, double> cnyRates) {
   if (h.currency == 'CNY') return 1;
-  if (MarketSource.fromStorage(h.marketSource) == MarketSource.forex) {
-    return 1;
-  }
+  if (isFxLinked(h)) return 1;
   return cnyRates[h.currency.toUpperCase()] ?? 1;
 }
 
 /// CNY conversion rate for a holding's cost basis: the exchange rate
 /// recorded at purchase time (costFxRate), falling back to the current
-/// rate. 1 for CNY holdings and FX-linked holdings (see [valueRateOf]).
+/// rate. 1 for CNY holdings and rate-linked holdings (see [isFxLinked]).
 double costRateOf(HoldingRow h, Map<String, double> cnyRates) {
   if (h.currency == 'CNY') return 1;
-  if (MarketSource.fromStorage(h.marketSource) == MarketSource.forex) {
-    return 1;
-  }
+  if (isFxLinked(h)) return 1;
   final fx = h.costFxRate;
   if (fx != null && fx > 0) return fx;
   return cnyRates[h.currency.toUpperCase()] ?? 1;
