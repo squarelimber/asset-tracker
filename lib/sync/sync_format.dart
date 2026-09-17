@@ -65,6 +65,7 @@ class SyncFormatter {
         'costFxRate': h.costFxRate,
         'purchaseDate': h.purchaseDate?.toIso8601String(),
         'riskLevel': h.riskLevel,
+        'categoryOverride': h.categoryOverride,
         'currency': h.currency,
         'note': h.note,
         'archived': h.archived,

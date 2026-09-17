@@ -43,10 +43,9 @@ class AllocationCard extends ConsumerWidget {
     final total = summary.totalAssets;
     // Aggregate the fine-grained types into the high-level allocation
     // categories (股票/基金/黄金/债券/现金/其他) for the summary view.
-    final byCat = <AssetCategory, double>{};
-    for (final b in breakdown) {
-      byCat[b.type.category] = (byCat[b.type.category] ?? 0) + b.marketValue;
-    }
+    final byCat = <AssetCategory, double>{
+      for (final b in summary.categoryBreakdown) b.category: b.marketValue,
+    };
     final plan = ref.watch(targetAllocationProvider).value ?? const <AssetCategory, double>{};
     final entries = [
       for (final entry in byCat.entries)

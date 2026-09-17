@@ -33,6 +33,17 @@ class Holdings extends Table {
 
   DateTimeColumn get purchaseDate => dateTime().nullable()();
   TextColumn get riskLevel => text().nullable()();
+
+  /// Manual override of the holding's allocation category (an
+  /// [AssetCategory.storageName]). Null = derive it from [assetType].
+  ///
+  /// The asset type says how a holding is recorded and priced; the category
+  /// says where it counts in the allocation view, the 配置比例 alert and the
+  /// category filter. An ETF carries the *product* type (场内基金 — Sina-
+  /// priced, share-based) while its exposure may sit elsewhere: a 黄金ETF /
+  /// 豆粕ETF is 黄金 / 商品 for allocation even though its product type is a
+  /// fund. Mirrors the [riskLevel] manual override.
+  TextColumn get categoryOverride => text().nullable()();
   TextColumn get note => text().nullable()();
 
   /// Archived holdings stay in the database (and in the earnings calendar)

@@ -40,16 +40,24 @@ String _fundingSourceLabel(HoldingRow h) {
 /// fund types collapse into a single "基金" entry (resolved to 场内/场外 by
 /// the symbol at save time). [AssetType.liability] is a special entry
 /// outside the plan categories.
+///
+/// 「基金」is appended to every category that can be held through a fund,
+/// because a fund's *product* type and its *exposure* are different things:
+/// a 黄金ETF / 豆粕ETF is an 场内基金 (share-based, quoted by Sina) whose
+/// exposure is 黄金 / 商品. Picking the category here sets the exposure and
+/// typing a 6-digit code makes the product an ETF — without this entry the
+/// category could only be picked by mislabelling the product as 期货.
+/// Categories where a fund makes no sense (现金/房产/银行理财) stay as-is.
 List<AssetType> _typesOfCategory(AssetCategory category) {
   switch (category) {
     case AssetCategory.bond:
-      return const [AssetType.bond];
+      return const [AssetType.bond, AssetType.mutualFund];
     case AssetCategory.equity:
       return const [AssetType.stock, AssetType.mutualFund];
     case AssetCategory.gold:
-      return const [AssetType.gold];
+      return const [AssetType.gold, AssetType.mutualFund];
     case AssetCategory.commodity:
-      return const [AssetType.crypto, AssetType.futures];
+      return const [AssetType.crypto, AssetType.futures, AssetType.mutualFund];
     case AssetCategory.cash:
       return const [
         AssetType.cash,
@@ -85,6 +93,8 @@ Future<void> showAddHoldingDialog(BuildContext context, WidgetRef ref) async {
 
   final accountId = ValueNotifier<int?>(accounts.first.id);
   final assetType = ValueNotifier<AssetType>(AssetType.stock);
+  // Manual allocation-category override; null = follow the asset type.
+  final categoryOverride = ValueNotifier<AssetCategory?>(null);
   final riskLevel = ValueNotifier<String?>(null);
   final nameCtrl = TextEditingController();
   final symbolCtrl = TextEditingController();
@@ -132,56 +142,89 @@ Future<void> showAddHoldingDialog(BuildContext context, WidgetRef ref) async {
               ),
             ),
             const SizedBox(height: 12),
-            ValueListenableBuilder<AssetType>(
-              valueListenable: assetType,
-              builder: (context, value, _) => Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Category first, then the specific type, so the picker
-                  // stays short (7 categories + 负债 special entry).
-                  Wrap(
-                    spacing: 6,
-                    runSpacing: 6,
-                    children: [
-                      for (final c in AssetCategory.values)
+            ListenableBuilder(
+              listenable: Listenable.merge([assetType, categoryOverride]),
+              builder: (context, _) {
+                final value = assetType.value;
+                // The picked category is the *allocation* category (品类 =
+                // 标的归类), while 具体类型 says how the holding is recorded
+                // and priced. They only differ for a fund tracking something
+                // other than equities — a 豆粕ETF is 商品 exposure held as an
+                // 场内基金 — which is exactly what the override records.
+                final category = categoryOverride.value ?? value.category;
+                final candidates = _typesOfCategory(category);
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Category first, then the specific type, so the picker
+                    // stays short (7 categories + 负债 special entry).
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: [
+                        for (final c in AssetCategory.values)
+                          ChoiceChip(
+                            label: Text(c.label),
+                            selected: value != AssetType.liability &&
+                                category == c,
+                            visualDensity: VisualDensity.compact,
+                            onSelected: (_) {
+                              categoryOverride.value = c;
+                              // Keep the selected type when the new category
+                              // still offers it, otherwise fall back to the
+                              // category's default.
+                              final next = _typesOfCategory(c);
+                              if (!next.contains(assetType.value)) {
+                                assetType.value = next.first;
+                              }
+                            },
+                          ),
                         ChoiceChip(
-                          label: Text(c.label),
-                          selected: value != AssetType.liability &&
-                              value.category == c,
+                          label: const Text('负债'),
+                          selected: value == AssetType.liability,
                           visualDensity: VisualDensity.compact,
                           onSelected: (_) {
-                            assetType.value = _typesOfCategory(c).first;
+                            categoryOverride.value = null;
+                            assetType.value = AssetType.liability;
                           },
                         ),
-                      ChoiceChip(
-                        label: const Text('负债'),
-                        selected: value == AssetType.liability,
-                        visualDensity: VisualDensity.compact,
-                        onSelected: (_) => assetType.value = AssetType.liability,
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  if (value == AssetType.liability)
-                    const Text(
-                      '负债持仓：信用卡、贷款等欠款（净资产中扣除）',
-                      style: TextStyle(fontSize: 12.5, color: T.text2),
-                    )
-                  else
-                    DropdownButtonFormField<AssetType>(
-                      initialValue: value,
-                      decoration: terminalDecoration('具体类型'),
-                      items: [
-                        for (final t in _typesOfCategory(value.category))
-                          DropdownMenuItem(
-                            value: t,
-                            child: Text(_typePickerLabel(t)),
-                          ),
                       ],
-                      onChanged: (v) => assetType.value = v ?? value,
                     ),
-                ],
-              ),
+                    const SizedBox(height: 8),
+                    if (value == AssetType.liability)
+                      const Text(
+                        '负债持仓：信用卡、贷款等欠款（净资产中扣除）',
+                        style: TextStyle(fontSize: 12.5, color: T.text2),
+                      )
+                    else ...[
+                      DropdownButtonFormField<AssetType>(
+                        initialValue: candidates.contains(value)
+                            ? value
+                            : candidates.first,
+                        decoration: terminalDecoration('具体类型'),
+                        items: [
+                          for (final t in candidates)
+                            DropdownMenuItem(
+                              value: t,
+                              child: Text(_typePickerLabel(t)),
+                            ),
+                        ],
+                        onChanged: (v) => assetType.value = v ?? value,
+                      ),
+                      if (category != value.category)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 6),
+                          child: Text(
+                            '归类为「${category.label}」，产品类型为'
+                            '「${_typePickerLabel(value)}」——资产配置、'
+                            '配置比例告警与品类筛选都按「${category.label}」统计。',
+                            style: const TextStyle(fontSize: 12, color: T.text2),
+                          ),
+                        ),
+                    ],
+                  ],
+                );
+              },
             ),
             const SizedBox(height: 12),
             ValueListenableBuilder<AssetType>(
@@ -240,7 +283,7 @@ Future<void> showAddHoldingDialog(BuildContext context, WidgetRef ref) async {
                   );
                 }
                 final symbolEnabled =
-                    type.isMarketLinked || type == AssetType.bankWealth;
+                    !type.isAmountBased && type != AssetType.liability;
                 return Column(
                   children: [
                     TerminalTextField(
@@ -249,14 +292,17 @@ Future<void> showAddHoldingDialog(BuildContext context, WidgetRef ref) async {
                       hint: switch (type) {
                         AssetType.stock || AssetType.etf =>
                           '如 510880 / 159915（自动识别沪/深）',
-                        AssetType.mutualFund => '如 110022',
+                        AssetType.mutualFund =>
+                          '如 110022；场内 6 位代码自动改为实时行情',
                         AssetType.gold => 'AU99.99（自动金价）',
                         AssetType.crypto => '如 bitcoin',
-                        AssetType.futures => null,
-                        AssetType.bond => '如 019742（国债）或债基代码',
+                        AssetType.futures =>
+                          '选填：合约或产品代码（无实时行情，按手动净值）',
+                        AssetType.bond =>
+                          '选填：如 019742（国债）或基金代码，留空按手动净值',
                         AssetType.bankWealth =>
                           '填外汇代码如 USD 可自动汇率联动，留空手动净值',
-                        _ => null,
+                        _ => '选填：仅作记录，按手动净值',
                       },
                       enabled: symbolEnabled,
                     ),
@@ -464,6 +510,16 @@ Future<void> showAddHoldingDialog(BuildContext context, WidgetRef ref) async {
               }
             }
             final hasSymbol = symbol != null && symbol.isNotEmpty;
+            // Only persist the category when it differs from the type's
+            // natural one: an override equal to the default is noise, and
+            // storing it would pin the category against a later type change.
+            final pickedCategory = categoryOverride.value;
+            final Value<String?> categoryOverrideValue =
+                (type == AssetType.liability ||
+                        pickedCategory == null ||
+                        pickedCategory == type.category)
+                    ? const Value<String?>.absent()
+                    : Value(pickedCategory.storageName);
             // `forex` means "priced by a currency rate" — only a
             // 银行理财 whose *code* is a currency (e.g. USD) qualifies.
             // A product code (Y05A9W10006A) has no live quote: it is a
@@ -528,6 +584,7 @@ Future<void> showAddHoldingDialog(BuildContext context, WidgetRef ref) async {
                 name: name,
                 assetType: type.storageName,
                 marketSource: Value(marketSource),
+                categoryOverride: categoryOverrideValue,
                 symbol: hasSymbol ? Value(symbol) : const Value.absent(),
                 quantity: Value(qty),
                 costPrice: Value(isAmount
@@ -681,6 +738,10 @@ Future<void> showEditHoldingDialog(
   final typeNotifier = ValueNotifier<AssetType>(initialType);
   final accountIdNotifier = ValueNotifier<int>(holding.accountId);
   final riskLevelNotifier = ValueNotifier<String?>(holding.riskLevel);
+  // Manual allocation-category override; null = follow the asset type.
+  final categoryNotifier = ValueNotifier<AssetCategory?>(
+    AssetCategory.fromStorageOrNull(holding.categoryOverride),
+  );
   final nameCtrl = TextEditingController(text: holding.name);
   final symbolCtrl = TextEditingController(text: holding.symbol ?? '');
   final quantityCtrl =
@@ -776,6 +837,38 @@ Future<void> showEditHoldingDialog(
                     riskLevelNotifier.value = v == 'auto' ? null : v;
                   }),
                 ),
+                if (!isLiability) ...[
+                  const SizedBox(height: 12),
+                  DropdownButtonFormField<String>(
+                    initialValue:
+                        categoryNotifier.value?.storageName ?? 'auto',
+                    decoration: terminalDecoration('配置归类'),
+                    items: [
+                      const DropdownMenuItem(
+                        value: 'auto',
+                        child: Text('自动（按资产类型）'),
+                      ),
+                      for (final c in AssetCategory.values)
+                        DropdownMenuItem(
+                          value: c.storageName,
+                          child: Text(c.label),
+                        ),
+                    ],
+                    onChanged: (v) => setState(() {
+                      categoryNotifier.value = v == 'auto'
+                          ? null
+                          : AssetCategory.fromStorageOrNull(v);
+                    }),
+                  ),
+                  const Padding(
+                    padding: EdgeInsets.only(top: 4),
+                    child: Text(
+                      '决定资产配置、配置比例告警与品类筛选里的归类。'
+                      '黄金ETF / 商品ETF 等请在此指定标的归类。',
+                      style: TextStyle(fontSize: 11.5, color: T.text3),
+                    ),
+                  ),
+                ],
                 if (!isAmount) ...[
                   const SizedBox(height: 12),
                   TerminalTextField(
@@ -999,6 +1092,15 @@ Future<void> showEditHoldingDialog(
       riskLevel: riskLevelNotifier.value == null
           ? const Value.absent()
           : Value(riskLevelNotifier.value),
+      // Only keep an override that actually differs from the type's natural
+      // category; an unknown stored type keeps whatever it already had.
+      categoryOverride: unknownType
+          ? Value(holding.categoryOverride)
+          : (type == AssetType.liability ||
+                  categoryNotifier.value == null ||
+                  categoryNotifier.value == type.category)
+              ? const Value.absent()
+              : Value(categoryNotifier.value!.storageName),
       // An unknown stored type keeps its original symbol regardless of the
       // fallback display form.
       symbol: unknownType

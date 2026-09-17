@@ -149,6 +149,9 @@ class BackupService {
             riskLevel: h['riskLevel'] == null
                 ? const Value.absent()
                 : Value(h['riskLevel'].toString()),
+            categoryOverride: h['categoryOverride'] == null
+                ? const Value.absent()
+                : Value(h['categoryOverride'].toString()),
             currency: Value(h['currency']?.toString() ?? 'CNY'),
             note: h['note'] == null
                 ? const Value.absent()
@@ -325,6 +328,7 @@ class BackupService {
         'costFxRate': h.costFxRate,
         'purchaseDate': h.purchaseDate?.toIso8601String(),
         'riskLevel': h.riskLevel,
+        'categoryOverride': h.categoryOverride,
         'currency': h.currency,
         'note': h.note,
         'createdAt': h.createdAt.toIso8601String(),

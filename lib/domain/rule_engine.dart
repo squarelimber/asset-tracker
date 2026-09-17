@@ -3,6 +3,7 @@ import 'dart:convert';
 import '../core/enums.dart';
 import '../core/symbols.dart';
 import '../data/database.dart';
+import 'holding_category.dart';
 import 'portfolio_calculator.dart';
 
 enum AlertLevel { info, warning, danger }
@@ -117,12 +118,13 @@ class AssetRatioEvaluator extends RuleEvaluator {
     final total = ctx.summary.totalAssets;
     if (total <= 0) return const [];
 
-    // Equity = every asset type mapped to the 权益 category (single source
-    // of truth; do not keep a local type set that can drift).
+    // Equity = every holding whose *effective* allocation category is 权益
+    // (single source of truth; do not keep a local type set that can drift).
+    // The manual category override counts: a 商品ETF filed under 商品 must
+    // not inflate the equity ratio.
     var equity = 0.0;
     for (final h in ctx.holdings) {
-      final type = AssetType.fromStorage(h.assetType);
-      if (type.category == AssetCategory.equity) {
+      if (effectiveCategoryOf(h) == AssetCategory.equity) {
         equity += h.quantity * h.latestPrice * valueRateOf(h, ctx.cnyRates);
       }
     }

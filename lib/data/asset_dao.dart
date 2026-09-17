@@ -102,6 +102,7 @@ class AssetDao {
         currency: Value(holding.currency),
         purchaseDate: Value(holding.purchaseDate),
         riskLevel: Value(holding.riskLevel),
+        categoryOverride: Value(holding.categoryOverride),
         note: Value(holding.note),
         archived: Value(holding.archived),
         updatedAt: Value(now ?? DateTime.now()),

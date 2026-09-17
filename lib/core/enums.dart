@@ -134,6 +134,18 @@ enum AssetCategory {
         (t) => t.storageName == name,
         orElse: () => AssetCategory.bond,
       );
+
+  /// Nullable lookup: null or an unrecognised name yields null so the caller
+  /// can fall back (this is how a stored override is resolved — the value
+  /// may also come from a newer app version). [fromStorage] keeps its
+  /// non-null contract for call sites that need a value.
+  static AssetCategory? fromStorageOrNull(String? name) {
+    if (name == null) return null;
+    for (final c in AssetCategory.values) {
+      if (c.storageName == name) return c;
+    }
+    return null;
+  }
 }
 
 /// Where the latest price comes from.

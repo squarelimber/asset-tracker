@@ -22,7 +22,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase([QueryExecutor? executor]) : super(executor ?? _openConnection());
 
   @override
-  int get schemaVersion => 8;
+  int get schemaVersion => 9;
 
   static QueryExecutor _openConnection() {
     // Web requires explicit web options: sqlite3.wasm and drift_worker.js
@@ -104,6 +104,14 @@ class AppDatabase extends _$AppDatabase {
           if (from < 8) {
             final db = m.database as AppDatabase;
             await m.addColumn(db.holdings, db.holdings.archived);
+          }
+          // v8 -> v9: allocation-category override on holdings, so a holding
+          // can be categorised by its underlying exposure rather than its
+          // product type (a 黄金ETF is an 场内基金 whose exposure is gold).
+          // Nullable without a default, so drift's addColumn is safe.
+          if (from < 9) {
+            final db = m.database as AppDatabase;
+            await m.addColumn(db.holdings, db.holdings.categoryOverride);
           }
         },
       );

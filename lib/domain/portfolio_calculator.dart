@@ -1,6 +1,7 @@
 import '../core/enums.dart';
 import '../core/symbols.dart';
 import '../data/database.dart';
+import 'holding_category.dart';
 
 /// Per-asset-type breakdown entry (CNY-converted values).
 class TypeBreakdown {
@@ -12,6 +13,22 @@ class TypeBreakdown {
 
   double get profit => marketValue - cost;
   double get profitPct => cost == 0 ? 0 : profit / cost;
+}
+
+/// Per-allocation-category breakdown entry (CNY-converted values).
+///
+/// Grouped by [effectiveCategoryOf], i.e. the holding's manual category
+/// override when set, so a 黄金ETF counts towards 黄金 rather than 权益.
+class CategoryBreakdown {
+  const CategoryBreakdown({
+    required this.category,
+    required this.marketValue,
+    required this.cost,
+  });
+
+  final AssetCategory category;
+  final double marketValue;
+  final double cost;
 }
 
 /// Per-risk-tier breakdown entry.
@@ -33,6 +50,7 @@ class PortfolioSummary {
     required this.todayChange,
     required this.todayChangePct,
     required this.breakdown,
+    this.categoryBreakdown = const [],
     this.riskBreakdown = const [],
     this.realizedProfit = 0,
   });
@@ -43,6 +61,12 @@ class PortfolioSummary {
   final double todayChange;
   final double? todayChangePct;
   final List<TypeBreakdown> breakdown;
+
+  /// Market value per high-level allocation category. Unlike [breakdown]
+  /// (which groups by asset type), this honours each holding's manual
+  /// category override, so it is the correct source for the allocation view
+  /// and the target-allocation comparison.
+  final List<CategoryBreakdown> categoryBreakdown;
 
   /// Market value per risk tier.
   final List<RiskBreakdown> riskBreakdown;
@@ -95,6 +119,8 @@ class PortfolioCalculator {
 
     final byType = <AssetType, double>{};
     final costByType = <AssetType, double>{};
+    final byCategory = <AssetCategory, double>{};
+    final costByCategory = <AssetCategory, double>{};
     final byRisk = <RiskLevel, double>{};
     final costByRisk = <RiskLevel, double>{};
 
@@ -119,6 +145,9 @@ class PortfolioCalculator {
       cost += holdingCost;
       byType[type] = (byType[type] ?? 0) + marketValue;
       costByType[type] = (costByType[type] ?? 0) + holdingCost;
+      final category = effectiveCategoryOf(h);
+      byCategory[category] = (byCategory[category] ?? 0) + marketValue;
+      costByCategory[category] = (costByCategory[category] ?? 0) + holdingCost;
       byRisk[risk] = (byRisk[risk] ?? 0) + marketValue;
       costByRisk[risk] = (costByRisk[risk] ?? 0) + holdingCost;
 
@@ -141,6 +170,15 @@ class PortfolioCalculator {
         ),
     ]..sort((a, b) => b.marketValue.compareTo(a.marketValue));
 
+    final categoryBreakdown = [
+      for (final entry in byCategory.entries)
+        CategoryBreakdown(
+          category: entry.key,
+          marketValue: entry.value,
+          cost: costByCategory[entry.key] ?? 0,
+        ),
+    ]..sort((a, b) => b.marketValue.compareTo(a.marketValue));
+
     final riskBreakdown = [
       for (final entry in byRisk.entries)
         RiskBreakdown(
@@ -159,6 +197,7 @@ class PortfolioCalculator {
       todayChange: todayChange,
       todayChangePct: prevTotal == 0 ? null : todayChange / prevTotal,
       breakdown: breakdown,
+      categoryBreakdown: categoryBreakdown,
       riskBreakdown: riskBreakdown,
       realizedProfit: realized,
     );

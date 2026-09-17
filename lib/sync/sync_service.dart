@@ -251,6 +251,9 @@ class SyncService {
             riskLevel: row['riskLevel'] == null
                 ? const Value.absent()
                 : Value(row['riskLevel'].toString()),
+            categoryOverride: row['categoryOverride'] == null
+                ? const Value.absent()
+                : Value(row['categoryOverride'].toString()),
             currency: Value(row['currency']?.toString() ?? 'CNY'),
             note: row['note'] == null ? const Value.absent() : Value(row['note'].toString()),
             archived: Value(row['archived'] == true),
@@ -392,6 +395,7 @@ class SyncService {
         costFxRate: (row['costFxRate'] as num?)?.toDouble(),
         purchaseDate: parseIso(row['purchaseDate']),
         riskLevel: row['riskLevel'] as String?,
+        categoryOverride: row['categoryOverride'] as String?,
         currency: row['currency']?.toString() ?? 'CNY',
         note: row['note'] as String?,
         archived: row['archived'] == true,

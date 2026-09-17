@@ -1,13 +1,15 @@
+import 'package:drift/drift.dart' hide isNull;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:asset_tracker/core/enums.dart';
 import 'package:asset_tracker/data/asset_dao.dart';
 import 'package:asset_tracker/data/database.dart';
+import 'package:asset_tracker/domain/holding_category.dart';
 
-/// SQL schema as produced by schema version 7 (multi-device sync:
-/// `updated_at` on accounts/transactions/alert_rules plus the tombstone
-/// table). Dates are stored as unix seconds, matching drift's INTEGER storage.
-const _v7Ddl = [
+/// SQL schema as produced by schema version 8 (`archived` on holdings).
+/// Dates are stored as unix seconds, matching drift's INTEGER storage.
+const _v8Ddl = [
   '''
   CREATE TABLE accounts (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -35,6 +37,7 @@ const _v7Ddl = [
     purchase_date INTEGER,
     risk_level TEXT,
     note TEXT,
+    archived INTEGER NOT NULL DEFAULT 0,
     created_at INTEGER NOT NULL DEFAULT (CAST(strftime('%s', CURRENT_TIMESTAMP) AS INTEGER)),
     updated_at INTEGER NOT NULL DEFAULT (CAST(strftime('%s', CURRENT_TIMESTAMP) AS INTEGER))
   );
@@ -117,28 +120,29 @@ const _v7Ddl = [
   ''',
 ];
 
-/// Opens the app database on top of a hand-built v7 schema and seed data,
-/// exercising the real v7 -> v8 upgrade path that production databases hit.
-Future<AppDatabase> _openOnV7() async {
+/// Opens the app database on top of a hand-built v8 schema and seed data,
+/// exercising the real v8 -> v9 upgrade path that production databases hit.
+Future<AppDatabase> _openOnV8() async {
   final db = AppDatabase(
     NativeDatabase.memory(
       setup: (sqlite) {
-        for (final ddl in _v7Ddl) {
+        for (final ddl in _v8Ddl) {
           sqlite.execute(ddl);
         }
         sqlite.execute(
           "INSERT INTO accounts (id, name, type, currency, note, created_at, updated_at) "
           "VALUES (1, '旧账户', 'general', 'CNY', NULL, 1787000000, 1787000000);",
         );
+        // A plain 场内基金 with no category override: its allocation category
+        // must keep being derived from the asset type after the migration.
         sqlite.execute(
           "INSERT INTO holdings (id, account_id, name, asset_type, market_source, symbol, "
           "quantity, cost_price, latest_price, currency, cost_fx_rate, purchase_date, "
-          "risk_level, note, created_at, updated_at) "
-          "VALUES (1, 1, '某基金', 'mutual_fund', 'eastmoney', '110022', "
-          "100, 10, 15, 'CNY', NULL, NULL, NULL, NULL, 1787000000, 1788000000);",
+          "risk_level, note, archived, created_at, updated_at) "
+          "VALUES (1, 1, '沪深300ETF', 'etf', 'sina', 'sh510300', "
+          "1000, 3.5, 4.0, 'CNY', NULL, NULL, NULL, NULL, 0, 1787000000, 1788000000);",
         );
-        // Mark the database as schema version 7 so drift runs the upgrade.
-        sqlite.execute('PRAGMA user_version = 7;');
+        sqlite.execute('PRAGMA user_version = 8;');
       },
     ),
   );
@@ -146,58 +150,79 @@ Future<AppDatabase> _openOnV7() async {
 }
 
 void main() {
-  test('v7 -> v8 migration adds holdings.archived defaulting to false', () async {
-    final db = await _openOnV7();
+  test('v8 -> v9 migration adds holdings.category_override as NULL', () async {
+    final db = await _openOnV8();
     final dao = AssetDao(db);
 
-    // The seeded row survives the migration and reads archived = false.
+    // The seeded row survives and has no override — i.e. it keeps the old,
+    // type-derived categorisation rather than being filed anywhere new.
     final holdings = await dao.getHoldings();
     expect(holdings, hasLength(1));
-    expect(holdings.single.archived, isFalse);
+    expect(holdings.single.categoryOverride, isNull);
+    expect(effectiveCategoryOf(holdings.single), AssetCategory.equity);
 
-    // Raw storage: the column exists and the default is 0.
-    // The schema has since moved on (v9 added category_override), so a v7
-    // database migrates straight through — assert at least the v8 step ran.
-    final userVersion = await db
-        .customSelect('PRAGMA user_version;')
+    // Raw storage: the column exists, is nullable and defaults to NULL.
+    final userVersion = await db.customSelect('PRAGMA user_version;').getSingle();
+    expect(userVersion.data.values.single, 9);
+
+    final raw = await db
+        .customSelect('SELECT category_override FROM holdings WHERE id = 1;')
         .getSingle();
-    expect(userVersion.data.values.single, greaterThanOrEqualTo(8));
+    expect(raw.data.values.single, isNull);
 
-    final archivedValue = await db
-        .customSelect('SELECT archived FROM holdings WHERE id = 1;')
+    // The upgrade must not rewrite any existing value: the round-trip build
+    // of the row would drop an unknown column, so check the whole row too.
+    final name = await db
+        .customSelect('SELECT symbol, latest_price FROM holdings WHERE id = 1;')
         .getSingle();
-    expect(archivedValue.data.values.single, 0);
+    expect(name.data.values, ['sh510300', 4.0]);
 
-    // setArchived flips the flag and bumps updated_at. Dates are stored as
-    // unix seconds, so use a whole-second timestamp for an exact round trip.
-    final now = DateTime(2026, 9, 4, 10, 30);
-    await dao.setArchived(1, true, now: now);
-    final archived = await dao.getHolding(1);
-    expect(archived!.archived, isTrue);
-    expect(archived.updatedAt, now);
-
-    // Restore works too.
-    await dao.setArchived(1, false, now: now);
-    expect((await dao.getHolding(1))!.archived, isFalse);
-
-    // Writes still work after the migration.
-    await dao.createAccount(AccountsCompanion.insert(
-      name: '新账户2',
-      type: 'general',
-    ));
-    expect(await dao.getAccounts(), hasLength(2));
     await db.close();
   });
 
-  test('v8 database created from scratch still works (no regression)', () async {
+  test('the override survives an update round-trip', () async {
+    final db = await _openOnV8();
+    final dao = AssetDao(db);
+
+    final h = (await dao.getHoldings()).single;
+    // File the ETF under 商品 (a 豆粕ETF-style holding) and save.
+    await dao.updateHolding(h.copyWith(categoryOverride: const Value('commodity')));
+    final saved = (await dao.getHoldings()).single;
+    expect(saved.categoryOverride, 'commodity');
+    expect(effectiveCategoryOf(saved), AssetCategory.commodity);
+    // The product type is untouched — 场内基金 is still 场内基金.
+    expect(AssetType.fromStorage(saved.assetType), AssetType.etf);
+
+    // Clearing it goes back to the type-derived category.
+    await dao.updateHolding(saved.copyWith(categoryOverride: const Value(null)));
+    expect(
+      effectiveCategoryOf((await dao.getHoldings()).single),
+      AssetCategory.equity,
+    );
+
+    await db.close();
+  });
+
+  test('a v9 database created from scratch still works (no regression)',
+      () async {
     final db = AppDatabase(NativeDatabase.memory());
     final dao = AssetDao(db);
     await dao.createAccount(AccountsCompanion.insert(
       name: '全新库',
       type: 'general',
     ));
-    final accounts = await dao.getAccounts();
-    expect(accounts.single.name, '全新库');
+    await dao.createHolding(HoldingsCompanion.insert(
+      accountId: 1,
+      name: '豆粕ETF',
+      assetType: 'etf',
+      symbol: const Value('sz159985'),
+      quantity: const Value(100),
+      categoryOverride: const Value('commodity'),
+    ));
+    expect(
+      effectiveCategoryOf((await dao.getHoldings()).single),
+      AssetCategory.commodity,
+    );
     await db.close();
   });
 }

@@ -600,6 +600,17 @@ class $HoldingsTable extends Holdings
     type: DriftSqlType.string,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _categoryOverrideMeta = const VerificationMeta(
+    'categoryOverride',
+  );
+  @override
+  late final GeneratedColumn<String> categoryOverride = GeneratedColumn<String>(
+    'category_override',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
   static const VerificationMeta _noteMeta = const VerificationMeta('note');
   @override
   late final GeneratedColumn<String> note = GeneratedColumn<String>(
@@ -663,6 +674,7 @@ class $HoldingsTable extends Holdings
     costFxRate,
     purchaseDate,
     riskLevel,
+    categoryOverride,
     note,
     archived,
     createdAt,
@@ -773,6 +785,15 @@ class $HoldingsTable extends Holdings
         riskLevel.isAcceptableOrUnknown(data['risk_level']!, _riskLevelMeta),
       );
     }
+    if (data.containsKey('category_override')) {
+      context.handle(
+        _categoryOverrideMeta,
+        categoryOverride.isAcceptableOrUnknown(
+          data['category_override']!,
+          _categoryOverrideMeta,
+        ),
+      );
+    }
     if (data.containsKey('note')) {
       context.handle(
         _noteMeta,
@@ -858,6 +879,10 @@ class $HoldingsTable extends Holdings
         DriftSqlType.string,
         data['${effectivePrefix}risk_level'],
       ),
+      categoryOverride: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}category_override'],
+      ),
       note: attachedDatabase.typeMapping.read(
         DriftSqlType.string,
         data['${effectivePrefix}note'],
@@ -900,7 +925,21 @@ class HoldingRow extends DataClass implements Insertable<HoldingRow> {
   final double? costFxRate;
   final DateTime? purchaseDate;
   final String? riskLevel;
+
+  /// Manual override of the holding's allocation category (an
+  /// [AssetCategory.storageName]). Null = derive it from [assetType].
+  ///
+  /// The asset type says how a holding is recorded and priced; the category
+  /// says where it counts in the allocation view, the 配置比例 alert and the
+  /// category filter. An ETF carries the *product* type (场内基金 — Sina-
+  /// priced, share-based) while its exposure may sit elsewhere: a 黄金ETF /
+  /// 豆粕ETF is 黄金 / 商品 for allocation even though its product type is a
+  /// fund. Mirrors the [riskLevel] manual override.
+  final String? categoryOverride;
   final String? note;
+
+  /// Archived holdings stay in the database (and in the earnings calendar)
+  /// but are hidden from the default holdings views.
   final bool archived;
   final DateTime createdAt;
   final DateTime updatedAt;
@@ -918,6 +957,7 @@ class HoldingRow extends DataClass implements Insertable<HoldingRow> {
     this.costFxRate,
     this.purchaseDate,
     this.riskLevel,
+    this.categoryOverride,
     this.note,
     required this.archived,
     required this.createdAt,
@@ -946,6 +986,9 @@ class HoldingRow extends DataClass implements Insertable<HoldingRow> {
     }
     if (!nullToAbsent || riskLevel != null) {
       map['risk_level'] = Variable<String>(riskLevel);
+    }
+    if (!nullToAbsent || categoryOverride != null) {
+      map['category_override'] = Variable<String>(categoryOverride);
     }
     if (!nullToAbsent || note != null) {
       map['note'] = Variable<String>(note);
@@ -979,6 +1022,9 @@ class HoldingRow extends DataClass implements Insertable<HoldingRow> {
       riskLevel: riskLevel == null && nullToAbsent
           ? const Value.absent()
           : Value(riskLevel),
+      categoryOverride: categoryOverride == null && nullToAbsent
+          ? const Value.absent()
+          : Value(categoryOverride),
       note: note == null && nullToAbsent ? const Value.absent() : Value(note),
       archived: Value(archived),
       createdAt: Value(createdAt),
@@ -1005,6 +1051,7 @@ class HoldingRow extends DataClass implements Insertable<HoldingRow> {
       costFxRate: serializer.fromJson<double?>(json['costFxRate']),
       purchaseDate: serializer.fromJson<DateTime?>(json['purchaseDate']),
       riskLevel: serializer.fromJson<String?>(json['riskLevel']),
+      categoryOverride: serializer.fromJson<String?>(json['categoryOverride']),
       note: serializer.fromJson<String?>(json['note']),
       archived: serializer.fromJson<bool>(json['archived']),
       createdAt: serializer.fromJson<DateTime>(json['createdAt']),
@@ -1028,6 +1075,7 @@ class HoldingRow extends DataClass implements Insertable<HoldingRow> {
       'costFxRate': serializer.toJson<double?>(costFxRate),
       'purchaseDate': serializer.toJson<DateTime?>(purchaseDate),
       'riskLevel': serializer.toJson<String?>(riskLevel),
+      'categoryOverride': serializer.toJson<String?>(categoryOverride),
       'note': serializer.toJson<String?>(note),
       'archived': serializer.toJson<bool>(archived),
       'createdAt': serializer.toJson<DateTime>(createdAt),
@@ -1049,6 +1097,7 @@ class HoldingRow extends DataClass implements Insertable<HoldingRow> {
     Value<double?> costFxRate = const Value.absent(),
     Value<DateTime?> purchaseDate = const Value.absent(),
     Value<String?> riskLevel = const Value.absent(),
+    Value<String?> categoryOverride = const Value.absent(),
     Value<String?> note = const Value.absent(),
     bool? archived,
     DateTime? createdAt,
@@ -1067,6 +1116,9 @@ class HoldingRow extends DataClass implements Insertable<HoldingRow> {
     costFxRate: costFxRate.present ? costFxRate.value : this.costFxRate,
     purchaseDate: purchaseDate.present ? purchaseDate.value : this.purchaseDate,
     riskLevel: riskLevel.present ? riskLevel.value : this.riskLevel,
+    categoryOverride: categoryOverride.present
+        ? categoryOverride.value
+        : this.categoryOverride,
     note: note.present ? note.value : this.note,
     archived: archived ?? this.archived,
     createdAt: createdAt ?? this.createdAt,
@@ -1095,6 +1147,9 @@ class HoldingRow extends DataClass implements Insertable<HoldingRow> {
           ? data.purchaseDate.value
           : this.purchaseDate,
       riskLevel: data.riskLevel.present ? data.riskLevel.value : this.riskLevel,
+      categoryOverride: data.categoryOverride.present
+          ? data.categoryOverride.value
+          : this.categoryOverride,
       note: data.note.present ? data.note.value : this.note,
       archived: data.archived.present ? data.archived.value : this.archived,
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
@@ -1118,6 +1173,7 @@ class HoldingRow extends DataClass implements Insertable<HoldingRow> {
           ..write('costFxRate: $costFxRate, ')
           ..write('purchaseDate: $purchaseDate, ')
           ..write('riskLevel: $riskLevel, ')
+          ..write('categoryOverride: $categoryOverride, ')
           ..write('note: $note, ')
           ..write('archived: $archived, ')
           ..write('createdAt: $createdAt, ')
@@ -1141,6 +1197,7 @@ class HoldingRow extends DataClass implements Insertable<HoldingRow> {
     costFxRate,
     purchaseDate,
     riskLevel,
+    categoryOverride,
     note,
     archived,
     createdAt,
@@ -1163,6 +1220,7 @@ class HoldingRow extends DataClass implements Insertable<HoldingRow> {
           other.costFxRate == this.costFxRate &&
           other.purchaseDate == this.purchaseDate &&
           other.riskLevel == this.riskLevel &&
+          other.categoryOverride == this.categoryOverride &&
           other.note == this.note &&
           other.archived == this.archived &&
           other.createdAt == this.createdAt &&
@@ -1183,6 +1241,7 @@ class HoldingsCompanion extends UpdateCompanion<HoldingRow> {
   final Value<double?> costFxRate;
   final Value<DateTime?> purchaseDate;
   final Value<String?> riskLevel;
+  final Value<String?> categoryOverride;
   final Value<String?> note;
   final Value<bool> archived;
   final Value<DateTime> createdAt;
@@ -1201,6 +1260,7 @@ class HoldingsCompanion extends UpdateCompanion<HoldingRow> {
     this.costFxRate = const Value.absent(),
     this.purchaseDate = const Value.absent(),
     this.riskLevel = const Value.absent(),
+    this.categoryOverride = const Value.absent(),
     this.note = const Value.absent(),
     this.archived = const Value.absent(),
     this.createdAt = const Value.absent(),
@@ -1220,6 +1280,7 @@ class HoldingsCompanion extends UpdateCompanion<HoldingRow> {
     this.costFxRate = const Value.absent(),
     this.purchaseDate = const Value.absent(),
     this.riskLevel = const Value.absent(),
+    this.categoryOverride = const Value.absent(),
     this.note = const Value.absent(),
     this.archived = const Value.absent(),
     this.createdAt = const Value.absent(),
@@ -1241,6 +1302,7 @@ class HoldingsCompanion extends UpdateCompanion<HoldingRow> {
     Expression<double>? costFxRate,
     Expression<DateTime>? purchaseDate,
     Expression<String>? riskLevel,
+    Expression<String>? categoryOverride,
     Expression<String>? note,
     Expression<bool>? archived,
     Expression<DateTime>? createdAt,
@@ -1260,6 +1322,7 @@ class HoldingsCompanion extends UpdateCompanion<HoldingRow> {
       if (costFxRate != null) 'cost_fx_rate': costFxRate,
       if (purchaseDate != null) 'purchase_date': purchaseDate,
       if (riskLevel != null) 'risk_level': riskLevel,
+      if (categoryOverride != null) 'category_override': categoryOverride,
       if (note != null) 'note': note,
       if (archived != null) 'archived': archived,
       if (createdAt != null) 'created_at': createdAt,
@@ -1281,6 +1344,7 @@ class HoldingsCompanion extends UpdateCompanion<HoldingRow> {
     Value<double?>? costFxRate,
     Value<DateTime?>? purchaseDate,
     Value<String?>? riskLevel,
+    Value<String?>? categoryOverride,
     Value<String?>? note,
     Value<bool>? archived,
     Value<DateTime>? createdAt,
@@ -1300,6 +1364,7 @@ class HoldingsCompanion extends UpdateCompanion<HoldingRow> {
       costFxRate: costFxRate ?? this.costFxRate,
       purchaseDate: purchaseDate ?? this.purchaseDate,
       riskLevel: riskLevel ?? this.riskLevel,
+      categoryOverride: categoryOverride ?? this.categoryOverride,
       note: note ?? this.note,
       archived: archived ?? this.archived,
       createdAt: createdAt ?? this.createdAt,
@@ -1349,6 +1414,9 @@ class HoldingsCompanion extends UpdateCompanion<HoldingRow> {
     if (riskLevel.present) {
       map['risk_level'] = Variable<String>(riskLevel.value);
     }
+    if (categoryOverride.present) {
+      map['category_override'] = Variable<String>(categoryOverride.value);
+    }
     if (note.present) {
       map['note'] = Variable<String>(note.value);
     }
@@ -1380,6 +1448,7 @@ class HoldingsCompanion extends UpdateCompanion<HoldingRow> {
           ..write('costFxRate: $costFxRate, ')
           ..write('purchaseDate: $purchaseDate, ')
           ..write('riskLevel: $riskLevel, ')
+          ..write('categoryOverride: $categoryOverride, ')
           ..write('note: $note, ')
           ..write('archived: $archived, ')
           ..write('createdAt: $createdAt, ')
@@ -2946,6 +3015,15 @@ class SnapshotRow extends DataClass implements Insertable<SnapshotRow> {
   /// Outstanding liabilities on that day, so the earning view can exclude
   /// principal repayments/borrowing from the return (cash-flow, not gain).
   final double liabilities;
+
+  /// Last time this day's value was (re)derived.
+  ///
+  /// Doubles as the cross-device last-write-wins version for snapshots
+  /// (`SyncFormatter.snapshotToRow` maps it to `updatedAt`), so it must be
+  /// written explicitly on every recompute: a snapshot is derived data and
+  /// is rewritten whenever the underlying prices or holdings change, and
+  /// that correction has to be able to win the merge. Leaving the column
+  /// default in place froze the version at the day's first write.
   final DateTime createdAt;
   const SnapshotRow({
     required this.date,
@@ -4915,6 +4993,7 @@ typedef $$HoldingsTableCreateCompanionBuilder =
       Value<double?> costFxRate,
       Value<DateTime?> purchaseDate,
       Value<String?> riskLevel,
+      Value<String?> categoryOverride,
       Value<String?> note,
       Value<bool> archived,
       Value<DateTime> createdAt,
@@ -4935,6 +5014,7 @@ typedef $$HoldingsTableUpdateCompanionBuilder =
       Value<double?> costFxRate,
       Value<DateTime?> purchaseDate,
       Value<String?> riskLevel,
+      Value<String?> categoryOverride,
       Value<String?> note,
       Value<bool> archived,
       Value<DateTime> createdAt,
@@ -5029,6 +5109,11 @@ class $$HoldingsTableFilterComposer
 
   ColumnFilters<String> get riskLevel => $composableBuilder(
     column: $table.riskLevel,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get categoryOverride => $composableBuilder(
+    column: $table.categoryOverride,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -5145,6 +5230,11 @@ class $$HoldingsTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<String> get categoryOverride => $composableBuilder(
+    column: $table.categoryOverride,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<String> get note => $composableBuilder(
     column: $table.note,
     builder: (column) => ColumnOrderings(column),
@@ -5242,6 +5332,11 @@ class $$HoldingsTableAnnotationComposer
   GeneratedColumn<String> get riskLevel =>
       $composableBuilder(column: $table.riskLevel, builder: (column) => column);
 
+  GeneratedColumn<String> get categoryOverride => $composableBuilder(
+    column: $table.categoryOverride,
+    builder: (column) => column,
+  );
+
   GeneratedColumn<String> get note =>
       $composableBuilder(column: $table.note, builder: (column) => column);
 
@@ -5319,6 +5414,7 @@ class $$HoldingsTableTableManager
                 Value<double?> costFxRate = const Value.absent(),
                 Value<DateTime?> purchaseDate = const Value.absent(),
                 Value<String?> riskLevel = const Value.absent(),
+                Value<String?> categoryOverride = const Value.absent(),
                 Value<String?> note = const Value.absent(),
                 Value<bool> archived = const Value.absent(),
                 Value<DateTime> createdAt = const Value.absent(),
@@ -5337,6 +5433,7 @@ class $$HoldingsTableTableManager
                 costFxRate: costFxRate,
                 purchaseDate: purchaseDate,
                 riskLevel: riskLevel,
+                categoryOverride: categoryOverride,
                 note: note,
                 archived: archived,
                 createdAt: createdAt,
@@ -5357,6 +5454,7 @@ class $$HoldingsTableTableManager
                 Value<double?> costFxRate = const Value.absent(),
                 Value<DateTime?> purchaseDate = const Value.absent(),
                 Value<String?> riskLevel = const Value.absent(),
+                Value<String?> categoryOverride = const Value.absent(),
                 Value<String?> note = const Value.absent(),
                 Value<bool> archived = const Value.absent(),
                 Value<DateTime> createdAt = const Value.absent(),
@@ -5375,6 +5473,7 @@ class $$HoldingsTableTableManager
                 costFxRate: costFxRate,
                 purchaseDate: purchaseDate,
                 riskLevel: riskLevel,
+                categoryOverride: categoryOverride,
                 note: note,
                 archived: archived,
                 createdAt: createdAt,

@@ -12,6 +12,7 @@ import '../../../core/responsive.dart';
 import '../../../core/symbols.dart';
 import '../../../data/database.dart';
 import '../../../domain/closed_holding.dart';
+import '../../../domain/holding_category.dart';
 import '../../components/app_bar_actions.dart';
 import '../../components/data_row.dart';
 import '../../components/delta_text.dart';
@@ -193,13 +194,15 @@ class _HoldingsPageState extends ConsumerState<HoldingsPage> {
 
   /// Search match: name, symbol, the asset-type label, or the high-level
   /// category (e.g. tapping "基金" in the allocation card filters to every
-  /// fund-type holding — etf + 场外基金).
+  /// fund-type holding — etf + 场外基金). The category match uses the
+  /// holding's *effective* category, so a 黄金ETF filed under 黄金 is found
+  /// by tapping 黄金 as well as by its own 场内基金 label.
   bool _matchesQuery(HoldingRow h, String q) {
     final type = AssetType.fromStorage(h.assetType);
     final cat = AssetCategory.values
         .where((c) => c.label == q || c.storageName == q)
         .firstOrNull;
-    if (cat != null && type.category == cat) return true;
+    if (cat != null && effectiveCategoryOf(h) == cat) return true;
     return h.name.toLowerCase().contains(q) ||
         (h.symbol ?? '').toLowerCase().contains(q) ||
         type.label.toLowerCase().contains(q) ||
