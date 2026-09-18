@@ -3,6 +3,7 @@ import 'package:drift/drift.dart';
 import '../core/enums.dart';
 import '../data/asset_dao.dart';
 import '../data/database.dart';
+import 'holding_cost.dart';
 
 /// Outcome of a transaction record/remove operation.
 class TransactionResult {
@@ -26,8 +27,11 @@ class TransactionResult {
   /// - sell:    share holding quantity -q (must not go negative); cost
   ///            unchanged; optional cash target holding +amount (invested
   ///            moves with it, mirror of buy).
-  /// - transfer: source and target are cash/liability holdings; source -amount,
-  ///            target +amount (repaying a liability = transfer to it).
+/// - transfer: source and target are cash/liability holdings; source -amount,
+///            target +amount (repaying a liability = transfer to it). The
+///            invested amount moves **proportionally** with the money and by
+///            the same absolute number on both legs, so a transfer never
+///            changes the portfolio's total cost (see [movedCostOf]).
   /// - dividend: cash holding +amount (invested untouched -> counts as gain).
   /// - income:   cash +amount AND invested +amount (capital entering, excluded
   ///            from investment P/L).
@@ -377,23 +381,34 @@ class TransactionService {
       throw ArgumentError(
           '「${source.name}」余额不足（可用 ${_fmt(source.quantity)}）');
     }
-    await _applyBalanceMove(sourceId, -amount, moveCost: moveCost);
-    await _applyBalanceMove(targetId, amount, moveCost: moveCost);
+    // The invested amount that travels with the money: computed **once**,
+    // from the source, and applied symmetrically to both legs so the
+    // portfolio's total cost is exactly conserved. An internal transfer
+    // must never create or destroy cost — when it did, the account's
+    // unrealized gain turned into a same-sized loss on the overview card.
+    final moved = moveCost ? movedCostOf(source, amount) : 0.0;
+    await _applyBalanceMove(sourceId, -amount, costDelta: -moved);
+    await _applyBalanceMove(targetId, amount, costDelta: moved);
   }
 
   /// Moves [delta] on a cash or liability holding. For liabilities the
   /// direction is inverted: receiving money repays debt (balance falls),
   /// paying out increases the debt.
   ///
-  /// Cash holdings move their invested amount (costPrice) together with the
-  /// balance (when [moveCost] is set), so internal transfers (repayment,
-  /// moving money between accounts) never distort the capital-gains return
-  /// rate: value and cost change by the same amount. Liabilities have no
-  /// cost basis and only move the outstanding balance.
+  /// [costDelta] is the change applied to the invested amount. Transfers
+  /// pass the moved principal explicitly (source −moved, target +moved,
+  /// same number — see [movedCostOf]); 0 leaves the invested amount
+  /// untouched, which is what legacy transfers recorded before cost
+  /// tracking need when they are reversed.
+  ///
+  /// The base is the *effective* cost ([effectiveCostOf]), not the raw
+  /// column: a holding whose invested amount was never recorded keeps its
+  /// implied principal instead of having it reset (or invented) by the
+  /// move. Liabilities have no cost basis and only move the balance.
   Future<void> _applyBalanceMove(
     int holdingId,
     double delta, {
-    bool moveCost = true,
+    double costDelta = 0,
   }) async {
     final holding = await _getHolding(holdingId);
     final type = AssetType.fromStorage(holding.assetType);
@@ -401,8 +416,8 @@ class TransactionService {
       throw ArgumentError('目标持仓不是现金/负债类资产');
     }
     final effective = type == AssetType.liability ? -delta : delta;
-    final newCost = type.isAmountBased && moveCost
-        ? (holding.costPrice + delta).clamp(0.0, double.infinity)
+    final newCost = type.isAmountBased && costDelta != 0
+        ? (effectiveCostOf(holding) + costDelta).clamp(0.0, double.infinity)
         : holding.costPrice;
     await _updateHolding(
       holding,

@@ -183,9 +183,16 @@ void main() {
       expect(r.ok, isTrue);
       expect((await dao.getHolding(a))!.quantity, 7000);
       expect((await dao.getHolding(b))!.quantity, 4000);
-      // Invested moves with the transfer so return rates stay undistorted.
-      expect((await dao.getHolding(a))!.costPrice, 6000);
-      expect((await dao.getHolding(b))!.costPrice, 4000);
+      // Invested moves with the balance so the transfer neither distorts the
+      // return rate of A (10,000/9,000 = 11.11% before and after) nor the
+      // portfolio's total cost. The share of the principal that leaves is
+      // proportional to the money moved: 9,000 × (3,000 / 10,000) = 2,700,
+      // not a flat 3,000 — moving a flat 3,000 would have pushed A's gain to
+      // 16.7% and, once the principal ran out, invented cost for B.
+      expect((await dao.getHolding(a))!.costPrice, closeTo(6300, 1e-6));
+      expect((await dao.getHolding(b))!.costPrice, closeTo(3700, 1e-6));
+      expect((await dao.getHolding(a))!.costPrice +
+          (await dao.getHolding(b))!.costPrice, closeTo(10000, 1e-6));
     });
 
     test('repaying a liability reduces both balances', () async {
