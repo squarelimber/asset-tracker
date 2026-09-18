@@ -568,4 +568,79 @@ void main() {
           reason: 'a day past the fallback week is left alone');
     });
   });
+
+  test('a transfer that empties an account leaves no phantom cost behind',
+      () async {
+    // The real 2026-09-18 sequence: 余额宝 (balance 117,303.20, invested
+    // 115,364.71) was emptied into 现金账户 by a 117,327.38 transfer, and the
+    // cash account then paid 13,642.20 for an ETF. The replay used to report
+    // 余额宝's *pre*-transfer principal as the transfer day's invested amount
+    // while its value was already 0, so that day's cost came out 117,327.38
+    // too high — the overview showed a fake "-114,713.84 today earning" on
+    // every cold start until a price refresh overwrote the day from the
+    // holdings table.
+    final accountId = await dao.createAccount(AccountsCompanion.insert(
+      name: '测试账户',
+      type: 'general',
+    ));
+    final yuebaoId = await dao.createHolding(HoldingsCompanion.insert(
+      accountId: accountId,
+      name: '余额宝',
+      assetType: 'bank_deposit',
+      marketSource: const Value('manual'),
+      quantity: const Value(0),
+      costPrice: const Value(0),
+      latestPrice: const Value(1),
+      purchaseDate: Value(DateTime(2026, 9, 1)),
+    ));
+    final cashId = await dao.createHolding(HoldingsCompanion.insert(
+      accountId: accountId,
+      name: '现金账户',
+      assetType: 'savings',
+      marketSource: const Value('manual'),
+      quantity: const Value(122182.66),
+      costPrice: const Value(122216.00),
+      latestPrice: const Value(1),
+      purchaseDate: Value(DateTime(2026, 9, 1)),
+    ));
+    await dao.createTransaction(TransactionsCompanion.insert(
+      accountId: accountId,
+      holdingId: const Value.absent(),
+      cashSourceId: Value(yuebaoId),
+      cashTargetId: Value(cashId),
+      type: 'transfer_out',
+      amount: 117327.38,
+      currency: const Value('CNY'),
+      occurredAt: DateTime(2026, 9, 18, 10, 16, 8),
+      costMoved: const Value(true),
+    ));
+    await dao.createTransaction(TransactionsCompanion.insert(
+      accountId: accountId,
+      holdingId: const Value.absent(),
+      cashSourceId: Value(cashId),
+      type: 'buy',
+      amount: 13642.20,
+      currency: const Value('CNY'),
+      occurredAt: DateTime(2026, 9, 18, 10, 45, 48),
+      costMoved: const Value(true),
+    ));
+
+    final service = HistoryBackfillService(dao, sources: {});
+    await service.backfill(now: DateTime(2026, 9, 18));
+
+    final snapshots = await dao.getSnapshots();
+    final byDate = {for (final s in snapshots) s.date: s};
+    // The rebuilt day must carry the holdings' own invested amounts
+    // (0 + 122,216.00) — the same figure the live refresh path writes, so the
+    // two writers for today's row agree instead of one of them adding the
+    // whole transfer on top.
+    expect(byDate['2026-09-18']!.totalCost, closeTo(122216.00, 1e-6));
+    expect(byDate['2026-09-18']!.totalValue, closeTo(122182.66, 1e-6));
+    final earning = const DailyEarningsCalculator()
+        .compute(snapshots)
+        .firstWhere((e) => e.date == '2026-09-18');
+    // Only the cash account's own 33.34 of accrued loss, not -117,327.38.
+    expect(earning.profit, closeTo(0, 100),
+        reason: 'a full transfer-out must not be booked as a one-day loss');
+  });
 }

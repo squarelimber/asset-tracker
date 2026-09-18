@@ -261,4 +261,49 @@ void main() {
     expect(map['2026-01-05'], closeTo(1000, 1e-6));
     expect(map['2026-01-11'], closeTo(1000, 1e-6));
   });
+
+  test('a flow that empties the holding does not leave its principal behind',
+      () {
+    // 余额宝 on 2026-09-18: the whole balance was moved to the cash account,
+    // so quantity and costPrice are both 0 now. Replaying the flow backwards
+    // recovers the pre-transfer principal, which is right for the days before
+    // it — but the transfer day itself must report 0. Leaving the pre-transfer
+    // principal there inflated that one day's cost by the entire transfer
+    // (117,327.38) while the day's value was already 0, which is the
+    // "today's earning is -114,713.84" report.
+    final h = _amountHolding(quantity: 0, cost: 0);
+    final out = TransactionRow(
+      id: 6,
+      accountId: 1,
+      holdingId: null,
+      cashSourceId: 1,
+      cashTargetId: 2,
+      type: 'transfer_out',
+      quantity: null,
+      price: null,
+      amount: 117327.38,
+      currency: 'CNY',
+      occurredAt: DateTime(2026, 9, 18, 10, 16, 8),
+      note: null,
+      costMoved: true,
+      updatedAt: DateTime(2026, 9, 18, 10, 16, 8),
+    );
+    final from = DateTime(2026, 9, 10);
+    final to = DateTime(2026, 9, 18);
+
+    final principal = calc.amountPrincipal(h, [out], from: from, to: to);
+    expect(principal['2026-09-17'], closeTo(117327.38, 1e-6));
+    expect(principal['2026-09-18'], closeTo(0, 1e-6),
+        reason: 'the transfer day must report the post-transfer principal');
+
+    final values = calc.amountHistory(h, [out], from: from, to: to, today: to);
+    expect(values['2026-09-18'], closeTo(0, 1e-6));
+    // Value and invested amount fall together, so the transfer day is not
+    // charged a loss. This is the assertion the old code failed: it reported
+    // a value drop of 117,327.38 against no cost drop at all.
+    expect(
+      values['2026-09-18']! - values['2026-09-17']!,
+      closeTo(principal['2026-09-18']! - principal['2026-09-17']!, 1e-6),
+    );
+  });
 }

@@ -66,20 +66,29 @@ class SmoothHistoryCalculator {
     }
     var cumGain = 0.0;
     for (final s in segments) {
-      final segGain = weightSum <= 0 ? 0.0 : totalGain * (s.principal * s.days) / weightSum;
+      final segGain = weightSum <= 0 || s.principal <= 0
+          ? 0.0
+          : totalGain * (s.principal * s.days) / weightSum;
       final startValue = s.principal + cumGain;
       final endValue = s.principal + cumGain + segGain;
       cumGain += segGain;
+      // A span with no principal holds no money, so its days are zero. An
+      // emptied account must not be handed the value it held before the
+      // withdrawal (interpolating would do exactly that, and for a
+      // zero-length span it would hand it the whole accrued gain).
+      final empty = s.principal <= 0;
       for (var d = s.start;
           !d.isAfter(s.end) && !d.isAfter(dayTo);
           d = d.add(const Duration(days: 1))) {
         final index = d.difference(s.start).inDays;
-        result[todayKey(d)] = geometricInterpolate(
-          startValue,
-          endValue,
-          index,
-          s.days,
-        );
+        result[todayKey(d)] = empty
+            ? 0
+            : geometricInterpolate(
+                startValue,
+                endValue,
+                index,
+                s.days,
+              );
       }
     }
     // When [to] is today (or later), the final day is exactly the current
@@ -106,6 +115,14 @@ class SmoothHistoryCalculator {
   /// balance on internal transfers (repayment/borrowing) that moved the
   /// cost, so historical days before a transfer keep the pre-transfer
   /// principal instead of the current one.
+  ///
+  /// A flow day belongs to the span that starts on it, not the one that ends
+  /// on it, so a flow that empties the holding reports 0 for that day rather
+  /// than the principal it held just before. Returning the pre-flow amount
+  /// there made the whole transfer land in one day's cost while the day's
+  /// value was already 0 — the 2026-09-18 "today's earning is -114,713.84"
+  /// report (a full 余额宝 -> cash transfer, re-derived by the backfill on
+  /// every cold start until the next price refresh overwrote the day).
   Map<String, double> amountPrincipal(
     HoldingRow h,
     List<TransactionRow> flows, {
@@ -127,6 +144,14 @@ class SmoothHistoryCalculator {
   /// Segments of constant principal between flow days, rebuilt by replaying
   /// the flows backwards from the current invested amount. Each segment
   /// carries its principal and the number of days it spans.
+  ///
+  /// Spans are kept even when their principal is 0. Spans are written in
+  /// order and later ones overwrite earlier ones on the shared boundary day,
+  /// so a span that zeroes the principal has to be present for the boundary
+  /// day to report the post-flow principal; dropping it (the pre-2026-09-18
+  /// behaviour) left that day carrying the *pre*-flow principal while the
+  /// value side had already dropped to the current balance, which surfaced
+  /// as one day of fake loss equal to the whole transfer.
   static List<({DateTime start, double principal, int days, DateTime end})>
       _amountSegments(
     HoldingRow h,
@@ -163,7 +188,7 @@ class SmoothHistoryCalculator {
       segStart ??= _dayOf(from);
       final end = day.isAfter(_dayOf(from)) ? day : _dayOf(from);
       final days = end.difference(segStart).inDays;
-      if (days >= 0 && principal > 0) {
+      if (days >= 0) {
         segments.add((
           start: segStart,
           principal: principal,
@@ -176,7 +201,7 @@ class SmoothHistoryCalculator {
     }
     segStart ??= _dayOf(from);
     final lastDays = _dayOf(to).difference(segStart).inDays;
-    if (lastDays >= 0 && principal > 0) {
+    if (lastDays >= 0) {
       segments.add((
         start: segStart,
         principal: principal,
