@@ -53,6 +53,11 @@ HoldingRow fxLinked() => HoldingRow(
       quantity: 10000,
       costPrice: 7.0,
       latestPrice: 7.1,
+      // Explicit: the day-detail service skips holdings whose purchase date
+      // (falling back to `createdAt`, which the DB defaults to the wall
+      // clock) is after the day being viewed — without it the fixture would
+      // silently drop out of the breakdown once the calendar moved on.
+      purchaseDate: DateTime(2026, 1, 1),
       currency: 'USD',
       archived: false,
       createdAt: DateTime(2026),
