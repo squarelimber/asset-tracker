@@ -374,7 +374,6 @@ class _HoldingsPageState extends ConsumerState<HoldingsPage> {
                     section: _section,
                     assets: assets,
                     liabilities: liabilities,
-                    rates: rates,
                     sort: _sort,
                     onSortChanged: (s) => setState(() => _sort = s),
                     onHoldingTap: (h) => showHoldingDetailSheet(context, ref, h),

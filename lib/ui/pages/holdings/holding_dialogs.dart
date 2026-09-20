@@ -635,11 +635,21 @@ Future<void> showAddHoldingDialog(BuildContext context, WidgetRef ref) async {
             }
             if (context.mounted) Navigator.pop(context);
 
-            // Auto-fetch the latest price for market-linked holdings
-            // unless the user already entered one.
-            if (marketSource != 'manual' && hasSymbol) {
+            // Auto-fetch the latest price for holdings that actually have a
+            // live source, unless the user already entered one.
+            //
+            // The guard is deliberately not `marketSource != 'manual'`: a
+            // 银行理财 records `forex` merely as its "priced by hand" marker,
+            // so a *product* code passed that test and every save fired a
+            // request that could only fail, popping「自动获取净值失败」. An
+            // FX-linked one (its code *is* a currency) really is live-priced
+            // and keeps refreshing.
+            if (hasSymbol) {
               final created = await dao.getHolding(createdId);
-              if (created != null) {
+              final refreshable = created != null &&
+                  (AssetType.fromStorage(created.assetType).isMarketLinked ||
+                      isFxLinked(created));
+              if (refreshable) {
                 final quote =
                     await ref.read(marketServiceProvider).refreshHolding(created);
                 if (!context.mounted) return;

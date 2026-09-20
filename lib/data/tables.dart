@@ -75,6 +75,22 @@ class Transactions extends Table {
   /// before the fix have this false, so removal must not roll the cost back.
   BoolColumn get costMoved => boolean().withDefault(const Constant(true))();
 
+  /// The invested amount this flow actually moved on the cash side,
+  /// recorded at write time so the history replay can undo exactly that
+  /// number instead of guessing.
+  ///
+  /// The write side moves a *proportional* share of the principal
+  /// ([movedCostOf]): a transfer drains `costPrice x amount / balance`, not
+  /// the raw amount, so the account keeps its gain rate. The replay used to
+  /// subtract the raw amount, which only agrees when the principal equals
+  /// the balance or the account is fully drained; otherwise the replayed
+  /// pre-flow principal came out off by the account's unrealized gain and
+  /// every day before the flow shifted with it.
+  ///
+  /// Null on rows written before this column existed (and on rows that
+  /// never moved a cost); the replay then keeps the legacy behaviour.
+  RealColumn get costMovedAmount => real().nullable()();
+
   DateTimeColumn get updatedAt => dateTime().withDefault(currentDateAndTime)();
 
   @override

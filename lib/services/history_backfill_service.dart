@@ -164,14 +164,30 @@ class HistoryBackfillService {
     // rate when available). Historical daily rates are approximated with
     // the current rate.
     final currencies = holdings
+        .where((h) => h.currency != 'CNY' && !isFxLinked(h))
         .map((h) => h.currency)
-        .where((c) => c != 'CNY')
         .toSet()
         .toList();
     final market = _market;
     final cnyRates = market == null
         ? const <String, double>{}
         : await market.loadCnyRates(currencies);
+    // Same reasoning as the daily snapshot writer: `valueRateOf` falls back
+    // to 1 for a code it cannot convert, so a missing rate would value that
+    // holding at parity for *every* day of the rebuild — writing an entire
+    // history that understates net worth by the FX leg. Abort before the
+    // snapshots table is touched.
+    final missingRates = missingCnyRates(currencies, cnyRates);
+    if (missingRates.isNotEmpty) {
+      return BackfillResult(
+        ok: false,
+        days: 0,
+        holdings: 0,
+        historyUnavailable: true,
+        message: '缺少汇率（${missingRates.join('、')}），本次未写入任何快照，'
+            '请检查网络后重试',
+      );
+    }
 
     // Fetch history per holding (in parallel). Holdings without a market
     // source (bank wealth, cash management) get a smooth interpolated

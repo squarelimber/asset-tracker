@@ -22,7 +22,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase([QueryExecutor? executor]) : super(executor ?? _openConnection());
 
   @override
-  int get schemaVersion => 9;
+  int get schemaVersion => 10;
 
   static QueryExecutor _openConnection() {
     // Web requires explicit web options: sqlite3.wasm and drift_worker.js
@@ -112,6 +112,16 @@ class AppDatabase extends _$AppDatabase {
           if (from < 9) {
             final db = m.database as AppDatabase;
             await m.addColumn(db.holdings, db.holdings.categoryOverride);
+          }
+          // v9 -> v10: record the invested amount a flow actually moved, so
+          // the history replay stops guessing it from the raw amount (which
+          // disagrees with the proportional write whenever the account has
+          // unrealized gain). Nullable without a default, so drift's
+          // addColumn is safe; existing rows stay NULL and the replay keeps
+          // its legacy behaviour for them.
+          if (from < 10) {
+            final db = m.database as AppDatabase;
+            await m.addColumn(db.transactions, db.transactions.costMovedAmount);
           }
         },
       );

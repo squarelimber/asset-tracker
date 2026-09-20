@@ -190,6 +190,11 @@ class BackupService {
             costMoved: t['costMoved'] == null
                 ? const Value.absent()
                 : Value(t['costMoved'] == true),
+            // Absent in backups taken before the column existed; the replay
+            // then falls back to the raw amount (the legacy behaviour).
+            costMovedAmount: t['costMovedAmount'] == null
+                ? const Value.absent()
+                : Value((t['costMovedAmount'] as num).toDouble()),
             updatedAt: Value(restoredAt),
           ));
         }
@@ -349,6 +354,7 @@ class BackupService {
         'occurredAt': t.occurredAt.toIso8601String(),
         'note': t.note,
         'costMoved': t.costMoved,
+        'costMovedAmount': t.costMovedAmount,
         'updatedAt': t.updatedAt.toIso8601String(),
       };
 

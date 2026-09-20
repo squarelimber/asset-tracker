@@ -1,6 +1,7 @@
 import 'package:drift/drift.dart';
 
 import '../core/formats.dart';
+import '../core/symbols.dart';
 import '../data/asset_dao.dart';
 import '../data/database.dart';
 import '../domain/portfolio_calculator.dart';
@@ -46,12 +47,25 @@ class SnapshotService {
     // push that corruption to every other device. Skip until there is data.
     if (holdings.isEmpty) return;
     // Convert non-CNY holdings with current FX rates so today's snapshot
-    // matches the dashboard figures.
-    final currencies =
-        holdings.map((h) => h.currency).where((c) => c != 'CNY').toList();
+    // matches the dashboard figures. Rate-linked 银行理财 (symbol = a
+    // currency code) already embed the conversion in `latestPrice`, so they
+    // need no rate and must not be reported as missing one.
+    final currencies = holdings
+        .where((h) => h.currency != 'CNY' && !isFxLinked(h))
+        .map((h) => h.currency)
+        .toSet()
+        .toList();
     final rates = _market == null
         ? const <String, double>{}
         : await _market.loadCnyRates(currencies);
+    // A rate we could not obtain makes `valueRateOf` silently fall back to 1,
+    // dropping the entire FX leg from net worth so the total still looks
+    // plausible. Snapshots merge across devices with last-write-wins, so a
+    // wrong figure written here does not stay here — it is pushed to every
+    // other device and re-read as the basis for that day's earnings. Skip
+    // the day instead: an empty cell is recoverable, a synchronised wrong
+    // total is not. A later refresh with real rates fills it in.
+    if (missingCnyRates(currencies, rates).isNotEmpty) return;
     final summary =
         const PortfolioCalculator().compute(holdings, cnyRates: rates);
 

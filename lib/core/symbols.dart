@@ -71,6 +71,27 @@ bool isFxLinked(HoldingRow h) {
   return isFxCurrencyCode(h.symbol);
 }
 
+/// Currency codes in [currencies] that [cnyRates] cannot convert to CNY.
+///
+/// [valueRateOf] returns 1 for a code it does not know, which keeps the UI
+/// working for a genuinely rate-less holding but makes a **partial** rate
+/// table dangerous: the whole FX leg silently disappears and the result
+/// still looks like a plausible number. Callers that persist the figure
+/// (daily snapshots, history rebuilds) must refuse to write while this list
+/// is non-empty, rather than record a value they know is wrong.
+List<String> missingCnyRates(
+  Iterable<String> currencies,
+  Map<String, double> cnyRates,
+) {
+  final missing = <String>[];
+  for (final raw in currencies) {
+    final code = raw.toUpperCase();
+    if (code == 'CNY') continue;
+    if (!((cnyRates[code] ?? 0) > 0)) missing.add(code);
+  }
+  return missing;
+}
+
 /// CNY conversion rate for a holding's market value: the current FX rate
 /// (1 for CNY holdings and rate-linked holdings, see [isFxLinked]).
 double valueRateOf(HoldingRow h, Map<String, double> cnyRates) {

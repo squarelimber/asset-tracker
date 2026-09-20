@@ -87,6 +87,7 @@ class SyncFormatter {
         'occurredAt': t.occurredAt.toIso8601String(),
         'note': t.note,
         'costMoved': t.costMoved,
+        'costMovedAmount': t.costMovedAmount,
         'updatedAt': t.updatedAt.toIso8601String(),
       };
 

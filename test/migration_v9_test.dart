@@ -163,7 +163,7 @@ void main() {
 
     // Raw storage: the column exists, is nullable and defaults to NULL.
     final userVersion = await db.customSelect('PRAGMA user_version;').getSingle();
-    expect(userVersion.data.values.single, 9);
+    expect(userVersion.data.values.single, greaterThanOrEqualTo(9));
 
     final raw = await db
         .customSelect('SELECT category_override FROM holdings WHERE id = 1;')

@@ -15,13 +15,21 @@ import 'holdings_page.dart';
 
 enum HoldingSection { assets, liabilities }
 
+/// Desktop holdings grid.
+///
+/// Every figure in a row is in the holding's **own currency** — only the
+/// section totals on the page around it (see `assetTotalOf` /
+/// `liabilityTotalOf`) are converted to CNY. That is deliberate: a row
+/// should read the way the broker reports it. It does mean a row and the
+/// total above it are not directly comparable for a foreign holding, so the
+/// CNY conversion is not accepted here as a parameter — passing rates in
+/// without using them would suggest the rows were already converted.
 class HoldingsTable extends ConsumerWidget {
   const HoldingsTable({
     super.key,
     required this.section,
     required this.assets,
     required this.liabilities,
-    required this.rates,
     required this.onHoldingTap,
     this.sort = HoldingSort.defaultOrder,
     this.onSortChanged,
@@ -31,7 +39,6 @@ class HoldingsTable extends ConsumerWidget {
   final HoldingSection section;
   final List<HoldingRow> assets;
   final List<HoldingRow> liabilities;
-  final Map<String, double> rates;
   final void Function(HoldingRow) onHoldingTap;
 
   /// Current sort mode (drives the header arrows).

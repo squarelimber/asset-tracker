@@ -59,6 +59,19 @@ class ProductEarningsService {
     final cnyRates = market == null
         ? const <String, double>{}
         : await market.loadCnyRates(currencies);
+    // A currency we cannot convert would be valued at parity by
+    // `valueRateOf`, mixing a wrong figure into an otherwise correct CNY
+    // total. This rollup is read-only, so unlike the snapshot writer (which
+    // persists and therefore refuses outright) it can simply omit the
+    // affected holdings instead of showing a wrong number beside right ones.
+    final missingFx = missingCnyRates(currencies, cnyRates).toSet();
+    final skippedFx = holdings
+        .where((h) =>
+            h.currency != 'CNY' &&
+            !isFxLinked(h) &&
+            missingFx.contains(h.currency.toUpperCase()))
+        .map((h) => h.id)
+        .toSet();
 
     final smoothCalc = const SmoothHistoryCalculator();
     final replay = const HoldingReplay();
@@ -72,6 +85,7 @@ class ProductEarningsService {
     for (final h in holdings) {
       final type = AssetType.fromStorage(h.assetType);
       if (type == AssetType.liability) continue;
+      if (skippedFx.contains(h.id)) continue;
       if (isSmoothedHolding(h)) {
         if (type.isAmountBased) {
           final flows = await _dao.getTransactionsForHolding(h.id);
@@ -112,6 +126,7 @@ class ProductEarningsService {
     for (final h in holdings) {
       final type = AssetType.fromStorage(h.assetType);
       if (type == AssetType.liability) continue;
+      if (skippedFx.contains(h.id)) continue;
       final valueRate = valueRateOf(h, cnyRates);
       final costRate = costRateOf(h, cnyRates);
       final closed = h.quantity <= 0;

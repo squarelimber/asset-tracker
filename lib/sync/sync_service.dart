@@ -300,6 +300,11 @@ class SyncService {
               costMoved: row['costMoved'] == null
                   ? const Value.absent()
                   : Value(row['costMoved'] == true),
+              // Absent from peers that predate the column; keep NULL so the
+              // replay falls back to the raw amount on our side too.
+              costMovedAmount: row['costMovedAmount'] == null
+                  ? const Value.absent()
+                  : Value((row['costMovedAmount'] as num).toDouble()),
               updatedAt: Value(updatedAt),
             ));
           } on Exception catch (e) {
@@ -417,6 +422,7 @@ class SyncService {
         occurredAt: parseIso(row['occurredAt']) ?? DateTime.now(),
         note: row['note'] as String?,
         costMoved: row['costMoved'] == null ? true : row['costMoved'] == true,
+        costMovedAmount: (row['costMovedAmount'] as num?)?.toDouble(),
         updatedAt: parseIso(row['updatedAt']) ?? DateTime.now(),
       );
 

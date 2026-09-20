@@ -214,31 +214,42 @@ class SmoothHistoryCalculator {
 
   /// Principal delta a flow applies to [h]'s invested amount (0 when the
   /// flow does not touch the holding or the cost was not moved).
+  ///
+  /// The amount is read back from the row ([TransactionRow.costMovedAmount])
+  /// rather than re-derived from `t.amount`, because the write side moves a
+  /// *proportional* share of the principal: a transfer drains
+  /// `costPrice x amount / balance` and the two only agree when the
+  /// principal equals the balance or the account is fully drained. Deriving
+  /// it from `amount` made the back-computed pre-flow principal come out off
+  /// by the account's unrealized gain, shifting every earlier day of a
+  /// rebuilt history. Rows written before the column existed have no value;
+  /// they keep the legacy `amount` behaviour.
   static double _flowDelta(HoldingRow h, TransactionRow t) {
     final type = TransactionType.fromStorage(t.type);
+    final moved = t.costMovedAmount ?? t.amount;
     switch (type) {
       case TransactionType.income:
-        if (t.cashTargetId == h.id) return t.amount;
+        if (t.cashTargetId == h.id) return moved;
       case TransactionType.expense:
-        if (t.cashTargetId == h.id) return -t.amount;
+        if (t.cashTargetId == h.id) return -moved;
       case TransactionType.transferIn || TransactionType.transferOut:
         if (!t.costMoved) return 0;
-        if (t.cashSourceId == h.id) return -t.amount;
-        if (t.cashTargetId == h.id) return t.amount;
+        if (t.cashSourceId == h.id) return -moved;
+        if (t.cashTargetId == h.id) return moved;
       case TransactionType.buy:
         // Buy linkage debits the funding cash holding's invested amount
         // (the "record buy with a funding source" flow).
-        if (t.cashSourceId == h.id) return -t.amount;
+        if (t.cashSourceId == h.id) return -moved;
       case TransactionType.sell:
         // Sell proceeds credited to a cash holding move its invested
         // amount; a redemption leg recorded on the amount-based holding
         // itself (funded buy / standalone redemption) debits it. Ignoring
         // these legs left the replayed balance/cost stuck at the
         // pre-redemption level until today (visible as a cliff).
-        if (t.cashTargetId == h.id) return t.amount;
+        if (t.cashTargetId == h.id) return moved;
         if (t.holdingId == h.id &&
             AssetType.fromStorage(h.assetType).isAmountBased) {
-          return -t.amount;
+          return -moved;
         }
       case TransactionType.dividend ||
             TransactionType.consume ||

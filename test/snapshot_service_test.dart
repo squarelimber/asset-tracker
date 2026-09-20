@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:asset_tracker/core/enums.dart';
 import 'package:asset_tracker/data/asset_dao.dart';
 import 'package:asset_tracker/data/database.dart';
+import 'package:asset_tracker/services/market/market_service.dart';
 import 'package:asset_tracker/services/snapshot_service.dart';
 import 'package:asset_tracker/sync/sync_format.dart';
 
@@ -111,5 +112,98 @@ void main() {
     await service.ensureTodaySnapshot();
 
     expect((await dao.getSnapshots()).single.totalValue, 12345);
+  });
+
+  // A foreign-currency holding whose rate cannot be obtained used to be
+  // valued at parity (`valueRateOf` falls back to 1), dropping the whole FX
+  // leg from net worth while still producing a plausible-looking total. The
+  // snapshot then merges to every other device with last-write-wins, so the
+  // wrong figure does not stay local. Refusing to write is the only safe
+  // response: an empty cell can be filled in later, a synchronised wrong
+  // total cannot.
+  group('汇率拿不到时不写快照', () {
+    // 银行理财 is share-based (cost = quantity x unit cost), and carries
+    // `forex` as its "no live NAV" marker — but the symbol is a *product*
+    // code, not a currency, so it is not rate-linked and still needs a real
+    // USD rate to convert.
+    Future<int> seedUsdHolding() async {
+      final accountId = await dao.createAccount(
+          AccountsCompanion.insert(name: '境外账户', type: 'general'));
+      return dao.createHolding(HoldingsCompanion.insert(
+        accountId: accountId,
+        name: '美元理财',
+        assetType: AssetType.bankWealth.storageName,
+        marketSource: Value(MarketSource.forex.storageName),
+        symbol: const Value('Y05A9W10006A'),
+        quantity: const Value(1000),
+        costPrice: const Value(6.9),
+        latestPrice: const Value(7.0),
+        currency: const Value('USD'),
+        purchaseDate: Value(DateTime(2026, 1, 1)),
+      ));
+    }
+
+    test('没有汇率时整天跳过，而不是按 1 折算', () async {
+      await seedUsdHolding();
+      // No market service and no cached rate: exactly the state a fresh
+      // device is in before its first successful refresh.
+      final service = SnapshotService(dao, clock: () => DateTime(2026, 9, 4));
+      await service.ensureTodaySnapshot();
+
+      expect(await dao.getSnapshots(), isEmpty);
+    });
+
+    test('汇率齐全时按汇率折算写出正确金额', () async {
+      await seedUsdHolding();
+      // `loadCnyRates` judges freshness against the *real* clock, so the
+      // cached rate must be stamped "now": an older stamp counts as stale,
+      // and the live re-fetch that follows is exactly the network
+      // dependency this test must not have.
+      final now = DateTime.now();
+      await dao.upsertPriceCache(PriceCacheRow(
+        symbol: 'USD',
+        source: 'forex',
+        name: '美元',
+        price: 7.15,
+        currency: 'USD',
+        fetchedAt: now,
+      ));
+
+      final service = SnapshotService(
+        dao,
+        clock: () => now,
+        market: MarketService(dao),
+      );
+      await service.ensureTodaySnapshot();
+
+      final snap = (await dao.getSnapshots()).single;
+      expect(snap.totalValue, closeTo(1000 * 7.0 * 7.15, 1e-6));
+      expect(snap.totalCost, closeTo(1000 * 6.9 * 7.15, 1e-6));
+    });
+
+    test('汇率联动持仓（代码即货币）不需要汇率表', () async {
+      final accountId = await dao.createAccount(
+          AccountsCompanion.insert(name: '境外账户', type: 'general'));
+      await dao.createHolding(HoldingsCompanion.insert(
+        accountId: accountId,
+        name: '美元存款',
+        assetType: AssetType.bankWealth.storageName,
+        marketSource: Value(MarketSource.forex.storageName),
+        // Code *is* the currency: latestPrice already carries the rate, so
+        // no second conversion may be applied and no rate is needed.
+        symbol: const Value('USD'),
+        quantity: const Value(10000),
+        costPrice: const Value(10000),
+        latestPrice: const Value(7.1),
+        currency: const Value('USD'),
+        purchaseDate: Value(DateTime(2026, 1, 1)),
+      ));
+
+      final service = SnapshotService(dao, clock: () => DateTime(2026, 9, 4));
+      await service.ensureTodaySnapshot();
+
+      final snap = (await dao.getSnapshots()).single;
+      expect(snap.totalValue, closeTo(10000 * 7.1, 1e-6));
+    });
   });
 }

@@ -244,6 +244,7 @@ class AssetDao {
         occurredAt: Value(t.occurredAt),
         note: Value(t.note),
         costMoved: Value(t.costMoved),
+        costMovedAmount: Value(t.costMovedAmount),
         updatedAt: Value(now ?? DateTime.now()),
       ),
     );

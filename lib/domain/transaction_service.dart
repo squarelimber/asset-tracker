@@ -63,24 +63,29 @@ class TransactionService {
     String? note,
   }) async {
     try {
+      // The invested amount the cash leg actually moved. Persisted so the
+      // history replay can undo this exact number: it is a *proportional*
+      // share of the principal, so re-deriving it from `amount` at replay
+      // time back-computes a wrong principal for every day before the flow.
+      double movedCost = 0;
       await _dao.transaction(() async {
         switch (type) {
           case TransactionType.buy:
-            await _applyBuy(
+            movedCost = await _applyBuy(
               holdingId: holdingId,
               quantity: quantity,
               amount: amount,
               cashSourceId: cashSourceId,
             );
           case TransactionType.sell:
-            await _applySell(
+            movedCost = await _applySell(
               holdingId: holdingId,
               quantity: quantity,
               amount: amount,
               cashTargetId: cashTargetId,
             );
           case TransactionType.transferIn || TransactionType.transferOut:
-            await _applyTransfer(
+            movedCost = await _applyTransfer(
               sourceId: cashSourceId,
               targetId: cashTargetId,
               amount: amount,
@@ -91,9 +96,11 @@ class TransactionService {
             // not show up as a phantom loss in the return rate.
             await _applyDividend(holdingId, amount, cashTargetId);
           case TransactionType.income:
-            await _applyCashMove(cashTargetId, amount, invested: true);
+            movedCost =
+                await _applyCashMove(cashTargetId, amount, invested: true);
           case TransactionType.expense:
-            await _applyCashMove(cashTargetId, -amount, invested: true);
+            movedCost =
+                await _applyCashMove(cashTargetId, -amount, invested: true);
           case TransactionType.consume:
             await _applyConsume(holdingId, amount);
           case TransactionType.split:
@@ -112,6 +119,7 @@ class TransactionService {
           currency: Value(currency),
           occurredAt: occurredAt ?? DateTime.now(),
           note: note == null || note.isEmpty ? const Value.absent() : Value(note),
+          costMovedAmount: Value(movedCost),
         ));
       });
       return TransactionResult.success;
@@ -164,7 +172,8 @@ class TransactionService {
       final (unit, sourceQty) = _redemptionOf(source, sourceType, amount);
 
       await _dao.transaction(() async {
-        await _applyRedemption(source, sourceType, amount, sourceQty);
+        final moved =
+            await _applyRedemption(source, sourceType, amount, sourceQty);
         await _applyBuy(
           holdingId: targetHoldingId,
           quantity: targetQuantity,
@@ -183,6 +192,7 @@ class TransactionService {
           currency: Value(currency),
           occurredAt: when,
           note: Value('赎回购买 ${target.name}'),
+          costMovedAmount: Value(moved),
         ));
         await _dao.createTransaction(TransactionsCompanion.insert(
           accountId: target.accountId,
@@ -225,7 +235,8 @@ class TransactionService {
       final (unit, sourceQty) = _redemptionOf(source, sourceType, amount);
 
       await _dao.transaction(() async {
-        await _applyRedemption(source, sourceType, amount, sourceQty);
+        final moved =
+            await _applyRedemption(source, sourceType, amount, sourceQty);
         await _dao.createTransaction(TransactionsCompanion.insert(
           accountId: source.accountId,
           holdingId: Value(sourceHoldingId),
@@ -236,6 +247,7 @@ class TransactionService {
           currency: Value(currency),
           occurredAt: occurredAt ?? DateTime.now(),
           note: (note == null || note.isEmpty) ? const Value.absent() : Value(note),
+          costMovedAmount: Value(moved),
         ));
       });
       return TransactionResult.success;
@@ -273,20 +285,23 @@ class TransactionService {
   /// Applies the redemption to [source]: amount-based debits balance and
   /// invested (same as a buy deduction); share-based reduces quantity with
   /// the unit cost kept (same invariant as a sell).
-  Future<void> _applyRedemption(
+  /// Redeems [amount] out of [source]. Returns the invested amount that left
+  /// an amount-based source (0 for a share-based one, whose cost travels
+  /// with the units rather than in the balance).
+  Future<double> _applyRedemption(
     HoldingRow source,
     AssetType sourceType,
     double amount,
     double sourceQty,
   ) async {
     if (sourceType.isAmountBased) {
-      await _applyCashMove(source.id, -amount, invested: true);
-    } else {
-      await _updateHolding(
-        source,
-        quantity: (source.quantity - sourceQty).clamp(0.0, double.infinity),
-      );
+      return _applyCashMove(source.id, -amount, invested: true);
     }
+    await _updateHolding(
+      source,
+      quantity: (source.quantity - sourceQty).clamp(0.0, double.infinity),
+    );
+    return 0;
   }
 
   static String _fmt(double v) =>
@@ -312,7 +327,9 @@ class TransactionService {
     }
   }
 
-  Future<void> _applyBuy({
+  /// Buys into [holdingId], optionally funded from [cashSourceId]. Returns
+  /// the invested amount the funding leg moved (0 when it has no cash leg).
+  Future<double> _applyBuy({
     required int? holdingId,
     required double? quantity,
     required double amount,
@@ -328,11 +345,14 @@ class TransactionService {
     if (cashSourceId != null) {
       final source = await _getHolding(cashSourceId);
       _assertSameCurrency(source, holding);
-      await _applyCashMove(cashSourceId, -amount, invested: true);
+      return _applyCashMove(cashSourceId, -amount, invested: true);
     }
+    return 0;
   }
 
-  Future<void> _applySell({
+  /// Sells out of [holdingId], optionally parking the proceeds in
+  /// [cashTargetId]. Returns the invested amount that leg moved.
+  Future<double> _applySell({
     required int? holdingId,
     required double? quantity,
     required double amount,
@@ -353,11 +373,15 @@ class TransactionService {
     if (cashTargetId != null) {
       final target = await _getHolding(cashTargetId);
       _assertSameCurrency(target, holding);
-      await _applyCashMove(cashTargetId, amount, invested: true);
+      return _applyCashMove(cashTargetId, amount, invested: true);
     }
+    return 0;
   }
 
-  Future<void> _applyTransfer({
+  /// Moves [amount] between two cash/liability holdings. Returns the
+  /// invested amount that actually travelled (0 for a legacy transfer whose
+  /// cost was not moved).
+  Future<double> _applyTransfer({
     required int? sourceId,
     required int? targetId,
     required double amount,
@@ -389,6 +413,7 @@ class TransactionService {
     final moved = moveCost ? movedCostOf(source, amount) : 0.0;
     await _applyBalanceMove(sourceId, -amount, costDelta: -moved);
     await _applyBalanceMove(targetId, amount, costDelta: moved);
+    return moved;
   }
 
   /// Moves [delta] on a cash or liability holding. For liabilities the
@@ -494,7 +519,13 @@ class TransactionService {
   /// Moves [delta] on a cash holding (buy deduction, sell credit,
   /// dividend, income, expense). Liabilities are not allowed here —
   /// their flows go through transfers (repayment/borrowing).
-  Future<void> _applyCashMove(int? holdingId, double delta, {required bool invested}) async {
+  ///
+  /// Returns the invested amount this leg actually moved (0 when
+  /// [invested] is false), so the caller can persist it and the history
+  /// replay can undo exactly that number rather than re-deriving it from
+  /// the raw amount — the two only coincide when the principal equals the
+  /// balance.
+  Future<double> _applyCashMove(int? holdingId, double delta, {required bool invested}) async {
     if (holdingId == null) {
       throw ArgumentError('需要指定现金持仓');
     }
@@ -503,13 +534,36 @@ class TransactionService {
     if (!type.isAmountBased) {
       throw ArgumentError('目标持仓不是现金类资产');
     }
+    // The invested amount must be moved off the *effective* cost
+    // ([effectiveCostOf]), never the raw column: an account whose principal
+    // was never recorded carries its balance as the implied principal, so
+    // reading the 0 default here would reset — or invent — that principal.
+    //
+    // Money *leaving* takes a proportional share of the principal, the same
+    // rule transfers use ([movedCostOf]) and for the same reason: a flat
+    // `costPrice - amount` clamped at 0 pins the column to its
+    // "never recorded" sentinel, and the totals then re-read that 0 as the
+    // whole remaining balance. Spending 5,000 out of a 10,000 balance with
+    // 3,000 recorded handed the remaining 5,000 a cost of 5,000 (zero gain)
+    // instead of 1,500 — a 3,500 phantom loss. Money *arriving* is new
+    // capital with no gain attached, so it adds 1:1.
+    var movedCost = 0.0;
+    var newCost = holding.costPrice;
+    if (invested) {
+      if (delta >= 0) {
+        movedCost = delta;
+        newCost = effectiveCostOf(holding) + delta;
+      } else {
+        movedCost = movedCostOf(holding, delta);
+        newCost = effectiveCostOf(holding) - movedCost;
+      }
+    }
     await _updateHolding(
       holding,
       quantity: holding.quantity + delta,
-      costPrice: invested
-          ? (holding.costPrice + delta).clamp(0, double.infinity)
-          : holding.costPrice,
+      costPrice: newCost,
     );
+    return movedCost;
   }
 
   Future<HoldingRow> _getHolding(int id) async {
