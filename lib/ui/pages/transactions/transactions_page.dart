@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../app/providers.dart';
 import '../../../core/enums.dart';
 import '../../../core/formats.dart';
+import '../../../core/history_sync.dart';
 import '../../../core/responsive.dart';
 import '../../../data/database.dart';
 import '../../../domain/trade_stats.dart';
@@ -175,6 +176,55 @@ class _TransactionsPageState extends ConsumerState<TransactionsPage> {
     );
   }
 
+  /// 修改一笔流水的发生日期。日期是历史回放（金额型平滑、收益日历、
+  /// 月度收益）的分组键，改日期即改写历史 —— 必须全量重建。
+  Future<void> _editDate(TransactionRow t) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('修改流水日期'),
+        content: const Text('将更改这笔流水在历史净值中的归属日期，'
+            '保存后会自动全量重算历史。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('继续'),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true || !mounted) return;
+    final local = t.occurredAt;
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: local,
+      firstDate: DateTime(2020),
+      lastDate: DateTime.now(),
+    );
+    if (picked == null || !mounted) return;
+    final when = DateTime(
+      picked.year,
+      picked.month,
+      picked.day,
+      local.hour,
+      local.minute,
+      local.second,
+    );
+    final dao = ref.read(daoProvider);
+    await dao.updateTransaction(t.copyWith(occurredAt: when));
+    await dao.setSetting(historySyncDirtyKey, historyDirtySet);
+    await dao.setSetting(historyFullRebuildKey, '1');
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('流水日期已更新，将重建全部历史净值')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final txns = ref.watch(transactionsProvider);
@@ -322,14 +372,19 @@ class _TransactionsPageState extends ConsumerState<TransactionsPage> {
                       net: _dayNet(rows, rates),
                     ),
                     for (final t in rows) ...[
-                      TransactionTile(
-                        txn: t,
-                        costPrice: _tileCostPrice(t, holdingsById),
-                        holdingName: t.holdingId == null
-                            ? null
-                            : holdingsById[t.holdingId]?.name,
-                        accountName: accountName[t.accountId],
-                        counterpartyText: _counterpartyText(t, holdingsById),
+                      InkWell(
+                        borderRadius: BorderRadius.circular(6),
+                        onTap: () => _editDate(t),
+                        child: TransactionTile(
+                          txn: t,
+                          costPrice: _tileCostPrice(t, holdingsById),
+                          holdingName: t.holdingId == null
+                              ? null
+                              : holdingsById[t.holdingId]?.name,
+                          accountName: accountName[t.accountId],
+                          counterpartyText:
+                              _counterpartyText(t, holdingsById),
+                        ),
                       ),
                       const SizedBox(height: 4),
                     ],

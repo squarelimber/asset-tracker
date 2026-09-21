@@ -99,6 +99,10 @@ Future<void> showHoldingTransactionDialog(
         : (moneyHoldings.isEmpty ? null : moneyHoldings.first.id),
   );
   final noteCtrl = TextEditingController();
+  // 发生日期：默认今天。补录历史操作（如 9 月初买入、今天才记账）时必须能
+  // 改成真实发生日期，否则历史回放会把今天才发生的流水放在错误的日子，
+  // 出现「钱在转账前已消失/还在」的错位（2026-09 月月鑫双计问题）。
+  final occurredAt = ValueNotifier<DateTime>(DateTime.now());
 
   String? validate() {
     final t = txnType.value;
@@ -297,6 +301,8 @@ Future<void> showHoldingTransactionDialog(
               },
             ),
             const SizedBox(height: 12),
+            _TransactionDateField(value: occurredAt),
+            const SizedBox(height: 12),
             TerminalTextField(
               controller: noteCtrl,
               label: '备注（可选）',
@@ -346,6 +352,7 @@ Future<void> showHoldingTransactionDialog(
                     targetPrice: price,
                     amount: amount,
                     currency: holding.currency,
+                    occurredAt: occurredAt.value,
                     note: noteCtrl.text.trim(),
                   )
                 : await service.record(
@@ -388,11 +395,27 @@ Future<void> showHoldingTransactionDialog(
                     },
                     note: noteCtrl.text.trim(),
                     currency: holding.currency,
+                    occurredAt: occurredAt.value,
                   );
             if (!context.mounted) return;
             Navigator.pop(context);
             if (result.ok) {
               ref.read(daoProvider).setSetting(historySyncDirtyKey, historyDirtySet);
+              // 补录历史日期的流水会同时改变过去每一天的历史本金/收益
+              // （金额型回放、产品收益日历都按流水日期重算），light 窗口
+              // 覆盖不到更早的日子 —— 必须全量重建。
+              final when = occurredAt.value;
+              final now = DateTime.now();
+              final backdated = when.year != now.year ||
+                  when.month != now.month ||
+                  when.day != now.day;
+              if (backdated) {
+                // Fire-and-forget, mirroring the dirty flag: keeps the save
+                // callback free of post-await BuildContext uses.
+                ref
+                    .read(daoProvider)
+                    .setSetting(historyFullRebuildKey, '1');
+              }
             }
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
@@ -415,6 +438,46 @@ Future<void> showHoldingTransactionDialog(
   priceCtrl.dispose();
   amountCtrl.dispose();
   noteCtrl.dispose();
+  occurredAt.dispose();
+}
+
+/// Date picker for the transaction's 发生日期 (defaults to today; change it
+/// when backfilling an operation that happened earlier — otherwise the
+/// history replay places the flow on the wrong day).
+class _TransactionDateField extends StatelessWidget {
+  const _TransactionDateField({required this.value});
+
+  final ValueNotifier<DateTime> value;
+
+  Future<void> _pick(BuildContext context) async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: value.value,
+      firstDate: DateTime(2020),
+      lastDate: DateTime.now(),
+    );
+    if (picked != null) value.value = picked;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<DateTime>(
+      valueListenable: value,
+      builder: (context, v, _) => InkWell(
+        onTap: () => _pick(context),
+        child: InputDecorator(
+          decoration: terminalDecoration('发生日期'),
+          child: Row(
+            children: [
+              const Icon(Icons.calendar_today_outlined, size: 16),
+              const SizedBox(width: 8),
+              Text(Formats.date(v)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 String sellProfitText(
