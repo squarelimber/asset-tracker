@@ -8,10 +8,20 @@ import '../../../core/formats.dart';
 import '../../../core/history_sync.dart';
 import '../../../core/symbols.dart';
 import '../../../data/database.dart';
+import '../../../domain/holding_type_conversion.dart';
 import '../../components/form_fields.dart';
 import '../../tokens.dart';
 import 'invested_profit_field.dart';
 import 'purchase_date_field.dart';
+
+/// Plain number for a text field, without thousands separators, so it stays
+/// directly parseable by double.tryParse.
+String _plainNum(double v) {
+  if (v == v.roundToDouble()) return v.toInt().toString();
+  var s = v.toStringAsFixed(4);
+  s = s.replaceFirst(RegExp(r'\.?0+$'), '');
+  return s;
+}
 
 /// The cost_fx_rate companion value for the edit dialog: the parsed rate
 /// when the currency is foreign, absent otherwise.
@@ -772,6 +782,60 @@ Future<void> showEditHoldingDialog(
   final amount = ValueNotifier<double>(holding.quantity);
   double? investedResult = initialType.isAmountBased ? holding.costPrice : null;
 
+  // --- Type-switch semantic conversion (see holding_type_conversion.dart) ---
+  // 金额型（现金/银行存款/活期理财）与份额型在 quantity/costPrice/latestPrice
+  // 三列里存着不同的含义：金额型 = 余额 / 累计投入 / 恒 1；份额型 = 份额 /
+  // 单位成本 / 净值。跨过这条边界时必须换算，否则「银行存款 50000 → 银行理财」
+  // 会把 50000 元余额变成 50000 元/份的单位成本，持仓直接报出 25 亿巨亏
+  // （见 type_switch_regression_test）。
+  //
+  // [conversionNotice] 描述最近一次跨金额性换算的结果（null = 未发生），在
+  // 对话框内联显示；[conversionCount] 用于以新 principal 重挂载
+  // InvestedProfitField（其内部状态无法从外部改写）。
+  String? conversionNotice;
+  var conversionCount = 0;
+
+  void applyTypeSwitch(AssetType next) {
+    final prev = typeNotifier.value;
+    final cross = prev.isAmountBased != next.isAmountBased;
+    typeNotifier.value = next;
+    if (!cross) return;
+    final qty = double.tryParse(quantityCtrl.text.trim());
+    final cost = double.tryParse(costCtrl.text.trim());
+    final price = double.tryParse(priceCtrl.text.trim());
+    if (qty == null || cost == null || price == null) {
+      conversionNotice = '类型已切换为「${next.label}」：请按新类型的含义填写数量、成本与净值';
+      return;
+    }
+    final conv = convertHoldingTypeSemantics(
+      from: prev,
+      to: next,
+      quantity: qty,
+      costPrice: cost,
+      latestPrice: price,
+    );
+    if (conv == null) {
+      conversionNotice =
+          '类型已切换为「${next.label}」，但当前数值无法可靠换算：请手动按新类型的含义填写字段';
+      return;
+    }
+    quantityCtrl.text = _plainNum(conv.quantity);
+    if (next.isAmountBased) {
+      // 份额 × 净值 → 余额（市值）、份额 × 单位成本 → 累计投入。
+      investedResult = conv.costPrice;
+      amount.value = conv.quantity;
+      conversionCount++;
+      conversionNotice = '已按「${next.label}」口径自动换算：当前金额 ${_plainNum(conv.quantity)}、'
+          '累计投入 ${_plainNum(conv.costPrice)}，请核对';
+    } else {
+      // 余额 → 份额（净值 1 时数字不变）、累计投入 ÷ 份额 → 单位成本。
+      costCtrl.text = _plainNum(conv.costPrice);
+      priceCtrl.text = _plainNum(conv.latestPrice);
+      conversionNotice = '已按「${next.label}」口径自动换算：份额 ${_plainNum(conv.quantity)}、'
+          '成本单价 ${_plainNum(conv.costPrice)}、净值 ${_plainNum(conv.latestPrice)}（请填写真实净值）';
+    }
+  }
+
   final ok = await showDialog<bool>(
     context: context,
     builder: (context) => StatefulBuilder(
@@ -825,9 +889,19 @@ Future<void> showEditHoldingDialog(
                   onChanged: unknownType
                       ? null
                       : (v) {
-                          if (v != null) setState(() => typeNotifier.value = v);
+                          if (v != null) {
+                            setState(() => applyTypeSwitch(v));
+                          }
                         },
                 ),
+                if (conversionNotice != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8, bottom: 4),
+                    child: Text(
+                      '⚠️ $conversionNotice',
+                      style: T.label(size: 12, color: T.warning),
+                    ),
+                  ),
                 const SizedBox(height: 12),
                 DropdownButtonFormField<String>(
                   initialValue: holding.riskLevel ?? 'auto',
@@ -903,8 +977,12 @@ Future<void> showEditHoldingDialog(
                 if (isAmountBased) ...[
                   const SizedBox(height: 12),
                   InvestedProfitField(
+                    // Remount on every conversion so the field re-reads the
+                    // converted principal (its controllers are internal).
+                    key: ValueKey('invested-$conversionCount'),
                     amount: amount,
-                    initialInvested: holding.costPrice > 0 ? holding.costPrice : null,
+                    initialInvested: investedResult ??
+                        (holding.costPrice > 0 ? holding.costPrice : null),
                     onChanged: (v) => investedResult = v,
                   ),
                 ] else if (!isLiability) ...[
@@ -1026,6 +1104,12 @@ Future<void> showEditHoldingDialog(
     final type = typeNotifier.value;
     final isAmountBased = type.isAmountBased;
     final isAmount = isAmountBased || type == AssetType.liability;
+    // Crossing the amount-based boundary changes the *meaning* of the
+    // stored numbers (see applyTypeSwitch / holding_type_conversion.dart).
+    // Even with the conversion applied, every day written under the old
+    // semantics must be re-derived — force a full rebuild instead of the
+    // usual light window.
+    final crossAmountSwitch = initialType.isAmountBased != type.isAmountBased;
     final qty = double.tryParse(quantityCtrl.text.trim());
     if (qty == null) return;
     final cost = double.tryParse(costCtrl.text.trim());
@@ -1126,6 +1210,19 @@ Future<void> showEditHoldingDialog(
     );
     await ref.read(daoProvider).updateHolding(updated);
     ref.read(daoProvider).setSetting(historySyncDirtyKey, historyDirtySet);
+    if (crossAmountSwitch) {
+      // The semantics of quantity/costPrice changed for every historical
+      // day; the next backfill must rebuild the whole window. Needs network
+      // (history prices), so a later failed run keeps the marker and retries.
+      await ref.read(daoProvider).setSetting(historyFullRebuildKey, '1');
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('持仓类型已变更：打开总览时将联网重算全部历史净值，请在网络正常时执行'),
+          ),
+        );
+      }
+    }
   }
   // Wait for the dialog's exit animation before releasing controllers.
   await Future<void>.delayed(const Duration(milliseconds: 350));

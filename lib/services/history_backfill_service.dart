@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 
 import '../core/enums.dart';
 import '../core/formats.dart';
+import '../core/history_sync.dart';
 import '../core/symbols.dart';
 import '../data/asset_dao.dart';
 import '../data/database.dart';
@@ -270,7 +271,15 @@ class HistoryBackfillService {
     }
 
     final firstTimeRebuild = await _dao.getSetting(_backfillV3Marker) == null;
-    final needFullRebuild = forceRebuild || firstTimeRebuild;
+    // A type switch that crossed the amount-based boundary changes the
+    // *meaning* of the stored numbers (see holding_type_conversion.dart); the
+    // days written under the old semantics must not survive a light run (a
+    // light run leaves everything before the last run in place, so the curve
+    // would show a permanent step where the type changed). The dialog sets
+    // this marker and the next run — even a light one — rebuilds the whole
+    // window once, then clears it.
+    final forceNext = await _dao.getSetting(historyFullRebuildKey) == '1';
+    final needFullRebuild = forceRebuild || forceNext || firstTimeRebuild;
     final existingDates = <String>{};
     // Anchor recorded by the previous run. Null on a full rebuild (every day
     // is re-derived, so there is nothing to anchor against) and on a first
@@ -385,6 +394,12 @@ class HistoryBackfillService {
     // Mark the one-time rebuild done only after a successful swap.
     if (firstTimeRebuild) {
       await _dao.setSetting(_backfillV3Marker, '${current.millisecondsSinceEpoch}');
+    }
+    // Clear the forced-full-rebuild marker only after the swap succeeded,
+    // so a run aborted by a network failure retries the full rebuild next
+    // launch instead of silently leaving the old-semantics days in place.
+    if (forceNext) {
+      await _dao.setSetting(historyFullRebuildKey, '0');
     }
     // Remember where the next light run must re-derive from. Written only
     // after the swap succeeded, so an aborted run leaves the previous anchor
