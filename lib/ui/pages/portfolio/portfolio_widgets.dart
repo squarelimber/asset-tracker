@@ -948,6 +948,7 @@ class _TrendChartState extends State<_TrendChart> with SingleTickerProviderState
                           xSpan: points.last.x - points.first.x,
                           lastX: points.last.x,
                           lastValue: lastValue,
+                          hideAmounts: hideAmounts,
                         ),
                       ),
                     ),
@@ -959,6 +960,50 @@ class _TrendChartState extends State<_TrendChart> with SingleTickerProviderState
       },
     );
   }
+}
+
+/// 走势图悬停/按压时的信息标签行：[日期, 数值, 较前日?]。
+/// 数值口径与图表一致：净值模式显示金额（隐私掩码生效），收益率模式
+/// 显示累计涨跌幅百分比；「较前日」用资产口径（净资产+负债）计算，
+/// 本金进出不影响当日盈亏。
+List<String> trendHoverLabelLines({
+  required List<SnapshotRow> list,
+  required bool isRate,
+  required List<double> rates,
+  required int index,
+  required bool hideAmounts,
+}) {
+  if (index < 0 || index >= list.length) return const [];
+  final row = list[index];
+  final date = DateTime.tryParse(row.date);
+  final lines = <String>[
+    date == null ? row.date : Formats.date(date),
+  ];
+  if (isRate) {
+    final rate = index < rates.length ? rates[index] : null;
+    lines.add(rate == null
+        ? '--'
+        : '${rate >= 0 ? '+' : ''}${Formats.pct(rate / 100)}');
+  } else {
+    lines.add(hideAmounts ? Formats.masked() : Formats.money(row.totalValue));
+  }
+  if (index > 0) {
+    final delta = isRate
+        ? (index < rates.length && index - 1 < rates.length
+            ? rates[index] - rates[index - 1]
+            : null)
+        : (row.totalValue + row.liabilities) -
+            (list[index - 1].totalValue + list[index - 1].liabilities);
+    if (delta != null) {
+      final text = isRate
+          ? '${delta >= 0 ? '+' : ''}${Formats.pct(delta / 100)}'
+          : hideAmounts
+              ? Formats.masked()
+              : '${delta >= 0 ? '+' : ''}${Formats.money(delta)}';
+      lines.add('较前日 $text');
+    }
+  }
+  return lines;
 }
 
 class _TrendOverlayPainter extends CustomPainter {
@@ -974,6 +1019,7 @@ class _TrendOverlayPainter extends CustomPainter {
     required this.xSpan,
     required this.lastX,
     required this.lastValue,
+    required this.hideAmounts,
   });
 
   final int? hoverIndex;
@@ -987,6 +1033,7 @@ class _TrendOverlayPainter extends CustomPainter {
   final double xSpan;
   final double lastX;
   final double lastValue;
+  final bool hideAmounts;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -1023,6 +1070,84 @@ class _TrendOverlayPainter extends CustomPainter {
     final y = yOf(value);
     _dashedLine(canvas, Offset(0, y), Offset(size.width, y), paint);
     _dashedLine(canvas, Offset(x, 0), Offset(x, size.height), paint);
+
+    _drawHoverLabel(
+      canvas,
+      size,
+      lines: trendHoverLabelLines(
+        list: list,
+        isRate: isRate,
+        rates: rates,
+        index: idx,
+        hideAmounts: hideAmounts,
+      ),
+      anchorX: x,
+      deltaValue: hideAmounts
+          ? null
+          : isRate
+              ? (idx > 0 && idx < rates.length
+                  ? rates[idx] - rates[idx - 1]
+                  : null)
+              : (idx > 0
+                  ? (list[idx].totalValue + list[idx].liabilities) -
+                      (list[idx - 1].totalValue + list[idx - 1].liabilities)
+                  : null),
+    );
+  }
+
+  /// 悬停/按压信息块：日期、数值、较前日。
+  void _drawHoverLabel(
+    Canvas canvas,
+    Size size, {
+    required List<String> lines,
+    required double anchorX,
+    double? deltaValue,
+  }) {
+    if (lines.isEmpty) return;
+    final painters = <TextPainter>[];
+    var widest = 0.0;
+    for (final line in lines) {
+      final tp = TextPainter(
+        text: TextSpan(text: line, style: T.mono(size: 11)),
+        textDirection: TextDirection.ltr,
+      )..layout();
+      painters.add(tp);
+      if (tp.width > widest) widest = tp.width;
+    }
+    const padX = 8.0;
+    const padY = 5.0;
+    const lineH = 15.0;
+    final boxW = widest + padX * 2;
+    final boxH = padY * 2 + lines.length * lineH;
+    // 优先放在锚点右侧；放不下则左侧，并夹在绘图区内。
+    var left = anchorX + 10;
+    if (left + boxW > size.width) left = anchorX - 10 - boxW;
+    if (left < 0) left = 2;
+    if (left + boxW > size.width) left = size.width - boxW - 2;
+    const top = 6.0;
+    final rect = Rect.fromLTWH(left, top, boxW, boxH);
+    final bg = Paint()..color = T.surface2.withValues(alpha: 0.96);
+    final border = Paint()
+      ..color = T.border
+      ..strokeWidth = 1
+      ..style = PaintingStyle.stroke;
+    final rr = RRect.fromRectAndRadius(rect, const Radius.circular(8));
+    canvas.drawRRect(rr, bg);
+    canvas.drawRRect(rr, border);
+
+    var y = top + padY;
+    for (var i = 0; i < painters.length; i++) {
+      final color = switch (i) {
+        0 => T.text2,
+        1 => T.text1,
+        _ => deltaValue == null ? T.text2 : T.changeColor(deltaValue),
+      };
+      painters[i].text = TextSpan(
+          text: lines[i], style: T.mono(size: 11, color: color));
+      painters[i].layout();
+      painters[i].paint(canvas, Offset(left + padX, y));
+      y += lineH;
+    }
   }
 
   void _dashedLine(Canvas canvas, Offset a, Offset b, Paint paint) {
