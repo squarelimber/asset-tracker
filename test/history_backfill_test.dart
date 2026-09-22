@@ -530,6 +530,7 @@ void main() {
     test('falls back to a fixed week, repairing inside and sparing outside',
         () async {
       await dao.setSetting('backfill_v7_gold_spot_and_today', '1');
+      await dao.setSetting('backfill_v8_share_replay', '1');
       await seedFundHolding(purchaseDate: DateTime(2026, 7, 1), latest: 2.9);
       final fake = _FakeHistorySource();
       fake.data['110022'] = {

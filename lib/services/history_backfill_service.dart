@@ -6,6 +6,7 @@ import '../core/history_sync.dart';
 import '../core/symbols.dart';
 import '../data/asset_dao.dart';
 import '../data/database.dart';
+import '../domain/product_monthly_earnings.dart';
 import '../domain/smooth_history.dart';
 import 'market/history_lookup.dart';
 import 'market/history_source.dart';
@@ -111,6 +112,14 @@ class HistoryBackfillService {
   /// the other instrument and need the corrected series.
   static const _backfillV3Marker = 'backfill_v7_gold_spot_and_today';
 
+  /// Marker for the v8 one-time full rebuild: share-based holdings started
+  /// being valued by replaying their buy/sell/split/dividend flows (HoldingReplay)
+  /// instead of carrying the current quantity over every historical day — so
+  /// sold-out and partially-sold positions finally show their real market
+  /// value on the days they were held. Devices that already ran v7 hold
+  /// history built with the current-quantity shortcut and need a full pass.
+  static const _shareReplayMarker = 'backfill_v8_share_replay';
+
   /// Date (yyyy-MM-dd) of the previous successful run. A light run re-derives
   /// every day from this date through today, because any of them may have
   /// been overwritten by the live-quote path in the meantime and needs to be
@@ -197,6 +206,10 @@ class HistoryBackfillService {
     final smoothValues = <int, Map<String, double>>{};
     final smoothPrincipals = <int, Map<String, double>>{};
     final fillers = <int, HistoryPriceLookup>{};
+    // Share-based holdings: daily (quantity, totalCost) replayed from their
+    // buy/sell/split/dividend flows, so sold-out / partially-sold positions
+    // carry real market value on the days they were actually held (v8).
+    final replays = <int, Map<String, (double, double)>>{};
     final futures = <Future<void>>[];
     // Symbols whose history fetch threw. A network failure must NOT be
     // silently swallowed: the day-by-day loop would otherwise fall back to
@@ -238,6 +251,10 @@ class HistoryBackfillService {
         rawSymbol = normalizeSinaSymbol(rawSymbol);
       }
       final symbol = rawSymbol;
+      // Replay the holding's own flows for its historical quantity/cost.
+      final flows = await _dao.getTransactionsForHolding(h.id);
+      replays[h.id] =
+          const HoldingReplay().replay(h, flows, from: windowStart, to: current);
       futures.add(() async {
         try {
           final history = await adapter.fetch(symbol, windowStart, current);
@@ -270,7 +287,9 @@ class HistoryBackfillService {
       );
     }
 
-    final firstTimeRebuild = await _dao.getSetting(_backfillV3Marker) == null;
+    final firstTimeRebuild =
+        await _dao.getSetting(_backfillV3Marker) == null ||
+            await _dao.getSetting(_shareReplayMarker) == null;
     // A type switch that crossed the amount-based boundary changes the
     // *meaning* of the stored numbers (see holding_type_conversion.dart); the
     // days written under the old semantics must not survive a light run (a
@@ -356,16 +375,23 @@ class HistoryBackfillService {
         final filler = fillers[h.id];
         final price = filler?.priceOnOrBefore(key) ?? h.latestPrice;
         if (price > 0) hasPrice = true;
-        final value = h.quantity * price * valueRateOf(h, cnyRates);
+        // Historical quantity/cost from the flow replay: a sold-out fund
+        // still shows its real market value on the days it was held (v8).
+        // Absent a replay row (holding created after the window start is
+        // guarded by the buy-day check) fall back to the current position.
+        final replayed = replays[h.id]?[key];
+        final shares = replayed?.$1 ?? h.quantity;
+        final value = shares * price * valueRateOf(h, cnyRates);
         if (type == AssetType.liability) {
           liabilities += value;
         } else {
           assets += value;
           // Amount-based assets store the cumulative invested amount in
-          // costPrice; unit-based assets store the per-unit cost.
+          // costPrice; share-based ones use the replayed total cost (unit
+          // cost moves through buys/sells/dividends/splits).
           cost += (type.isAmountBased
                   ? (h.costPrice > 0 ? h.costPrice : h.quantity)
-                  : h.quantity * h.costPrice) *
+                  : replayed?.$2 ?? shares * h.costPrice) *
               costRateOf(h, cnyRates);
         }
       }
@@ -394,6 +420,7 @@ class HistoryBackfillService {
     // Mark the one-time rebuild done only after a successful swap.
     if (firstTimeRebuild) {
       await _dao.setSetting(_backfillV3Marker, '${current.millisecondsSinceEpoch}');
+      await _dao.setSetting(_shareReplayMarker, '${current.millisecondsSinceEpoch}');
     }
     // Clear the forced-full-rebuild marker only after the swap succeeded,
     // so a run aborted by a network failure retries the full rebuild next

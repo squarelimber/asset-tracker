@@ -3,6 +3,7 @@ import '../core/formats.dart';
 import '../core/symbols.dart';
 import '../data/asset_dao.dart';
 import '../data/database.dart';
+import '../domain/product_monthly_earnings.dart';
 import '../domain/smooth_history.dart';
 import '../services/market/history_lookup.dart';
 import '../services/market/history_source.dart';
@@ -124,6 +125,9 @@ class HoldingDetailService {
     final smoothCalc = const SmoothHistoryCalculator();
     final smoothValues = <int, Map<String, double>>{};
     final lookups = <int, HistoryPriceLookup>{};
+    // Share-based holdings: daily (quantity, totalCost) from the flow replay,
+    // matching the backfill (sold-out positions keep their held-market value).
+    final replays = <int, Map<String, (double, double)>>{};
     final futures = <Future<void>>[];
     for (final h in holdings) {
       if (isSmoothedHolding(h)) {
@@ -150,6 +154,9 @@ class HoldingDetailService {
         rawSymbol = normalizeSinaSymbol(rawSymbol);
       }
       final symbol = rawSymbol;
+      final flows = await _dao.getTransactionsForHolding(h.id);
+      replays[h.id] =
+          const HoldingReplay().replay(h, flows, from: earliest ?? day, to: day);
       futures.add(() async {
         try {
           final history = await adapter.fetch(symbol, earliest ?? day, day);
@@ -197,13 +204,14 @@ class HoldingDetailService {
         } else {
           price = hist;
         }
-        value = h.quantity * price;
+        value = (replays[h.id]?[key]?.$1 ?? h.quantity) * price;
       }
       final rate = valueRateOf(h, cnyRates);
       // Cost converts at the recorded purchase rate when available.
+      final replayedCost = replays[h.id]?[key]?.$2;
       final cost = (type.isAmountBased
               ? (h.costPrice > 0 ? h.costPrice : h.quantity)
-              : h.quantity * h.costPrice) *
+              : replayedCost ?? h.quantity * h.costPrice) *
           costRateOf(h, cnyRates);
 
       // Day change: price vs the previous trading day (only meaningful for

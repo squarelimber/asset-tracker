@@ -2,6 +2,12 @@
 
 All notable changes to Asset Tracker. Entries are condensed from the commit history; dates follow the release tags.
 
+## [0.9.17] - 2026-09-22
+
+### Fixed
+
+- 份额型持仓历史改为按买卖流水重放份额，清仓/部分卖出产品不再按 0 市值构建历史
+
 ## [0.9.16] - 2026-09-21
 
 ### Added
