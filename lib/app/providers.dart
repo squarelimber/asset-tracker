@@ -158,16 +158,21 @@ final historySyncProvider = FutureProvider<BackfillResult?>((ref) async {
   // backfill (web) still gets its snapshot — only the fetch-failure abort
   // sets [BackfillResult.historyUnavailable].
   //
-  // Also skipped when the backfill already wrote today from the historical
-  // series. [SnapshotService.ensureTodaySnapshot] documents that `force` may
-  // only be passed once the quotes behind the numbers are known to be fresh,
-  // and this code path performs no market refresh at all: forcing here would
-  // rebuild today from whatever quotes happen to be cached, replacing a
-  // figure that is consistent with every earlier day. The refresh-gated
-  // writer on the portfolio page already covers today as soon as a real
-  // refresh succeeds.
-  if (!result.historyUnavailable && !result.wroteToday) {
-    await ref.read(snapshotServiceProvider).ensureTodaySnapshot(force: true);
+  // When the backfill DID write today, it priced the day from the cached
+  // quote / historical series — not fresh live quotes. Letting that stand
+  // left "today" stale on every cold start until the user hit refresh
+  // (v0.9.9 skipped this branch on `wroteToday` for fear of overwriting the
+  // series-consistent day with a *cache* price; the safer fix is to refresh
+  // the quotes first and then force-rewrite today with the verified-fresh
+  // prices — the same gate the manual "重建历史快照" uses). A failed refresh
+  // keeps the day the backfill just wrote.
+  if (!result.historyUnavailable) {
+    final refresh = await ref.read(marketServiceProvider).refreshAll();
+    if (refresh.allOk) {
+      await ref
+          .read(snapshotServiceProvider)
+          .ensureTodaySnapshot(force: true);
+    }
   }
   return result;
 });

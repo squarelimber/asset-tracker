@@ -2,6 +2,12 @@
 
 All notable changes to Asset Tracker. Entries are condensed from the commit history; dates follow the release tags.
 
+## [0.9.18] - 2026-09-22
+
+### Fixed
+
+- 冷启动打开总览时自动刷新行情并重写今日快照，今日收益无需再手动点刷新
+
 ## [0.9.17] - 2026-09-22
 
 ### Fixed
