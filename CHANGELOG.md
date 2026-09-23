@@ -2,6 +2,16 @@
 
 All notable changes to Asset Tracker. Entries are condensed from the commit history; dates follow the release tags.
 
+## [0.9.19] - 2026-09-22
+
+### Changed
+
+- 首页资产总览卡在手机端改为银行卡式布局（净资产为主角、今日盈亏红绿标、底部小字合计，长金额单行自适应）
+
+### Fixed
+
+- 添加/编辑持仓与记一笔/记流水对话框在长表单且键盘弹出时顶部标题被顶出屏幕的遮挡问题
+
 ## [0.9.18] - 2026-09-22
 
 ### Fixed

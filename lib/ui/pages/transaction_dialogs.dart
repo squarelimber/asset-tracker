@@ -9,6 +9,17 @@ import '../../data/database.dart';
 import '../components/form_fields.dart';
 import '../tokens.dart';
 
+/// Caps a dialog's scroll content so the dialog body itself always fits on
+/// screen (long forms + keyboard would otherwise push the title off screen).
+Widget _cappedContent(BuildContext context, Widget child) {
+  final view = MediaQuery.viewInsetsOf(context);
+  final maxH = MediaQuery.sizeOf(context).height - view.vertical - 96.0;
+  return ConstrainedBox(
+    constraints: BoxConstraints(maxHeight: maxH.clamp(240.0, double.infinity)),
+    child: child,
+  );
+}
+
 /// Dialog for recording a transaction against a specific holding.
 /// Available types follow the holding's nature:
 /// - share-based (stocks/funds/gold/wealth/crypto/bonds/futures/property):
@@ -165,7 +176,9 @@ Future<void> showHoldingTransactionDialog(
     builder: (context) => StatefulBuilder(
       builder: (context, setState) => AlertDialog(
       title: Text('记一笔 · ${holding.name}'),
-      content: SingleChildScrollView(
+      content: _cappedContent(
+        context,
+        SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -309,6 +322,7 @@ Future<void> showHoldingTransactionDialog(
             ),
           ],
         ),
+      ),
       ),
       actions: [
         TextButton(onPressed: () => Navigator.pop(context), child: const Text('取消')),
@@ -589,7 +603,9 @@ Future<void> showAccountTransactionDialog(
     builder: (context) => StatefulBuilder(
       builder: (context, setState) => AlertDialog(
       title: const Text('记流水'),
-      content: SingleChildScrollView(
+      content: _cappedContent(
+        context,
+        SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -654,6 +670,7 @@ Future<void> showAccountTransactionDialog(
             ),
           ],
         ),
+      ),
       ),
       actions: [
         TextButton(onPressed: () => Navigator.pop(context), child: const Text('取消')),
