@@ -8,9 +8,10 @@ import 'terminal_card.dart';
 /// One "资产总览" card holding the whole balance-sheet snapshot:
 /// 总资产 / 总负债 / 净资产 / 今日盈亏.
 ///
-/// Desktop renders a single 4-column row, phone a 2x2 grid; cells are
-/// separated by 1px hairlines (T.border) instead of four independent
-/// cards, which saves vertical space on phone and reduces border noise.
+/// Desktop renders a single 4-column row with 1px hairlines between the
+/// cells. Phone renders a bank-card layout: a dark gradient card whose
+/// hero cell is 净资产 with 今日盈亏 right beside the main value, and a
+/// muted footer line carrying 总资产 / 总负债.
 class AssetOverviewCard extends StatelessWidget {
   const AssetOverviewCard({
     super.key,
@@ -81,7 +82,11 @@ class AssetOverviewCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final width = MediaQuery.sizeOf(context).width;
     final desktop = width >= 1100;
-    final columns = desktop ? 4 : 2;
+    if (!desktop) {
+      return _buildBankCard(context);
+    }
+
+    const columns = 4;
 
     final cells = <Widget>[
       _cell('总资产', _amount(totalAssets)),
@@ -128,4 +133,109 @@ class AssetOverviewCard extends StatelessWidget {
       ),
     );
   }
+
+  /// Phone: bank-card layout — 深色渐变 + 圆角大卡，净资产为主角。
+  Widget _buildBankCard(BuildContext context) {
+    // 深蓝 → 深紫的暗渐变，保持终端深色调；右上一团淡光晕模拟卡面反光。
+    const gradient = LinearGradient(
+      begin: Alignment.topLeft,
+      end: Alignment.bottomRight,
+      colors: [
+        Color(0xFF1C2740), // 深靛蓝
+        Color(0xFF25203E), // 深蓝紫
+        Color(0xFF26203A), // 暗紫
+      ],
+      stops: [0.0, 0.55, 1.0],
+    );
+
+    String pctText() {
+      final pct = todayPct;
+      if (pct == null) return '';
+      return '${pct >= 0 ? '+' : ''}${Formats.pct1(pct)}';
+    }
+
+    // 主数值右边的今日盈亏标：金额（掩码隐藏时只显示 pct）。
+    Widget profitBadge() {
+      final color = T.changeColor(todayProfit);
+      final text = hidden
+          ? (todayPct == null ? Formats.masked() : pctText())
+          : '${todayProfit >= 0 ? '+' : ''}${Formats.amount(todayProfit)}'
+              '${todayPct == null ? '' : '  ${pctText()}'}';
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.16),
+          borderRadius: BorderRadius.circular(T.rPill),
+        ),
+        child: Text(
+          text,
+          maxLines: 1,
+          style: T.mono(size: 12, weight: FontWeight.w700, color: color),
+        ),
+      );
+    }
+
+    return Container(
+      // 与 TerminalCard 相同的圆角/边框语言，但外层自绘渐变。
+      decoration: BoxDecoration(
+        gradient: gradient,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: T.border),
+        boxShadow: const [
+          // 右上一团微光，模拟卡面高光且不破坏深色基调。
+          BoxShadow(
+            color: Color(0x2458A6FF), // accent 14% 上发光
+            offset: Offset(-24, -18),
+            blurRadius: 48,
+          ),
+          BoxShadow(
+            color: Color(0x143E2A66),
+            offset: Offset(20, 18),
+            blurRadius: 60,
+          ),
+        ],
+      ),
+      padding: const EdgeInsets.fromLTRB(20, 18, 20, 16),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('净资产', style: T.label(size: 12, color: T.text2)),
+          const SizedBox(height: 10),
+          // 主行：主数值 + 今日盈亏 pill。FittedBox 保证长金额不折行——
+          // 空间不够时整体等比缩小，永远单行。
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  _amount(netWorth),
+                  maxLines: 1,
+                  style: T.mono(
+                    size: 26,
+                    weight: FontWeight.w700,
+                    color: T.text1,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                profitBadge(),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            '总资产 ${_compact(totalAssets)} · 负债 ${_compact(totalLiabilities)}',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: T.mono(size: 12, color: T.text2),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 底部小字用紧凑金额（太长会吃掉整行宽度）。
+  String _compact(double v) =>
+      hidden ? Formats.masked() : Formats.amountCompact(v);
 }
