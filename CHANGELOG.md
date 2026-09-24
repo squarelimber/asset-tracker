@@ -2,6 +2,13 @@
 
 All notable changes to Asset Tracker. Entries are condensed from the commit history; dates follow the release tags.
 
+## [0.9.20] - 2026-09-23
+
+### Fixed
+
+- 资产卡主数值行高度固定，隐私切换不再让卡片忽大忽小；眼睛按钮移入卡片右上角（桌面保留原入口）
+- 添加/编辑持仓等长表单对话框整体限高，首行不再被键盘或小屏顶出屏幕
+
 ## [0.9.19] - 2026-09-22
 
 ### Changed
