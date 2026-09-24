@@ -87,12 +87,17 @@ class ProductEarningsService {
       if (type == AssetType.liability) continue;
       if (skippedFx.contains(h.id)) continue;
       if (isSmoothedHolding(h)) {
+        final flows = await _dao.getTransactionsForHolding(h.id);
         if (type.isAmountBased) {
-          final flows = await _dao.getTransactionsForHolding(h.id);
           smoothValues[h.id] =
               smoothCalc.amountHistory(h, flows, from: from, to: current, today: current);
           smoothPrincipals[h.id] =
               smoothCalc.amountPrincipal(h, flows, from: from, to: current);
+        } else {
+          // Share-based smoothed holdings (manual-NAV / FX-linked bank
+          // wealth) replay their flows too, so a partial redemption does not
+          // collapse the pre-redemption days (2026-09-24 月月宝 report).
+          replays[h.id] = replay.replay(h, flows, from: from, to: current);
         }
         continue;
       }
@@ -145,14 +150,20 @@ class ProductEarningsService {
             ));
           }
         } else {
+          final replayMap = replays[h.id] ?? const <String, (double, double)>{};
           for (var day = DateTime(from.year, from.month, from.day);
               !day.isAfter(current);
               day = day.add(const Duration(days: 1))) {
+            final key = todayKey(day);
             final price = smoothCalc.sharePrice(h, day, from, current);
+            // The replayed quantity/cost, so pre-redemption days keep the
+            // pre-redemption position.
+            final rc = replayMap[key];
+            final qty = rc?.$1 ?? h.quantity;
             days.add(HoldingDay(
-              date: todayKey(day),
-              value: h.quantity * price * valueRate,
-              cost: h.quantity * h.costPrice * costRate,
+              date: key,
+              value: qty * price * valueRate,
+              cost: (rc?.$2 ?? qty * h.costPrice) * costRate,
             ));
           }
         }

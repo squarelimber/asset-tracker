@@ -131,9 +131,19 @@ class HoldingDetailService {
     final futures = <Future<void>>[];
     for (final h in holdings) {
       if (isSmoothedHolding(h)) {
+        final flows = await _dao.getTransactionsForHolding(h.id);
         if (AssetType.fromStorage(h.assetType).isAmountBased) {
-          final flows = await _dao.getTransactionsForHolding(h.id);
           smoothValues[h.id] = smoothCalc.amountHistory(
+            h,
+            flows,
+            from: earliest ?? day,
+            to: day,
+          );
+        } else {
+          // Share-based smoothed holdings replay their flows too: valuing
+          // historical days with the *current* quantity collapses the whole
+          // history after a partial redemption (2026-09-24 月月宝 report).
+          replays[h.id] = const HoldingReplay().replay(
             h,
             flows,
             from: earliest ?? day,
@@ -187,7 +197,10 @@ class HoldingDetailService {
           value = smoothValues[h.id]?[key] ?? h.quantity;
         } else {
           price = smoothCalc.sharePrice(h, day, earliest ?? day, day);
-          value = h.quantity * price;
+          // Replayed quantity: days held before a redemption keep the
+          // pre-redemption share count (see the backfill v9 marker).
+          final replayed = replays[h.id]?[key];
+          value = (replayed?.$1 ?? h.quantity) * price;
         }
       } else {
         final hist = lookup?.priceOnOrBefore(key);
@@ -231,7 +244,10 @@ class HoldingDetailService {
         }
         if (prev > 0 && price > 0) {
           prevPrice = prev;
-          dayChange = (price - prev) * h.quantity;
+          // The replayed quantity where available, so a partial sell/redemption
+          // does not distort that day's change (same rule as the value above).
+          final qty = replays[h.id]?[key]?.$1 ?? h.quantity;
+          dayChange = (price - prev) * qty;
           dayChangePct = (price - prev) / prev;
         }
       } else if (isSmoothedHolding(h) && type.isAmountBased) {

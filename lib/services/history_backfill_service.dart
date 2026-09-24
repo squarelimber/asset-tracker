@@ -120,6 +120,15 @@ class HistoryBackfillService {
   /// history built with the current-quantity shortcut and need a full pass.
   static const _shareReplayMarker = 'backfill_v8_share_replay';
 
+  /// Marker for the v9 one-time full rebuild: the v8 replay covered the
+  /// market-linked share holdings, but **smoothed** share-based holdings
+  /// (manual-NAV bank wealth, FX-linked bank wealth, etc.) were still valued
+  /// with the *current* quantity on every historical day. After a partial
+  /// redemption (e.g. 2026-09-24 月月宝 redeemed 107k of 223k shares) a full
+  /// rebuild collapsed every day before the redemption by the redeemed market
+  /// value, destroying the whole trend. v9 replays their flows too.
+  static const _smoothShareReplayMarker = 'backfill_v9_smooth_share_replay';
+
   /// Date (yyyy-MM-dd) of the previous successful run. A light run re-derives
   /// every day from this date through today, because any of them may have
   /// been overwritten by the live-quote path in the meantime and needs to be
@@ -221,8 +230,8 @@ class HistoryBackfillService {
     final failedSymbols = <String>[];
     for (final h in holdings) {
       if (isSmoothedHolding(h)) {
+        final flows = await _dao.getTransactionsForHolding(h.id);
         if (AssetType.fromStorage(h.assetType).isAmountBased) {
-          final flows = await _dao.getTransactionsForHolding(h.id);
           smoothValues[h.id] = smoothCalc.amountHistory(
             h,
             flows,
@@ -231,6 +240,19 @@ class HistoryBackfillService {
             today: current,
           );
           smoothPrincipals[h.id] = smoothCalc.amountPrincipal(
+            h,
+            flows,
+            from: windowStart,
+            to: current,
+          );
+        } else {
+          // Share-based smoothed holdings (manual-NAV / FX-linked bank
+          // wealth) must replay their flows just like market-linked ones:
+          // pricing every historical day with the *current* quantity makes a
+          // full rebuild collapse the whole trend after a partial redemption
+          // (2026-09-24「月月宝 → 五年国债ETF」report — the redeemed ~107k of
+          // 223k shares vanished from every pre-redemption day).
+          replays[h.id] = const HoldingReplay().replay(
             h,
             flows,
             from: windowStart,
@@ -289,7 +311,8 @@ class HistoryBackfillService {
 
     final firstTimeRebuild =
         await _dao.getSetting(_backfillV3Marker) == null ||
-            await _dao.getSetting(_shareReplayMarker) == null;
+            await _dao.getSetting(_shareReplayMarker) == null ||
+            await _dao.getSetting(_smoothShareReplayMarker) == null;
     // A type switch that crossed the amount-based boundary changes the
     // *meaning* of the stored numbers (see holding_type_conversion.dart); the
     // days written under the old semantics must not survive a light run (a
@@ -357,7 +380,11 @@ class HistoryBackfillService {
             value = smoothValues[h.id]?[key] ?? h.quantity;
           } else {
             final price = smoothCalc.sharePrice(h, day, windowStart, current);
-            value = h.quantity * price;
+            // The replayed quantity, so days held before a redemption keep
+            // the pre-redemption position (see [_smoothShareReplayMarker]).
+            final replayed = replays[h.id]?[key];
+            final qty = replayed?.$1 ?? h.quantity;
+            value = qty * price;
           }
           if (value > 0) hasPrice = true;
           assets += value * valueRateOf(h, cnyRates);
@@ -368,7 +395,8 @@ class HistoryBackfillService {
           final principal = type.isAmountBased
               ? (smoothPrincipals[h.id]?[key] ??
                   (h.costPrice > 0 ? h.costPrice : h.quantity))
-              : h.quantity * h.costPrice;
+              // Replayed total cost for share-based smoothed holdings too.
+              : (replays[h.id]?[key]?.$2 ?? h.quantity * h.costPrice);
           cost += principal * costRateOf(h, cnyRates);
           continue;
         }
@@ -421,6 +449,7 @@ class HistoryBackfillService {
     if (firstTimeRebuild) {
       await _dao.setSetting(_backfillV3Marker, '${current.millisecondsSinceEpoch}');
       await _dao.setSetting(_shareReplayMarker, '${current.millisecondsSinceEpoch}');
+      await _dao.setSetting(_smoothShareReplayMarker, '${current.millisecondsSinceEpoch}');
     }
     // Clear the forced-full-rebuild marker only after the swap succeeded,
     // so a run aborted by a network failure retries the full rebuild next

@@ -531,6 +531,11 @@ void main() {
         () async {
       await dao.setSetting('backfill_v7_gold_spot_and_today', '1');
       await dao.setSetting('backfill_v8_share_replay', '1');
+      // v9 (smooth share replay) migrated too: this is a fully current
+      // database, so the run below is a plain light run. The one-time full
+      // rebuild for databases missing the v9 marker is covered by
+      // smooth_share_replay_test.dart.
+      await dao.setSetting('backfill_v9_smooth_share_replay', '1');
       await seedFundHolding(purchaseDate: DateTime(2026, 7, 1), latest: 2.9);
       final fake = _FakeHistorySource();
       fake.data['110022'] = {
