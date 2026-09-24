@@ -144,24 +144,32 @@ void main() {
   });
 
   group('内部赎回不入已实现收益', () {
-    test('PortfolioCalculator.realizedProfit 跳过内部赎回腿', () async {
+    test('PortfolioCalculator.realizedProfit 跳过内部赎回腿（含卖出回款到现金）',
+        () async {
       final acc = await addAccount('A');
       final stock = await addHolding(
         accountId: acc, name: '股票', type: AssetType.stock,
         quantity: 100, costPrice: 10, latestPrice: 20,
       );
-      // A real sell (proceeds parked in cash): realizes (15 - 10) x 40.
+      // A real sell WITHOUT a cash target (回款不入账 — the proceeds leave
+      // the tracker): this one is a realization, (15 - 10) x 40 = 200.
+      await service.record(
+        accountId: acc, holdingId: stock, type: TransactionType.sell,
+        quantity: 40, price: 15, amount: 600,
+      );
+      // A sell parked in a tracked cash holding: internal movement, the
+      // cost travels with the money — NOT a realization.
       final cash = await addHolding(
         accountId: acc, name: '现金', type: AssetType.bankDeposit,
         quantity: 600, costPrice: 600, latestPrice: 1,
       );
       await service.record(
         accountId: acc, holdingId: stock, type: TransactionType.sell,
-        quantity: 40, price: 15, amount: 600, cashTargetId: cash,
+        quantity: 20, price: 15, amount: 300, cashTargetId: cash,
       );
       // An internal redemption (proceeds fund another holding): 30 shares
-      // at cost 10, value 20 -> 15 shares remain; the cost of the redeemed
-      // units travels into the new position, nothing is realized.
+      // left (100 - 40 - 20 - 30 ... see below), cost carried into the new
+      // position, nothing realized.
       final fund = await addHolding(
         accountId: acc, name: '新基金', type: AssetType.mutualFund,
         quantity: 0, costPrice: 0, latestPrice: 1,
@@ -175,9 +183,10 @@ void main() {
         await dao.getHoldings(),
         sellTransactions: await dao.getTransactions(),
       );
-      // Only the real sell counts: (15 - 10) x 40 = 200. The internal
-      // redemption's (20 - 10) x 30 = 300 must NOT be added on top of the
-      // 300 the new position already carries in its cost basis.
+      // Only the real exit counts: (15 - 10) x 40 = 200. The sell-to-cash
+      // ((15-10) x 20 = 100) and the internal redemption ((20-10) x 30 = 300
+      // — already carried in the new position's cost basis) must NOT be
+      // added on top.
       expect(s.realizedProfit, closeTo(200, 1e-6));
     });
 
@@ -206,6 +215,109 @@ void main() {
         amountBasedHoldingIds: const {},
       );
       expect(byHolding, isEmpty);
+    });
+  });
+
+  group('卖出回款到现金 / 从现金买入：成本守恒（同族修复）', () {
+    test('卖出到现金：现金本金只增加卖出份额的本金，总成本与总收益不变', () async {
+      final acc = await addAccount('A');
+      final fund = await addHolding(
+        accountId: acc, name: '基金', type: AssetType.mutualFund,
+        quantity: 1000, costPrice: 1, latestPrice: 2,
+      );
+      final cash = await addHolding(
+        accountId: acc, name: '现金账户', type: AssetType.bankDeposit,
+        quantity: 0, costPrice: 0, latestPrice: 1,
+      );
+      final costBefore = await totalCost();
+      final profitBefore = await totalProfit();
+
+      final r = await service.record(
+        accountId: acc, holdingId: fund, type: TransactionType.sell,
+        quantity: 500, price: 2, amount: 1000, cashTargetId: cash,
+      );
+      expect(r.ok, isTrue);
+
+      // 回款 1000 全额进余额，但本金只进卖出份额的本金 500×1=500——浮盈
+      // 留在现金账户（未实现），不入新本金。旧行为 +1000 → 总成本凭空
+      // +500 → 卖出当天出现 -500 的假亏损（「直接赎回到现金也资产算错」）。
+      final cashAfter = await holding(cash);
+      expect(cashAfter.quantity, closeTo(1000, 1e-6));
+      expect(cashAfter.costPrice, closeTo(500, 1e-6));
+      expect((await holding(fund)).quantity, closeTo(500, 1e-6));
+      expect(await totalCost(), closeTo(costBefore, 1e-6));
+      expect(await totalProfit(), closeTo(profitBefore, 1e-6));
+
+      // 删除该笔卖出：余额与本金全部还原。
+      final row = (await dao.getTransactions()).single;
+      expect((await service.remove(row.id)).ok, isTrue);
+      expect((await holding(fund)).quantity, closeTo(1000, 1e-6));
+      expect((await holding(cash)).quantity, closeTo(0, 1e-6));
+      expect((await holding(cash)).costPrice, closeTo(0, 1e-6));
+    });
+
+    test('从有浮盈的现金买入：目标成本 = 移动本金（不是金额）', () async {
+      final acc = await addAccount('A');
+      final cash = await addHolding(
+        accountId: acc, name: '余额宝', type: AssetType.bankDeposit,
+        quantity: 5000, costPrice: 3000, latestPrice: 1, // gain 2000
+      );
+      final fund = await addHolding(
+        accountId: acc, name: '基金', type: AssetType.mutualFund,
+        quantity: 0, costPrice: 0, latestPrice: 10,
+      );
+      final costBefore = await totalCost();
+      final profitBefore = await totalProfit();
+
+      final r = await service.record(
+        accountId: acc, holdingId: fund, type: TransactionType.buy,
+        quantity: 100, price: 10, amount: 1000, cashSourceId: cash,
+      );
+      expect(r.ok, isTrue);
+
+      // 按比例移动本金 3000×1000/5000 = 600；基金成本只 +600（旧行为
+      // +1000 → 现金账户浮盈被重复记成本 → 当日假亏损 400）。
+      final cashAfter = await holding(cash);
+      expect(cashAfter.quantity, closeTo(4000, 1e-6));
+      expect(cashAfter.costPrice, closeTo(2400, 1e-6));
+      expect((await holding(fund)).costPrice, closeTo(6, 1e-9));
+      expect(await totalCost(), closeTo(costBefore, 1e-6));
+      expect(await totalProfit(), closeTo(profitBefore, 1e-6));
+    });
+
+    test('卖出→现金→再买入 往返：总成本与总收益始终不变', () async {
+      final acc = await addAccount('A');
+      final fund = await addHolding(
+        accountId: acc, name: '基金', type: AssetType.mutualFund,
+        quantity: 1000, costPrice: 1, latestPrice: 2,
+      );
+      final cash = await addHolding(
+        accountId: acc, name: '现金账户', type: AssetType.bankDeposit,
+        quantity: 0, costPrice: 0, latestPrice: 1,
+      );
+      final costBefore = await totalCost();
+      final profitBefore = await totalProfit();
+
+      // 清仓回款 2000 → 现金 2000/1000（本金 = 卖出份额成本 2000×1）。
+      await service.record(
+        accountId: acc, holdingId: fund, type: TransactionType.sell,
+        quantity: 1000, price: 2, amount: 2000, cashTargetId: cash,
+      );
+      // 现金（带浮盈 1000）再买入 100 份 @2 = 200 —— 目标成本 = 移动本金
+      // 1000 × 200/2000 = 100（0.143×… 的比例规则，成本跟钱走）。
+      await service.record(
+        accountId: acc, holdingId: fund, type: TransactionType.buy,
+        quantity: 100, price: 2, amount: 200, cashSourceId: cash,
+      );
+
+      final fundAfter = await holding(fund);
+      expect(fundAfter.quantity, closeTo(100, 1e-6));
+      expect(fundAfter.costPrice, closeTo(1, 1e-9)); // 100 / 100
+      final cashAfter = await holding(cash);
+      expect(cashAfter.quantity, closeTo(1800, 1e-6));
+      expect(cashAfter.costPrice, closeTo(900, 1e-6)); // 1000 - 100
+      expect(await totalCost(), closeTo(costBefore, 1e-6));
+      expect(await totalProfit(), closeTo(profitBefore, 1e-6));
     });
   });
 

@@ -1921,12 +1921,13 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
   /// never moved a cost); the replay then keeps the legacy behaviour.
   final double? costMovedAmount;
 
-  /// True on the sell row of an **internal** redemption whose proceeds fund
-  /// another holding (「赎回购买」/「由 X 出资」): the money never leaves the
-  /// portfolio, the cost basis travels with the units into the new position
-  /// (total cost conserved), and the row is therefore *not* a realization —
-  /// it must not feed the realized-profit estimates, or the same gain is
-  /// counted twice (once carried into the new holding, once "realized").
+  /// True on the sell leg of an **internal** movement whose proceeds stay in
+  /// the portfolio: a redemption funding another holding (「赎回购买」/「由 X
+  /// 出资」) or a sell parked in a tracked cash holding (回款到现金). The money
+  /// never leaves the portfolio, the cost basis travels with it (total cost
+  /// conserved), and the row is therefore *not* a realization — it must not
+  /// feed the realized-profit estimates, or the same gain is counted twice
+  /// (once carried into the new position, once "realized").
   ///
   /// False (the default) for ordinary sells, including "回款不入账" ones,
   /// whose proceeds genuinely leave the tracker and do realize.

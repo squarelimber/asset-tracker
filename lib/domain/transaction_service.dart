@@ -128,6 +128,14 @@ class TransactionService {
           occurredAt: occurredAt ?? DateTime.now(),
           note: note == null || note.isEmpty ? const Value.absent() : Value(note),
           costMovedAmount: Value(movedCost),
+          // A sell whose proceeds are parked in a tracked cash holding never
+          // leaves the portfolio (the balance grows by the proceeds, the
+          // invested amount by the sold principal): it is an internal
+          // movement, not a realization, and must not feed the
+          // realized-profit estimates (2026-09-24「直接赎回到现金」report).
+          internalMove: Value(
+            type == TransactionType.sell && cashTargetId != null,
+          ),
         ));
       });
       return TransactionResult.okWith(movedCost);
@@ -370,10 +378,13 @@ class TransactionService {
   /// the invested amount the funding leg moved (0 when it has no cash leg).
   ///
   /// [costBasis] overrides the amount that enters the holding's cost basis.
-  /// A plain buy adds the full purchase price. A redemption-funded buy adds
-  /// only the principal that travelled from the source ([movedCostOf] /
-  /// redeemed units' cost) — the difference is unrealized gain/loss that
-  /// must keep living in the position, not become new principal.
+  /// An unfunded buy adds the full purchase price; a redemption-funded buy
+  /// adds only the principal that travelled from the source. A buy **from a
+  /// cash holding** also adds only the principal the cash leg actually moved
+  /// ([movedCostOf]): the difference is unrealized gain/loss that must keep
+  /// living in the position (on the cash account), not become new principal —
+  /// otherwise every 卖出回款 → 现金 → 再买入 cycle re-books the cash's gain
+  /// as cost and the day shows a phantom loss of that size.
   Future<double> _applyBuy({
     required int? holdingId,
     required double? quantity,
@@ -385,20 +396,36 @@ class TransactionService {
       throw ArgumentError('买入需指定持仓、数量和金额');
     }
     final holding = await _getHolding(holdingId);
+    if (cashSourceId != null) {
+      final source = await _getHolding(cashSourceId);
+      _assertSameCurrency(source, holding);
+      // Cash leg first: the moved principal is what the target must receive
+      // to conserve the portfolio's total cost.
+      final moved = await _applyCashMove(cashSourceId, -amount, invested: true);
+      final newQty = holding.quantity + quantity;
+      final totalCost = holding.quantity * holding.costPrice + moved;
+      await _updateHolding(
+          holding, quantity: newQty, costPrice: totalCost / newQty);
+      return moved;
+    }
     final newQty = holding.quantity + quantity;
     final totalCost =
         holding.quantity * holding.costPrice + (costBasis ?? amount);
     await _updateHolding(holding, quantity: newQty, costPrice: totalCost / newQty);
-    if (cashSourceId != null) {
-      final source = await _getHolding(cashSourceId);
-      _assertSameCurrency(source, holding);
-      return _applyCashMove(cashSourceId, -amount, invested: true);
-    }
     return 0;
   }
 
   /// Sells out of [holdingId], optionally parking the proceeds in
   /// [cashTargetId]. Returns the invested amount that leg moved.
+  ///
+  /// A sell into a tracked cash holding is an **internal** movement: the
+  /// balance receives the full proceeds but the cash account's invested
+  /// amount grows only by the sold principal (`quantity x unit cost`), so
+  /// the unrealized gain of the sold lots stays unrealized — now carried by
+  /// the cash — and the portfolio's total cost is conserved. Booking the
+  /// full proceeds as "new capital" (the plain income rule) re-books the
+  /// gain as principal, inflates total cost and shows a phantom loss of the
+  /// gain's size on the sell day (2026-09-24「直接赎回到现金也资产算错」).
   Future<double> _applySell({
     required int? holdingId,
     required double? quantity,
@@ -420,7 +447,13 @@ class TransactionService {
     if (cashTargetId != null) {
       final target = await _getHolding(cashTargetId);
       _assertSameCurrency(target, holding);
-      return _applyCashMove(cashTargetId, amount, invested: true);
+      final soldPrincipal = quantity * holding.costPrice;
+      return _applyCashMove(
+        cashTargetId,
+        amount,
+        invested: true,
+        costCredit: soldPrincipal,
+      );
     }
     return 0;
   }
@@ -567,12 +600,25 @@ class TransactionService {
   /// dividend, income, expense). Liabilities are not allowed here —
   /// their flows go through transfers (repayment/borrowing).
   ///
+  /// [costCredit] overrides the invested-amount change for money *arriving*
+  /// from an internal movement (sell proceeds): the balance grows by the
+  /// full [delta] (the proceeds) but the invested amount grows only by the
+  /// principal that left the sold holding. Without it the plain income rule
+  /// ("arriving money is new capital, 1:1") would re-book the sold lots'
+  /// unrealized gain as principal, inflating the portfolio's total cost and
+  /// surfacing as a same-day phantom loss.
+  ///
   /// Returns the invested amount this leg actually moved (0 when
   /// [invested] is false), so the caller can persist it and the history
   /// replay can undo exactly that number rather than re-deriving it from
   /// the raw amount — the two only coincide when the principal equals the
   /// balance.
-  Future<double> _applyCashMove(int? holdingId, double delta, {required bool invested}) async {
+  Future<double> _applyCashMove(
+    int? holdingId,
+    double delta, {
+    required bool invested,
+    double? costCredit,
+  }) async {
     if (holdingId == null) {
       throw ArgumentError('需要指定现金持仓');
     }
@@ -593,7 +639,8 @@ class TransactionService {
     // whole remaining balance. Spending 5,000 out of a 10,000 balance with
     // 3,000 recorded handed the remaining 5,000 a cost of 5,000 (zero gain)
     // instead of 1,500 — a 3,500 phantom loss. Money *arriving* is new
-    // capital with no gain attached, so it adds 1:1.
+    // capital with no gain attached, so it adds 1:1 — except sell proceeds
+    // ([costCredit]), which carry their principal with them.
     var movedCost = 0.0;
     var newCost = holding.costPrice;
     if (invested) {
@@ -604,6 +651,10 @@ class TransactionService {
         movedCost = movedCostOf(holding, delta);
         newCost = effectiveCostOf(holding) - movedCost;
       }
+    }
+    if (costCredit != null) {
+      movedCost = costCredit;
+      newCost = effectiveCostOf(holding) + costCredit;
     }
     await _updateHolding(
       holding,
@@ -689,11 +740,15 @@ class TransactionService {
     }
     final qty = txn.quantity ?? 0;
     if (qty <= 0) throw ArgumentError('买入流水数量无效');
-    // Internal (redemption-funded) buys added only the principal that
-    // travelled — the full amount re-books unrealized gain as principal, so
-    // undo exactly what was added ([costMovedAmount]), never `amount`.
-    final basis =
-        txn.internalMove ? (txn.costMovedAmount ?? txn.amount) : txn.amount;
+    // Internal (redemption-funded) and cash-funded buys add only the
+    // principal that travelled, recorded in [costMovedAmount] at write time
+    // — the full amount re-books unrealized gain as principal, so undo
+    // exactly what was added, never `amount`. An unbudgeted buy (no funding
+    // leg) adds the full amount and carries no moved cost, so it keeps the
+    // amount rule.
+    final basis = (txn.internalMove || txn.cashSourceId != null)
+        ? (txn.costMovedAmount ?? txn.amount)
+        : txn.amount;
     if (qty > holding.quantity) {
       // Already reversed or inconsistent data; just zero the quantity.
       await _updateHolding(holding, quantity: 0);
@@ -734,7 +789,15 @@ class TransactionService {
           : holding.costPrice,
     );
     if (txn.cashTargetId != null) {
-      await _applyCashMove(txn.cashTargetId, -txn.amount, invested: true);
+      // Reverse the credit exactly as it was written: full proceeds off the
+      // balance, sold principal off the invested amount (see [_applySell]).
+      final credit = txn.costMovedAmount;
+      await _applyCashMove(
+        txn.cashTargetId,
+        -txn.amount,
+        invested: true,
+        costCredit: credit == null ? null : -credit,
+      );
     }
   }
 

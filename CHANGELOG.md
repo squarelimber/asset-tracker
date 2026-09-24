@@ -2,6 +2,14 @@
 
 All notable changes to Asset Tracker. Entries are condensed from the commit history; dates follow the release tags.
 
+## [0.9.23] - 未发布（待验证）
+
+### Fixed
+
+- 卖出回款到现金：现金账户本金只增加被卖份额的成本，不再把浮盈重复记成本（卖出当天不再出现等额假亏损）；该笔卖出按内部移动处理，不计入已实现收益
+- 从现金账户买入：目标产品成本按现金实际移动的本金，不再按全额金额
+- 「回款不入账」卖出语义不变（真实退出，仍计已实现）
+
 ## [0.9.22] - 2026-09-24
 
 ### Fixed

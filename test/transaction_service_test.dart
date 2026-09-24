@@ -105,7 +105,8 @@ void main() {
   });
 
   group('sell', () {
-    test('reduces quantity, cost unchanged, credits cash target', () async {
+    test('reduces quantity, cost unchanged, credits cash target at sold principal',
+        () async {
       final acc = await addAccount('A');
       final cash = await addHolding(
         accountId: acc, name: '现金', type: AssetType.bankDeposit,
@@ -125,7 +126,32 @@ void main() {
       expect(fundAfter.costPrice, 15);
       final cashAfter = (await dao.getHolding(cash))!;
       expect(cashAfter.quantity, 1000);
-      expect(cashAfter.costPrice, 1000); // invested moves with the credit
+      // Proceeds land in full, but only the *sold principal* (50 x 15 = 750)
+      // enters the invested amount — the 250 gain stays unrealized on the
+      // cash account, so the portfolio's total cost is conserved and the
+      // sell day shows no phantom loss. Booking the full 1000 re-books the
+      // gain as principal (2026-09-24「直接赎回到现金也资产算错」report).
+      expect(cashAfter.costPrice, closeTo(750, 1e-6));
+      // Sell into a tracked cash holding: an internal movement, not a
+      // realization (excluded from the realized-profit estimates).
+      expect((await dao.getTransactions()).single.internalMove, isTrue);
+    });
+
+    test('sell without a cash target (“回款不入账”) realizes', () async {
+      final acc = await addAccount('A');
+      final fund = await addHolding(
+        accountId: acc, name: '基金', type: AssetType.mutualFund,
+        quantity: 200, costPrice: 15, latestPrice: 20,
+      );
+      final r = await service.record(
+        accountId: acc, holdingId: fund, type: TransactionType.sell,
+        quantity: 50, price: 20, amount: 1000,
+      );
+      expect(r.ok, isTrue);
+      final row = (await dao.getTransactions()).single;
+      expect(row.internalMove, isFalse,
+          reason: '回款不入账的卖出是真实退出（钱离开追踪范围），仍计入已实现');
+      expect((await dao.getHolding(fund))!.quantity, 150);
     });
 
     test('rejects selling more than owned', () async {
