@@ -67,4 +67,8 @@ app.*.map.json
 /asset-tracker-*.apk
 /asset_tracker-windows-*.zip
 
+# Local-only user-data replay verification (contains personal data; never committed)
+/test/_local_*.dart
+/replay_verify_report.txt
+
 dist/
