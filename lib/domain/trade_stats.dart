@@ -92,7 +92,10 @@ class TradeStatsCalculator {
           // for share-based holdings, where costPrice is a unit cost.
           // Amount-based holdings store the cumulative invested amount in
           // costPrice (unit price and unit cost are both 1.0), so their
-          // realized profit is exactly 0 by construction.
+          // realized profit is exactly 0 by construction. Internal
+          // redemptions (proceeds fund another holding) never realize:
+          // their cost basis travels with the units into the new position.
+          if (t.internalMove) break;
           final holdingType =
               t.holdingId == null ? null : typeByHolding[t.holdingId];
           if (holdingType != null && !holdingType.isAmountBased) {
@@ -156,6 +159,9 @@ class TradeStatsCalculator {
       if (TransactionType.fromStorage(t.type) != TransactionType.sell) continue;
       final holdingId = t.holdingId;
       if (holdingId == null) continue;
+      // Internal redemption rows (proceeds fund another holding) carry the
+      // cost into the new position instead of realizing it.
+      if (t.internalMove) continue;
       if (amountBasedHoldingIds.contains(holdingId)) continue;
       final unitCost = costByHolding[holdingId] ?? 0;
       final qty = t.quantity ?? 0;

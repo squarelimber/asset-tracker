@@ -88,6 +88,7 @@ class SyncFormatter {
         'note': t.note,
         'costMoved': t.costMoved,
         'costMovedAmount': t.costMovedAmount,
+        'internalMove': t.internalMove,
         'updatedAt': t.updatedAt.toIso8601String(),
       };
 

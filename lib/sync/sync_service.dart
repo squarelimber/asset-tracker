@@ -305,6 +305,11 @@ class SyncService {
               costMovedAmount: row['costMovedAmount'] == null
                   ? const Value.absent()
                   : Value((row['costMovedAmount'] as num).toDouble()),
+              // Absent from peers that predate the column: internal-leg
+              // rows from an older build keep the legacy realized reading.
+              internalMove: row['internalMove'] == null
+                  ? const Value.absent()
+                  : Value(row['internalMove'] == true),
               updatedAt: Value(updatedAt),
             ));
           } on Exception catch (e) {
@@ -423,6 +428,7 @@ class SyncService {
         note: row['note'] as String?,
         costMoved: row['costMoved'] == null ? true : row['costMoved'] == true,
         costMovedAmount: (row['costMovedAmount'] as num?)?.toDouble(),
+        internalMove: row['internalMove'] == true,
         updatedAt: parseIso(row['updatedAt']) ?? DateTime.now(),
       );
 

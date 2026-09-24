@@ -49,6 +49,21 @@ void main() {
     ));
   }
 
+  /// Portfolio total cost basis (same convention as [PortfolioCalculator]):
+  /// share-based = quantity x unit cost; amount-based = the recorded
+  /// (or implied) cumulative principal. Used to assert cost conservation.
+  Future<double> portfolioCost() async {
+    var total = 0.0;
+    for (final h in await dao.getHoldings()) {
+      final type = AssetType.fromStorage(h.assetType);
+      if (type == AssetType.liability) continue;
+      total += type.isAmountBased
+          ? (h.costPrice > 0 ? h.costPrice : h.quantity)
+          : h.quantity * h.costPrice;
+    }
+    return total;
+  }
+
   group('buy', () {
     test('increases quantity with moving average cost', () async {
       final acc = await addAccount('A');
@@ -673,9 +688,12 @@ void main() {
       expect(buy.price, 20);
       expect(buy.note, '由 现金 出资');
       expect(sell.occurredAt, buy.occurredAt);
+      // Internal legs: the proceeds stay in the portfolio.
+      expect(sell.internalMove, isTrue);
+      expect(buy.internalMove, isTrue);
     });
 
-    test('share-based source: reduces quantity, cost kept, unit from latestPrice',
+    test('share-based source: cost basis follows the units, total cost conserved',
         () async {
       final acc = await addAccount('A');
       final mmf = await addHolding(
@@ -686,6 +704,7 @@ void main() {
         accountId: acc, name: '基金', type: AssetType.mutualFund,
         quantity: 0, costPrice: 0, latestPrice: 1,
       );
+      final before = await portfolioCost();
       final r = await service.recordBuyFundedByHolding(
         sourceHoldingId: mmf, targetHoldingId: fund,
         targetQuantity: 100, targetPrice: 10, amount: 1000,
@@ -693,14 +712,21 @@ void main() {
       expect(r.ok, isTrue);
       final mmfAfter = (await dao.getHolding(mmf))!;
       expect(mmfAfter.quantity, 500); // 1000 - 1000/2
-      expect(mmfAfter.costPrice, 1); // cost unchanged
+      expect(mmfAfter.costPrice, 1); // unit cost unchanged
       final fundAfter = (await dao.getHolding(fund))!;
       expect(fundAfter.quantity, 100);
-      expect(fundAfter.costPrice, 10);
+      // The redeemed units carried 500 x 1 = 500 of principal into the new
+      // position. NOT the market amount 1000: booking the unrealized gain
+      // as fresh principal inflates total cost and shows up as a same-day
+      // loss of exactly that gain.
+      expect(fundAfter.costPrice, closeTo(5, 1e-9));
+      // Total cost is conserved: money moved product -> product.
+      expect(await portfolioCost(), closeTo(before, 1e-6));
       final sell =
           (await dao.getTransactions()).firstWhere((t) => t.type == 'sell');
       expect(sell.quantity, 500);
       expect(sell.price, 2);
+      expect(sell.internalMove, isTrue);
     });
 
     test('unit falls back to costPrice when latestPrice is 0', () async {
@@ -842,7 +868,7 @@ void main() {
       expect((await service.remove(buy.id)).ok, isTrue);
       final fundAfter = (await dao.getHolding(fund))!;
       expect(fundAfter.quantity, 0);
-      expect(fundAfter.costPrice, 10); // full reversal keeps the unit cost
+      expect(fundAfter.costPrice, 5); // full reversal keeps the unit cost
       // The source stays redeemed: its sell row is untouched.
       expect((await dao.getHolding(mmf))!.quantity, 500);
     });
@@ -893,6 +919,36 @@ void main() {
       expect(row.price, 1);
       expect(row.amount, 2000);
       expect(row.note, '赎回购买 新基金');
+      // Proceeds fund another holding: an internal move, not a realization.
+      expect(row.internalMove, isTrue);
+      // The caller gets the principal that left, to carry into the new
+      // holding's cost basis.
+      expect(r.movedCost, closeTo(2000, 1e-6));
+    });
+
+    test('removing an amount-based redemption restores balance AND invested',
+        () async {
+      final acc = await addAccount('A');
+      final cash = await addHolding(
+        accountId: acc, name: '现金', type: AssetType.bankDeposit,
+        quantity: 5000, costPrice: 3000, latestPrice: 1, // principal < balance
+      );
+      await service.recordRedemption(
+        sourceHoldingId: cash, amount: 2000,
+      );
+      final h = (await dao.getHolding(cash))!;
+      expect(h.quantity, closeTo(3000, 1e-6));
+      // Proportional principal: 3000 * 2000/5000 = 1200 left.
+      expect(h.costPrice, closeTo(1800, 1e-6));
+
+      final row = (await dao.getTransactions()).single;
+      expect(row.costMovedAmount, closeTo(1200, 1e-6));
+      expect((await service.remove(row.id)).ok, isTrue);
+      final restored = (await dao.getHolding(cash))!;
+      expect(restored.quantity, closeTo(5000, 1e-6));
+      expect(restored.costPrice, closeTo(3000, 1e-6),
+          reason: 'removing the redemption must undo the principal too, '
+              'otherwise the balance is back but the invested is short');
     });
 
     test('share-based: reduces quantity, keeps cost, unit from latestPrice',
@@ -913,6 +969,9 @@ void main() {
       expect(row.type, 'sell');
       expect(row.quantity, 500);
       expect(row.price, 2);
+      expect(row.internalMove, isTrue);
+      // The 500 units carried 500 x 1 = 500 of principal out of the source.
+      expect(r.movedCost, closeTo(500, 1e-6));
     });
 
     test('rejects liability', () async {

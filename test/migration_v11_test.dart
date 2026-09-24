@@ -2,17 +2,15 @@ import 'package:drift/drift.dart' hide isNull;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:asset_tracker/core/enums.dart';
 import 'package:asset_tracker/data/asset_dao.dart';
 import 'package:asset_tracker/data/database.dart';
-import 'package:asset_tracker/domain/smooth_history.dart';
 
-/// SQL schema as produced by schema version 9 (`category_override` on
-/// holdings). Dates are stored as unix seconds, matching drift's INTEGER
-/// storage. Columns added by an upgrade sit at the *end* of the table,
-/// because `ALTER TABLE ... ADD COLUMN` appends — mirror that here or the
-/// migration test exercises a shape production never has.
-const _v9Ddl = [
+/// SQL schema as produced by schema version 10 (`cost_moved_amount` on
+/// transactions, no `internal_move` yet). Dates are stored as unix seconds,
+/// matching drift's INTEGER storage. Columns added by an upgrade sit at the
+/// *end* of the table, because `ALTER TABLE ... ADD COLUMN` appends — mirror
+/// that here or the migration test exercises a shape production never has.
+const _v10Ddl = [
   '''
   CREATE TABLE accounts (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -61,7 +59,8 @@ const _v9Ddl = [
     occurred_at INTEGER NOT NULL,
     note TEXT,
     cost_moved INTEGER NOT NULL DEFAULT 1,
-    updated_at INTEGER NOT NULL DEFAULT (CAST(strftime('%s', CURRENT_TIMESTAMP) AS INTEGER))
+    updated_at INTEGER NOT NULL DEFAULT (CAST(strftime('%s', CURRENT_TIMESTAMP) AS INTEGER)),
+    cost_moved_amount REAL
   );
   ''',
   '''
@@ -124,45 +123,36 @@ const _v9Ddl = [
   ''',
 ];
 
-/// Opens the app database on top of a hand-built v9 schema and seed data,
-/// exercising the real v9 -> v10 upgrade path that production databases hit.
-Future<AppDatabase> _openOnV9() async {
+/// Opens the app database on top of a hand-built v10 schema and seed data,
+/// exercising the real v10 -> v11 upgrade path that production databases hit.
+Future<AppDatabase> _openOnV10() async {
   final db = AppDatabase(
     NativeDatabase.memory(
       setup: (sqlite) {
-        for (final ddl in _v9Ddl) {
+        for (final ddl in _v10Ddl) {
           sqlite.execute(ddl);
         }
         sqlite.execute(
           "INSERT INTO accounts (id, name, type, currency, note, created_at, updated_at) "
           "VALUES (1, '旧账户', 'general', 'CNY', NULL, 1787000000, 1787000000);",
         );
-        // Post-transfer state of the two accounts: 余额宝 was emptied into
-        // 现金账户. On the write side that moved a proportional 8,000 of
-        // principal, but the pre-v10 row can only state the raw 10,000
-        // amount — which is exactly what the replay has to fall back to.
+        // A sell row recorded before the internal-redemption marker existed
+        // (e.g. a「赎回购买」from the old build): it stays an ordinary sell
+        // and keeps its legacy realized reading.
         sqlite.execute(
           "INSERT INTO holdings (id, account_id, name, asset_type, market_source, symbol, "
           "quantity, cost_price, latest_price, currency, cost_fx_rate, purchase_date, "
           "risk_level, note, archived, created_at, updated_at, category_override) "
-          "VALUES (1, 1, '余额宝', 'moneyFund', 'manual', NULL, "
-          "0, 0, 1, 'CNY', NULL, NULL, NULL, NULL, 0, 1787000000, 1788000000, 'cash');",
+          "VALUES (1, 1, '月月宝', 'bank_wealth', 'forex', NULL, "
+          "1000, 1, 2, 'CNY', NULL, NULL, NULL, NULL, 0, 1787000000, 1788000000, NULL);",
         );
-        sqlite.execute(
-          "INSERT INTO holdings (id, account_id, name, asset_type, market_source, symbol, "
-          "quantity, cost_price, latest_price, currency, cost_fx_rate, purchase_date, "
-          "risk_level, note, archived, created_at, updated_at, category_override) "
-          "VALUES (2, 1, '现金账户', 'cash', 'manual', NULL, "
-          "10000, 8000, 1, 'CNY', NULL, NULL, NULL, NULL, 0, 1787000000, 1788000000, NULL);",
-        );
-        // A transfer recorded before the new column existed.
         sqlite.execute(
           "INSERT INTO transactions (id, account_id, holding_id, cash_source_id, cash_target_id, "
-          "type, quantity, price, amount, currency, occurred_at, note, cost_moved, updated_at) "
-          "VALUES (1, 1, NULL, 1, 2, 'transfer_out', NULL, NULL, 10000, 'CNY', "
-          "1787000000, NULL, 1, 1788000000);",
+          "type, quantity, price, amount, currency, occurred_at, note, cost_moved, updated_at, cost_moved_amount) "
+          "VALUES (1, 1, 1, NULL, NULL, 'sell', 500, 2, 1000, 'CNY', "
+          "1787000000, '赎回购买 五年国债ETF', 1, 1788000000, 500);",
         );
-        sqlite.execute('PRAGMA user_version = 9;');
+        sqlite.execute('PRAGMA user_version = 10;');
       },
     ),
   );
@@ -170,79 +160,47 @@ Future<AppDatabase> _openOnV9() async {
 }
 
 void main() {
-  test('v9 -> v10 adds transactions.cost_moved_amount as NULL', () async {
-    final db = await _openOnV9();
+  test('v10 -> v11 adds transactions.internal_move defaulting to false', () async {
+    final db = await _openOnV10();
     final dao = AssetDao(db);
 
-    // The seeded transfer survives untouched — it simply has no recorded
-    // moved amount, which the replay must read as "unknown, use the legacy
-    // amount" rather than "moved nothing".
+    // The seeded sell row survives and reads as a non-internal sell.
     final txns = await dao.getTransactions();
     expect(txns, hasLength(1));
-    expect(txns.single.costMovedAmount, isNull);
-    expect(txns.single.costMoved, isTrue);
-    expect(txns.single.amount, closeTo(10000, 1e-6));
+    expect(txns.single.internalMove, isFalse);
+    expect(txns.single.costMovedAmount, closeTo(500, 1e-6));
 
-    // Raw storage: the column exists and defaults to NULL. The database is
-    // migrated up to the current schema (11: internal_move), so the
-    // upgraded cost_moved_amount still reads NULL — the columns added by
-    // later versions must not rewrite it.
+    // Raw storage: the column exists and defaults to 0.
     final userVersion = await db.customSelect('PRAGMA user_version;').getSingle();
     expect(userVersion.data.values.single, 11);
 
     final raw = await db
-        .customSelect('SELECT cost_moved_amount FROM transactions WHERE id = 1;')
+        .customSelect('SELECT internal_move FROM transactions WHERE id = 1;')
         .getSingle();
-    expect(raw.data.values.single, isNull);
+    expect(raw.data.values.single, 0);
 
     // The upgrade must not rewrite any existing value.
     final keep = await db
         .customSelect(
-            'SELECT amount, cost_moved, currency FROM transactions WHERE id = 1;')
+            'SELECT amount, cost_moved, cost_moved_amount FROM transactions WHERE id = 1;')
         .getSingle();
-    expect(keep.data.values, [10000.0, 1, 'CNY']);
+    expect(keep.data.values, [1000.0, 1, 500.0]);
 
     await db.close();
   });
 
-  test('a rebuilt history keeps the legacy reading for pre-v10 rows', () async {
-    final db = await _openOnV9();
-    final dao = AssetDao(db);
-
-    // No recorded moved amount => fall back to the raw amount. The replayed
-    // pre-transfer principal is then the balance (10,000), not the true
-    // 8,000 principal: that inaccuracy is inherent to the old rows and the
-    // migration must not pretend otherwise.
-    final h = (await dao.getHoldings()).firstWhere((x) => x.id == 1);
-    final flows = await dao.getTransactionsForHolding(1);
-    final principal = const SmoothHistoryCalculator().amountPrincipal(
-      h,
-      flows,
-      from: DateTime(2026, 8, 1),
-      to: DateTime(2026, 9, 20),
-    );
-    expect(principal.values.where((v) => v > 0).first, closeTo(10000, 1e-6));
-
-    await db.close();
-  });
-
-  test('the new column round-trips through an update', () async {
-    final db = await _openOnV9();
+  test('internal_move round-trips through an update', () async {
+    final db = await _openOnV10();
     final dao = AssetDao(db);
 
     final t = (await dao.getTransactions()).single;
-    await dao.updateTransaction(t.copyWith(costMovedAmount: const Value(8000)));
-    expect((await dao.getTransactions()).single.costMovedAmount, 8000);
-
-    // And clearing it back to NULL restores the legacy reading.
-    final saved = (await dao.getTransactions()).single;
-    await dao.updateTransaction(saved.copyWith(costMovedAmount: const Value(null)));
-    expect((await dao.getTransactions()).single.costMovedAmount, isNull);
+    await dao.updateTransaction(t.copyWith(internalMove: true));
+    expect((await dao.getTransactions()).single.internalMove, isTrue);
 
     await db.close();
   });
 
-  test('a v10 database created from scratch still works (no regression)',
+  test('a v11 database created from scratch still works (no regression)',
       () async {
     final db = AppDatabase(NativeDatabase.memory());
     final dao = AssetDao(db);
@@ -253,18 +211,19 @@ void main() {
     await dao.createHolding(HoldingsCompanion.insert(
       accountId: 1,
       name: '现金',
-      assetType: AssetType.cash.storageName,
+      assetType: 'bank_deposit',
       quantity: const Value(100),
       costPrice: const Value(100),
     ));
     await dao.createTransaction(TransactionsCompanion.insert(
       accountId: 1,
-      type: TransactionType.income.storageName,
+      type: 'income',
       amount: 50,
       occurredAt: DateTime(2026, 9, 20),
       costMovedAmount: const Value(50),
+      internalMove: const Value(true),
     ));
-    expect((await dao.getTransactions()).single.costMovedAmount, 50);
+    expect((await dao.getTransactions()).single.internalMove, isTrue);
     await db.close();
   });
 }

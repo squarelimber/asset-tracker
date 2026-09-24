@@ -22,7 +22,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase([QueryExecutor? executor]) : super(executor ?? _openConnection());
 
   @override
-  int get schemaVersion => 10;
+  int get schemaVersion => 11;
 
   static QueryExecutor _openConnection() {
     // Web requires explicit web options: sqlite3.wasm and drift_worker.js
@@ -122,6 +122,15 @@ class AppDatabase extends _$AppDatabase {
           if (from < 10) {
             final db = m.database as AppDatabase;
             await m.addColumn(db.transactions, db.transactions.costMovedAmount);
+          }
+          // v10 -> v11: mark the sell rows of internal redemptions whose
+          // proceeds fund another holding. Constant default, so drift's
+          // addColumn is safe; legacy rows stay false and keep behaving as
+          // ordinary sells (their realized contribution is already baked
+          // into the stored data).
+          if (from < 11) {
+            final db = m.database as AppDatabase;
+            await m.addColumn(db.transactions, db.transactions.internalMove);
           }
         },
       );

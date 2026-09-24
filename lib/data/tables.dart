@@ -91,6 +91,17 @@ class Transactions extends Table {
   /// never moved a cost); the replay then keeps the legacy behaviour.
   RealColumn get costMovedAmount => real().nullable()();
 
+  /// True on the sell row of an **internal** redemption whose proceeds fund
+  /// another holding (「赎回购买」/「由 X 出资」): the money never leaves the
+  /// portfolio, the cost basis travels with the units into the new position
+  /// (total cost conserved), and the row is therefore *not* a realization —
+  /// it must not feed the realized-profit estimates, or the same gain is
+  /// counted twice (once carried into the new holding, once "realized").
+  ///
+  /// False (the default) for ordinary sells, including "回款不入账" ones,
+  /// whose proceeds genuinely leave the tracker and do realize.
+  BoolColumn get internalMove => boolean().withDefault(const Constant(false))();
+
   DateTimeColumn get updatedAt => dateTime().withDefault(currentDateAndTime)();
 
   @override

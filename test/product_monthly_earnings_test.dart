@@ -54,6 +54,7 @@ TransactionRow _txn({
     occurredAt: at,
     note: null,
     costMoved: true,
+    internalMove: false,
     updatedAt: at,
   );
 }

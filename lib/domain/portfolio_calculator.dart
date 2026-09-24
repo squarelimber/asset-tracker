@@ -227,6 +227,12 @@ class PortfolioCalculator {
     for (final t in sells) {
       final holdingId = t.holdingId;
       if (holdingId == null) continue;
+      // An internal redemption (proceeds fund another holding) carries the
+      // cost basis into the new position and never leaves the portfolio:
+      // it is not a realization, and counting it here would double-count
+      // the same gain (once as the new holding's carried profit, once as
+      // this "realized" entry).
+      if (t.internalMove) continue;
       // Realized profit (price - unit cost) x quantity is only valid for
       // share-based holdings, where costPrice is a unit cost. Amount-based
       // holdings store the cumulative invested amount in costPrice (unit

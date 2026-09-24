@@ -48,6 +48,7 @@ TransactionRow _income({
     occurredAt: at,
     note: null,
     costMoved: true,
+    internalMove: false,
     updatedAt: at,
   );
 }
@@ -151,6 +152,7 @@ void main() {
       occurredAt: DateTime(2026, 1, 5),
       note: null,
       costMoved: false,
+    internalMove: false,
       updatedAt: DateTime(2026, 1, 5),
     );
     final map = calc.amountHistory(
@@ -219,6 +221,7 @@ void main() {
       occurredAt: DateTime(2026, 1, 5),
       note: null,
       costMoved: true,
+    internalMove: false,
       updatedAt: DateTime(2026, 1, 5),
     );
     final map = calc.amountPrincipal(
@@ -249,6 +252,7 @@ void main() {
       occurredAt: DateTime(2026, 1, 5),
       note: null,
       costMoved: false,
+    internalMove: false,
       updatedAt: DateTime(2026, 1, 5),
     );
     final map = calc.amountPrincipal(
@@ -286,6 +290,7 @@ void main() {
       occurredAt: DateTime(2026, 9, 18, 10, 16, 8),
       note: null,
       costMoved: true,
+    internalMove: false,
       updatedAt: DateTime(2026, 9, 18, 10, 16, 8),
     );
     final from = DateTime(2026, 9, 10);

@@ -656,6 +656,22 @@ Future<void> showAddHoldingDialog(BuildContext context, WidgetRef ref) async {
                 }
                 return;
               }
+              // Cost-basis conservation: the money that entered this new
+              // holding is the principal that left the source (a
+              // redeem-to-fund is an internal move, like a transfer). For a
+              // share-based target the recorded unit cost is the moved
+              // principal per share — never the market purchase price —
+              // otherwise the redeemed gain is re-booked as new principal,
+              // total cost climbs and the day shows a loss of that size
+              // (2026-09-24「月月宝 → 五年国债ETF」report).
+              if (!isAmount && redemption.movedCost > 0 && qty > 0) {
+                final created = await dao.getHolding(createdId);
+                if (created != null) {
+                  await dao.updateHolding(
+                    created.copyWith(costPrice: redemption.movedCost / qty),
+                  );
+                }
+              }
             }
             if (context.mounted) Navigator.pop(context);
 

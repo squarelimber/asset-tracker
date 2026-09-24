@@ -195,6 +195,9 @@ class BackupService {
             costMovedAmount: t['costMovedAmount'] == null
                 ? const Value.absent()
                 : Value((t['costMovedAmount'] as num).toDouble()),
+            internalMove: t['internalMove'] == null
+                ? const Value.absent()
+                : Value(t['internalMove'] == true),
             updatedAt: Value(restoredAt),
           ));
         }
@@ -355,6 +358,7 @@ class BackupService {
         'note': t.note,
         'costMoved': t.costMoved,
         'costMovedAmount': t.costMovedAmount,
+        'internalMove': t.internalMove,
         'updatedAt': t.updatedAt.toIso8601String(),
       };
 

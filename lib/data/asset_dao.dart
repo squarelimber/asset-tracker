@@ -245,6 +245,7 @@ class AssetDao {
         note: Value(t.note),
         costMoved: Value(t.costMoved),
         costMovedAmount: Value(t.costMovedAmount),
+        internalMove: Value(t.internalMove),
         updatedAt: Value(now ?? DateTime.now()),
       ),
     );

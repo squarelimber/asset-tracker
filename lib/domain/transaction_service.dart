@@ -7,12 +7,20 @@ import 'holding_cost.dart';
 
 /// Outcome of a transaction record/remove operation.
 class TransactionResult {
-  const TransactionResult({required this.ok, this.message});
+  const TransactionResult({required this.ok, this.message, this.movedCost = 0});
 
   final bool ok;
   final String? message;
 
+  /// Invested amount this flow actually moved, when that is meaningful to
+  /// the caller. Redemption flows report the cost that left the source (so
+  /// a new holding funded by the redemption can carry it as its cost
+  /// basis); everything else reports 0.
+  final double movedCost;
+
   static const success = TransactionResult(ok: true);
+  static TransactionResult okWith(double movedCost, {String? message}) =>
+      TransactionResult(ok: true, message: message, movedCost: movedCost);
   static TransactionResult fail(String message) =>
       TransactionResult(ok: false, message: message);
 }
@@ -122,7 +130,7 @@ class TransactionService {
           costMovedAmount: Value(movedCost),
         ));
       });
-      return TransactionResult.success;
+      return TransactionResult.okWith(movedCost);
     } catch (e) {
       return TransactionResult.fail(_recordFailMessage(e));
     }
@@ -171,14 +179,25 @@ class TransactionService {
 
       final (unit, sourceQty) = _redemptionOf(source, sourceType, amount);
 
+      // The cost that leaves the source travels into the target: for a
+      // share-based source it is the redeemed units' principal
+      // (`sourceQty * costPrice`); for an amount-based one the proportional
+      // share [movedCostOf]. The target's cost basis is that moved cost —
+      // **not** the full market `amount` — so the portfolio's total cost is
+      // conserved and the redemption does not realize a gain that never
+      // left the portfolio (a swap must not move the day's P/L). Both rows
+      // are marked internal: when the proceeds never leave the portfolio
+      // the sell is not a realization and must not feed the realized-profit
+      // estimates.
+      double moved = 0;
       await _dao.transaction(() async {
-        final moved =
-            await _applyRedemption(source, sourceType, amount, sourceQty);
+        moved = await _applyRedemption(source, sourceType, amount, sourceQty);
         await _applyBuy(
           holdingId: targetHoldingId,
           quantity: targetQuantity,
           amount: amount,
           cashSourceId: null,
+          costBasis: moved,
         );
 
         final when = occurredAt ?? DateTime.now();
@@ -193,6 +212,7 @@ class TransactionService {
           occurredAt: when,
           note: Value('赎回购买 ${target.name}'),
           costMovedAmount: Value(moved),
+          internalMove: const Value(true),
         ));
         await _dao.createTransaction(TransactionsCompanion.insert(
           accountId: target.accountId,
@@ -206,9 +226,14 @@ class TransactionService {
           note: (note == null || note.isEmpty)
               ? Value('由 ${source.name} 出资')
               : Value(note),
+          // The target's cost basis actually added (the moved cost, which
+          // differs from `amount` whenever the source carried unrealized
+          // gain/loss); reversing this row must undo exactly this number.
+          costMovedAmount: Value(moved),
+          internalMove: const Value(true),
         ));
       });
-      return TransactionResult.success;
+      return TransactionResult.okWith(moved);
     } catch (e) {
       return TransactionResult.fail(_recordFailMessage(e));
     }
@@ -234,9 +259,9 @@ class TransactionService {
       }
       final (unit, sourceQty) = _redemptionOf(source, sourceType, amount);
 
+      double moved = 0;
       await _dao.transaction(() async {
-        final moved =
-            await _applyRedemption(source, sourceType, amount, sourceQty);
+        moved = await _applyRedemption(source, sourceType, amount, sourceQty);
         await _dao.createTransaction(TransactionsCompanion.insert(
           accountId: source.accountId,
           holdingId: Value(sourceHoldingId),
@@ -248,9 +273,15 @@ class TransactionService {
           occurredAt: occurredAt ?? DateTime.now(),
           note: (note == null || note.isEmpty) ? const Value.absent() : Value(note),
           costMovedAmount: Value(moved),
+          // A standalone redemption exists only to fund a brand-new holding
+          // (the caller's holding-creation flow): the money stays in the
+          // portfolio, so this is an internal move, not a realization. The
+          // caller reads [TransactionResult.movedCost] to set the new
+          // holding's cost basis to the principal that travelled.
+          internalMove: const Value(true),
         ));
       });
-      return TransactionResult.success;
+      return TransactionResult.okWith(moved);
     } catch (e) {
       return TransactionResult.fail(_recordFailMessage(e));
     }
@@ -285,9 +316,17 @@ class TransactionService {
   /// Applies the redemption to [source]: amount-based debits balance and
   /// invested (same as a buy deduction); share-based reduces quantity with
   /// the unit cost kept (same invariant as a sell).
-  /// Redeems [amount] out of [source]. Returns the invested amount that left
-  /// an amount-based source (0 for a share-based one, whose cost travels
-  /// with the units rather than in the balance).
+  ///
+  /// Returns the invested amount that left the source, so the caller can
+  /// credit it to the position the proceeds fund — the portfolio's total
+  /// cost must be conserved when money moves inside it:
+  /// - amount-based: the proportional share [movedCostOf];
+  /// - share-based: the redeemed units' principal `sourceQty * costPrice`
+  ///   ("the cost travels with the units"). The units' cost basis leaves
+  ///   the source the moment the quantity shrinks; the destination has to
+  ///   receive exactly that number. Handing it the full market `amount`
+  ///   instead re-books the unrealized gain as new principal, inflating
+  ///   the total cost and surfacing as a same-day loss of that size.
   Future<double> _applyRedemption(
     HoldingRow source,
     AssetType sourceType,
@@ -301,7 +340,7 @@ class TransactionService {
       source,
       quantity: (source.quantity - sourceQty).clamp(0.0, double.infinity),
     );
-    return 0;
+    return sourceQty * source.costPrice;
   }
 
   static String _fmt(double v) =>
@@ -329,18 +368,26 @@ class TransactionService {
 
   /// Buys into [holdingId], optionally funded from [cashSourceId]. Returns
   /// the invested amount the funding leg moved (0 when it has no cash leg).
+  ///
+  /// [costBasis] overrides the amount that enters the holding's cost basis.
+  /// A plain buy adds the full purchase price. A redemption-funded buy adds
+  /// only the principal that travelled from the source ([movedCostOf] /
+  /// redeemed units' cost) — the difference is unrealized gain/loss that
+  /// must keep living in the position, not become new principal.
   Future<double> _applyBuy({
     required int? holdingId,
     required double? quantity,
     required double amount,
     int? cashSourceId,
+    double? costBasis,
   }) async {
     if (holdingId == null || quantity == null || quantity <= 0 || amount <= 0) {
       throw ArgumentError('买入需指定持仓、数量和金额');
     }
     final holding = await _getHolding(holdingId);
     final newQty = holding.quantity + quantity;
-    final totalCost = holding.quantity * holding.costPrice + amount;
+    final totalCost =
+        holding.quantity * holding.costPrice + (costBasis ?? amount);
     await _updateHolding(holding, quantity: newQty, costPrice: totalCost / newQty);
     if (cashSourceId != null) {
       final source = await _getHolding(cashSourceId);
@@ -642,6 +689,11 @@ class TransactionService {
     }
     final qty = txn.quantity ?? 0;
     if (qty <= 0) throw ArgumentError('买入流水数量无效');
+    // Internal (redemption-funded) buys added only the principal that
+    // travelled — the full amount re-books unrealized gain as principal, so
+    // undo exactly what was added ([costMovedAmount]), never `amount`.
+    final basis =
+        txn.internalMove ? (txn.costMovedAmount ?? txn.amount) : txn.amount;
     if (qty > holding.quantity) {
       // Already reversed or inconsistent data; just zero the quantity.
       await _updateHolding(holding, quantity: 0);
@@ -651,7 +703,7 @@ class TransactionService {
       // sell-out) so realized gains stay computable.
       final cost = newQty == 0
           ? holding.costPrice
-          : (holding.quantity * holding.costPrice - txn.amount) / newQty;
+          : (holding.quantity * holding.costPrice - basis) / newQty;
       await _updateHolding(holding, quantity: newQty, costPrice: cost < 0 ? 0.0 : cost);
     }
     if (txn.cashSourceId != null) {
@@ -664,7 +716,23 @@ class TransactionService {
     if (holdingId == null) throw ArgumentError('卖出流水缺少持仓');
     final holding = await _getHolding(holdingId);
     final qty = txn.quantity ?? 0;
-    await _updateHolding(holding, quantity: holding.quantity + qty);
+    // An internal redemption recorded on an amount-based holding itself
+    // debited its balance *and* invested; reversing must restore both,
+    // otherwise the balance comes back while the principal stays short — a
+    // phantom gain of the moved cost. Ordinary sells of share-based
+    // holdings never touch `costPrice`. Legacy rows without
+    // [TransactionRow.costMovedAmount] keep the old behaviour.
+    final type = AssetType.fromStorage(holding.assetType);
+    final restoreInvested = type.isAmountBased &&
+        txn.internalMove &&
+        txn.costMovedAmount != null;
+    await _updateHolding(
+      holding,
+      quantity: holding.quantity + qty,
+      costPrice: restoreInvested
+          ? holding.costPrice + txn.costMovedAmount!
+          : holding.costPrice,
+    );
     if (txn.cashTargetId != null) {
       await _applyCashMove(txn.cashTargetId, -txn.amount, invested: true);
     }

@@ -361,6 +361,7 @@ void main() {
         occurredAt: now,
         note: note,
         costMoved: true,
+        internalMove: false,
         updatedAt: now,
       );
     }

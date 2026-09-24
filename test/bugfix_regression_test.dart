@@ -307,6 +307,7 @@ void main() {
           currency: 'CNY',
           occurredAt: when,
           costMoved: true,
+          internalMove: false,
           updatedAt: when,
         );
 

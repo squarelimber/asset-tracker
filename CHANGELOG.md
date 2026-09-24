@@ -2,6 +2,14 @@
 
 All notable changes to Asset Tracker. Entries are condensed from the commit history; dates follow the release tags.
 
+## [0.9.21] - 2026-09-24
+
+### Fixed
+
+- 「赎回购买 / 由 X 出资」以前把赎回份额的本金丢掉、新持仓却按全市场金额入成本：组合总成本凭空增加（差额 = 该笔赎回的浮动收益），当天今日盈亏出现等额假亏损（月月宝 → 五年国债ETF）。现在成本随本金走：新持仓成本 = 赎回份额的本金，组合总成本严格守恒，换仓不再影响当日收益
+- 内部赎回腿不再计入「已实现收益」，避免同一笔收益被重复计算（新增 `internal_move` 标记，schema v11）
+- 删除金额型来源的赎回流水时同时归还本金，不再只回滚余额
+
 ## [0.9.20] - 2026-09-23
 
 ### Fixed
