@@ -23,19 +23,17 @@ String _plainNum(double v) {
   return s;
 }
 
-/// Caps a dialog's scroll content so the dialog body itself always fits on
-/// screen. Without a height constraint, an AlertDialog whose content is
-/// taller than the viewport (long forms; keyboard open via viewInsets)
-/// stretches beyond the top edge — the title and first rows were pushed off
-/// screen and the inner scroll never reached them.
-Widget _cappedContent(BuildContext context, Widget child) {
+/// Caps an AlertDialog's total height so the dialog always fits on screen
+/// (long forms + keyboard open via viewInsets): pass as `constraints:` to
+/// the AlertDialog. Title and actions stay visible; the content's own
+/// SingleChildScrollView scrolls within the remaining space. Without this,
+/// a tall dialog grows past the viewport and its top (title + first rows)
+/// is pushed off screen unreachable by any scroll.
+BoxConstraints _dialogConstraints(BuildContext context) {
   final view = MediaQuery.viewInsetsOf(context);
-  final maxH =
-      MediaQuery.sizeOf(context).height - view.vertical - 96.0;
-  return ConstrainedBox(
-    constraints: BoxConstraints(maxHeight: maxH.clamp(240.0, double.infinity)),
-    child: child,
-  );
+  final available =
+      MediaQuery.sizeOf(context).height - view.vertical - 48.0; // insetPadding ×2
+  return BoxConstraints(maxHeight: available.clamp(240.0, double.infinity));
 }
 
 /// The cost_fx_rate companion value for the edit dialog: the parsed rate
@@ -149,10 +147,9 @@ Future<void> showAddHoldingDialog(BuildContext context, WidgetRef ref) async {
   await showDialog<void>(
     context: context,
     builder: (context) => AlertDialog(
+      constraints: _dialogConstraints(context),
       title: const Text('添加持仓'),
-      content: _cappedContent(
-        context,
-        SingleChildScrollView(
+      content: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -481,7 +478,6 @@ Future<void> showAddHoldingDialog(BuildContext context, WidgetRef ref) async {
             ),
           ],
         ),
-      ),
       ),
       actions: [
         TextButton(onPressed: () => Navigator.pop(context), child: const Text('取消')),
@@ -863,14 +859,13 @@ Future<void> showEditHoldingDialog(
         final isAmount = isAmountBased || type == AssetType.liability;
         final isLiability = type == AssetType.liability;
         return AlertDialog(
+          constraints: _dialogConstraints(context),
           title: const Text('编辑持仓'),
-          content: _cappedContent(
-            context,
-            SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  TerminalTextField(controller: nameCtrl, label: '名称'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TerminalTextField(controller: nameCtrl, label: '名称'),
                 const SizedBox(height: 12),
                 ValueListenableBuilder<int>(
                   valueListenable: accountIdNotifier,
@@ -1104,7 +1099,6 @@ Future<void> showEditHoldingDialog(
                 TerminalTextField(controller: noteCtrl, label: '备注'),
               ],
             ),
-          ),
           ),
           actions: [
             TextButton(

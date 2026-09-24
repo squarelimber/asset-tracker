@@ -9,15 +9,14 @@ import '../../data/database.dart';
 import '../components/form_fields.dart';
 import '../tokens.dart';
 
-/// Caps a dialog's scroll content so the dialog body itself always fits on
-/// screen (long forms + keyboard would otherwise push the title off screen).
-Widget _cappedContent(BuildContext context, Widget child) {
+/// Caps an AlertDialog's total height so it always fits on screen (long
+/// forms + keyboard): pass as `constraints:`. Title/actions stay visible,
+/// the content scrolls in the remaining space.
+BoxConstraints _dialogConstraints(BuildContext context) {
   final view = MediaQuery.viewInsetsOf(context);
-  final maxH = MediaQuery.sizeOf(context).height - view.vertical - 96.0;
-  return ConstrainedBox(
-    constraints: BoxConstraints(maxHeight: maxH.clamp(240.0, double.infinity)),
-    child: child,
-  );
+  final available =
+      MediaQuery.sizeOf(context).height - view.vertical - 48.0; // insetPadding ×2
+  return BoxConstraints(maxHeight: available.clamp(240.0, double.infinity));
 }
 
 /// Dialog for recording a transaction against a specific holding.
@@ -175,10 +174,9 @@ Future<void> showHoldingTransactionDialog(
     context: context,
     builder: (context) => StatefulBuilder(
       builder: (context, setState) => AlertDialog(
+      constraints: _dialogConstraints(context),
       title: Text('记一笔 · ${holding.name}'),
-      content: _cappedContent(
-        context,
-        SingleChildScrollView(
+      content: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -322,7 +320,6 @@ Future<void> showHoldingTransactionDialog(
             ),
           ],
         ),
-      ),
       ),
       actions: [
         TextButton(onPressed: () => Navigator.pop(context), child: const Text('取消')),
@@ -602,10 +599,9 @@ Future<void> showAccountTransactionDialog(
     context: context,
     builder: (context) => StatefulBuilder(
       builder: (context, setState) => AlertDialog(
+      constraints: _dialogConstraints(context),
       title: const Text('记流水'),
-      content: _cappedContent(
-        context,
-        SingleChildScrollView(
+      content: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -670,7 +666,6 @@ Future<void> showAccountTransactionDialog(
             ),
           ],
         ),
-      ),
       ),
       actions: [
         TextButton(onPressed: () => Navigator.pop(context), child: const Text('取消')),
