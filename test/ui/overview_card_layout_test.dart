@@ -62,6 +62,67 @@ void main() {
     expect(find.text('1,862,593.80'), findsOneWidget);
   });
 
+  testWidgets('phone: eye toggle inside the card, height stable with/without mask',
+      (tester) async {
+    tester.view.physicalSize = const Size(360, 640);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
+    var toggles = 0;
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.dark(),
+        home: Scaffold(
+          body: AssetOverviewCard(
+            totalAssets: 1865792.20,
+            totalLiabilities: 3198.40,
+            netWorth: 1862593.80,
+            todayProfit: 1.14,
+            todayPct: 0.0001,
+            hidden: false,
+            onToggleHidden: () => toggles++,
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    // 眼睛按钮在卡片内。
+    expect(find.byIcon(Icons.visibility_outlined), findsOneWidget);
+    await tester.tap(find.byIcon(Icons.visibility_outlined));
+    expect(toggles, 1, reason: '点击眼睛应触发切换回调');
+
+    // 卡片根 Container（渐变卡面）——隐私切换前后整体高度必须稳定。
+    Finder cardRoot() => find.byWidgetPredicate((w) =>
+        w is Container &&
+        w.decoration is BoxDecoration &&
+        (w.decoration! as BoxDecoration).gradient != null);
+    final shownH = tester.getSize(cardRoot()).height;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.dark(),
+        home: Scaffold(
+          body: AssetOverviewCard(
+            totalAssets: 1865792.20,
+            totalLiabilities: 3198.40,
+            netWorth: 1862593.80,
+            todayProfit: 1.14,
+            todayPct: 0.0001,
+            hidden: true,
+            onToggleHidden: () => toggles++,
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    // 隐藏后显示掩码，卡片高度应保持不变（不再“一会儿大一会儿小”）。
+    expect(find.text('¥•••••'), findsOneWidget);
+    expect(tester.getSize(cardRoot()).height, shownH,
+        reason: '隐私切换不应改变卡片高度');
+  });
+
   testWidgets('desktop 1280px: 4-in-a-row (1 row of 4 cells)', (tester) async {
     await pumpCard(tester, const Size(1280, 800));
 

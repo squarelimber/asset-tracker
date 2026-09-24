@@ -152,18 +152,20 @@ class _PortfolioPageState extends ConsumerState<PortfolioPage> {
           title: const Text('总览'),
           actions: [
             const TerminalAppBarActions(),
-            Consumer(builder: (context, ref, _) {
-              final hidden = ref.watch(hideAmountsProvider);
-              return IconButton(
-                tooltip: hidden ? '显示金额' : '隐藏金额',
-                onPressed: () =>
-                    ref.read(hideAmountsProvider.notifier).state = !hidden,
-                icon: Icon(
-                  hidden ? Icons.visibility_off_outlined : Icons.visibility_outlined,
-                  color: T.text2,
-                ),
-              );
-            }),
+            // 手机端眼睛已移入资产总览卡内（银行卡右上角）；桌面保留 AppBar 入口。
+            if (MediaQuery.sizeOf(context).width >= 1100)
+              Consumer(builder: (context, ref, _) {
+                final hidden = ref.watch(hideAmountsProvider);
+                return IconButton(
+                  tooltip: hidden ? '显示金额' : '隐藏金额',
+                  onPressed: () =>
+                      ref.read(hideAmountsProvider.notifier).state = !hidden,
+                  icon: Icon(
+                    hidden ? Icons.visibility_off_outlined : Icons.visibility_outlined,
+                    color: T.text2,
+                  ),
+                );
+              }),
             ValueListenableBuilder<bool>(
               valueListenable: _refreshing,
               builder: (context, refreshing, _) => IconButton(
@@ -269,6 +271,10 @@ class _KpiRow extends ConsumerWidget {
       todayProfit: todayEarning?.profit ?? summary.todayChange,
       todayPct: todayEarning?.pct ?? summary.todayChangePct,
       hidden: hidden,
+      onToggleHidden: () {
+        final now = ref.read(hideAmountsProvider);
+        ref.read(hideAmountsProvider.notifier).state = !now;
+      },
     );
   }
 }

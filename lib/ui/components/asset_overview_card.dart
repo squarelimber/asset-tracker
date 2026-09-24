@@ -21,6 +21,7 @@ class AssetOverviewCard extends StatelessWidget {
     required this.todayProfit,
     this.todayPct,
     this.hidden = false,
+    this.onToggleHidden,
   });
 
   final double totalAssets;
@@ -33,6 +34,11 @@ class AssetOverviewCard extends StatelessWidget {
 
   /// Mask all amounts (hide-amounts toggle).
   final bool hidden;
+
+  /// Toggles amount visibility; when present the card renders an eye button
+  /// in its top-right corner (the phone bank-card layout only). Null keeps
+  /// the card non-interactive (the app-bar eye on wide screens).
+  final VoidCallback? onToggleHidden;
 
   String _amount(double v) => hidden ? Formats.masked() : Formats.amount(v);
 
@@ -200,28 +206,50 @@ class AssetOverviewCard extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('净资产', style: T.label(size: 12, color: T.text2)),
-          const SizedBox(height: 10),
-          // 主行：主数值 + 今日盈亏 pill。FittedBox 保证长金额不折行——
-          // 空间不够时整体等比缩小，永远单行。
-          FittedBox(
-            fit: BoxFit.scaleDown,
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  _amount(netWorth),
-                  maxLines: 1,
-                  style: T.mono(
-                    size: 26,
-                    weight: FontWeight.w700,
-                    color: T.text1,
+          Row(
+            children: [
+              Text('净资产', style: T.label(size: 12, color: T.text2)),
+              const Spacer(),
+              if (onToggleHidden != null)
+                IconButton(
+                  tooltip: hidden ? '显示金额' : '隐藏金额',
+                  visualDensity: VisualDensity.compact,
+                  onPressed: onToggleHidden,
+                  icon: Icon(
+                    hidden ? Icons.visibility_off_outlined : Icons.visibility_outlined,
+                    size: 18,
+                    color: T.text2,
                   ),
                 ),
-                const SizedBox(width: 10),
-                profitBadge(),
-              ],
-            ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          // 主行：主数值 + 今日盈亏 pill。主数值放在固定高度容器里，
+          // FittedBox 只负责宽度方向等比缩小——隐藏（¥•••••）与显示长
+          // 金额时卡片高度恒定，不会“一会儿大一会儿小”。
+          Row(
+            children: [
+              Flexible(
+                child: SizedBox(
+                  height: 36,
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      _amount(netWorth),
+                      maxLines: 1,
+                      style: T.mono(
+                        size: 26,
+                        weight: FontWeight.w700,
+                        color: T.text1,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              profitBadge(),
+            ],
           ),
           const SizedBox(height: 12),
           Text(
