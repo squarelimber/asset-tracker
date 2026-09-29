@@ -11,7 +11,8 @@ import 'package:asset_tracker/services/market/history_source.dart';
 /// Fake history source pricing every symbol at a constant [price] over the
 /// whole window, so the daily move is exactly the share-quantity effect.
 class _FlatHistorySource extends HistoryDataSource {
-  _FlatHistorySource(this.price) : super(MarketSource.eastmoney);
+  _FlatHistorySource(this.price, [MarketSource source = MarketSource.eastmoney])
+      : super(source);
 
   final double price;
 
@@ -40,7 +41,10 @@ void main() {
 
   Future<BackfillResult> run(DateTime now) async {
     return HistoryBackfillService(dao,
-            sources: {MarketSource.eastmoney: _FlatHistorySource(2.6)})
+            sources: {
+              MarketSource.eastmoney: _FlatHistorySource(2.6),
+              MarketSource.sina: _FlatHistorySource(1.8, MarketSource.sina),
+            })
         .backfill(now: now);
   }
 
@@ -203,5 +207,72 @@ void main() {
     expect(s!.totalValue, closeTo(260, 1e-6));
     // 标记已写入，下次 light run 恢复正常窗口。
     expect(await dao.getSetting('backfill_v8_share_replay'), isNotNull);
+  });
+
+  test('卖出回款到现金：现金成本只收被卖份额成本，换仓日总成本不跳', () async {
+    // 模拟 09-02 场景：卖半导体（成本 1.0/份）回款进现金。现金当前状态
+    // 必须与流水自洽（起点 2000 + 回款本金 100 = 2100），amountPrincipal
+    // 从当前状态反推每日本金。旧代码按全额 180 入现金成本 → 反推出错误
+    // 的起点本金，换仓日总成本凭空 +80（浮盈被重复记成本）。
+    final acc = await dao.createAccount(
+        AccountsCompanion.insert(name: 'a', type: 'general'));
+    // 现金账户：余额 2180（起点 2000 + 回款 180），本金 2100（起点 2000 + 份额成本 100）。
+    final cashId = await dao.createHolding(HoldingsCompanion.insert(
+      accountId: acc,
+      name: '现金账户',
+      assetType: AssetType.cash.storageName,
+      marketSource: const Value('manual'),
+      quantity: const Value(2180),
+      costPrice: const Value(2100),
+      latestPrice: const Value(1),
+      purchaseDate: Value(DateTime(2026, 3, 1)),
+    ));
+    // 半导体：3-01 买 100 份 × 1.0 = 100 成本；9-02 全卖 @1.8 → 回款 180。
+    final semId = await dao.createHolding(HoldingsCompanion.insert(
+      accountId: acc,
+      name: '半导体',
+      assetType: AssetType.stock.storageName,
+      marketSource: const Value('sina'),
+      symbol: const Value('sh600000'),
+      quantity: const Value(0), // 已全部卖出
+      costPrice: const Value(1.0),
+      latestPrice: const Value(1.8),
+      purchaseDate: Value(DateTime(2026, 3, 1)),
+    ));
+    await dao.createTransaction(TransactionsCompanion.insert(
+      accountId: acc,
+      holdingId: Value(semId),
+      type: TransactionType.buy.storageName,
+      quantity: const Value(100),
+      price: const Value(1.0),
+      amount: 100,
+      currency: const Value('CNY'),
+      occurredAt: DateTime(2026, 3, 1),
+      costMoved: const Value(false),
+    ));
+    await dao.createTransaction(TransactionsCompanion.insert(
+      accountId: acc,
+      holdingId: Value(semId),
+      cashTargetId: Value(cashId),
+      type: TransactionType.sell.storageName,
+      quantity: const Value(100),
+      price: const Value(1.8),
+      amount: 180,
+      currency: const Value('CNY'),
+      occurredAt: DateTime(2026, 9, 2),
+      costMoved: const Value(true),
+    ));
+
+    final r = await run(DateTime(2026, 9, 10));
+    expect(r.ok, isTrue);
+
+    final sep1 = (await dao.getSnapshots()).firstWhere((s) => s.date == '2026-09-01');
+    final sep2 = (await dao.getSnapshots()).firstWhere((s) => s.date == '2026-09-02');
+    // 9-01：现金反推本金 2000 + 半导体成本 100 = 2100。
+    expect(sep1.totalCost, closeTo(2100, 1e-6));
+    // 9-02：半导体成本移出 100，现金本金 +100（份额成本，非全额 180）
+    //       → 总成本 2100 不变。旧代码现金 +180 → 9-02 成本 2180（浮盈入成本）。
+    expect(sep2.totalCost, closeTo(2100, 1e-6),
+        reason: '卖出回款按被卖份额成本入现金，浮盈不得计入成本');
   });
 }

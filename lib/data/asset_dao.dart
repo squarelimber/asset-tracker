@@ -125,18 +125,39 @@ class AssetDao {
 
   /// Deletes a holding and every transaction referencing it — as the direct
   /// subject (holdingId) or as a transfer counterparty (cashSourceId /
-  /// cashTargetId), so no orphan flows are left behind.
+  /// cashTargetId), so no orphan flows are left behind. Paired legs of an
+  /// internal redeem-to-create (sell of the funding holding + buy of the
+  /// target, same timestamp & amount) are removed together: deleting the
+  /// target would otherwise leave the funding holding's sell leg orphaned
+  /// (the pair shares no direct holding/cash reference to the target).
   Future<int> deleteHolding(int id) async {
     return _db.transaction(() async {
-      final deleted = <TransactionRow>[
+      final related = <TransactionRow>[
         ...await (_db.select(_db.transactions)..where((t) => t.holdingId.equals(id))).get(),
         ...await (_db.select(_db.transactions)..where((t) => t.cashSourceId.equals(id))).get(),
         ...await (_db.select(_db.transactions)..where((t) => t.cashTargetId.equals(id))).get(),
       ];
-      await (_db.delete(_db.transactions)..where((t) => t.holdingId.equals(id))).go();
-      await (_db.delete(_db.transactions)..where((t) => t.cashSourceId.equals(id))).go();
-      await (_db.delete(_db.transactions)..where((t) => t.cashTargetId.equals(id))).go();
-      for (final t in deleted) {
+      // A redeem-to-create writes two internal rows with the same timestamp
+      // and amount (sell of the funding holding, buy of the target). When
+      // the target is deleted, its buy row is caught above (holdingId), but
+      // the funding side's sell row references only the funding holding.
+      // Match it by occurredAt + amount + internalMove to avoid orphaning.
+      final ids = related.map((t) => t.id).toSet();
+      final pairs = <TransactionRow>[];
+      for (final t in related) {
+        if (t.internalMove != true) continue;
+        pairs.addAll(await (_db.select(_db.transactions)
+              ..where((p) =>
+                  p.id.isNotIn(ids) &
+                  p.internalMove.equals(true) &
+                  p.amount.equals(t.amount) &
+                  p.occurredAt.equals(t.occurredAt))
+              ..limit(2))
+            .get());
+      }
+      final all = <TransactionRow>[...related, ...pairs];
+      for (final t in all) {
+        await (_db.delete(_db.transactions)..where((r) => r.id.equals(t.id))).go();
         await upsertTombstone('transactions', '${t.id}');
       }
       await (_db.delete(_db.holdings)..where((t) => t.id.equals(id))).go();

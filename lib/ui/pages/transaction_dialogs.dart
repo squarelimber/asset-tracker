@@ -195,6 +195,33 @@ Future<void> showHoldingTransactionDialog(
             if (isShare &&
                 txnType.value != TransactionType.dividend &&
                 txnType.value != TransactionType.split) ...[
+              if (txnType.value == TransactionType.sell) ...[
+                ValueListenableBuilder<TransactionType>(
+                  valueListenable: txnType,
+                  builder: (context, t, _) => Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton.icon(
+                      onPressed: () {
+                        // 全部卖出：数量 = 当前持仓，单价 = 最新价（无则成本价）。
+                        // 省去赎回大额份额时手动查净值/份额的麻烦。
+                        final unit = holding.latestPrice > 0
+                            ? holding.latestPrice
+                            : holding.costPrice;
+                        qtyCtrl.text = Formats.num(holding.quantity);
+                        priceCtrl.text = Formats.smartNum(unit);
+                        syncAmount(qtyCtrl, priceCtrl, amountCtrl);
+                      },
+                      icon: const Icon(Icons.select_all, size: 18),
+                      label: const Text('全部卖出'),
+                      style: TextButton.styleFrom(
+                        visualDensity: VisualDensity.compact,
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 4),
+              ],
               TerminalTextField(
                 controller: qtyCtrl,
                 label: '数量 / 份额 / 克数',
@@ -355,18 +382,17 @@ Future<void> showHoldingTransactionDialog(
                 t == TransactionType.buy &&
                 source != null &&
                 !AssetType.fromStorage(source.assetType).isAmountBased;
-            final result = fundedByHolding
-                ? await service.recordBuyFundedByHolding(
-                    sourceHoldingId: source.id,
-                    targetHoldingId: holding.id,
-                    targetQuantity: qty ?? 0,
-                    targetPrice: price,
-                    amount: amount,
-                    currency: holding.currency,
-                    occurredAt: occurredAt.value,
-                    note: noteCtrl.text.trim(),
-                  )
-                : await service.record(
+            // 补录历史日期的流水：只新增交易记录（历史回放会从流水重算出
+            // 发生日的余额与扣款），不修改任何持仓的当前快照，也不按今天
+            // 的余额做校验 —— 发生日当时该账户是否有钱由回放决定。
+            final when = occurredAt.value;
+            final now = DateTime.now();
+            final backdated =
+                when.year != now.year ||
+                    when.month != now.month ||
+                    when.day != now.day;
+            final result = backdated
+                ? await service.recordHistorical(
                     accountId: holding.accountId,
                     holdingId: (isShare || t == TransactionType.consume)
                         ? holding.id
@@ -393,10 +419,6 @@ Future<void> showHoldingTransactionDialog(
                       TransactionType.sell ||
                       TransactionType.dividend =>
                         cashId.value,
-                      // Expense debits the holding itself, mirroring income
-                      // crediting it (the service reads cashTargetId for
-                      // both; the old cashSourceId placement made every
-                      // holding-level expense fail).
                       TransactionType.income ||
                       TransactionType.expense =>
                         holding.id,
@@ -406,8 +428,57 @@ Future<void> showHoldingTransactionDialog(
                     },
                     note: noteCtrl.text.trim(),
                     currency: holding.currency,
-                    occurredAt: occurredAt.value,
-                  );
+                    occurredAt: when,
+                  )
+                : fundedByHolding
+                    ? await service.recordBuyFundedByHolding(
+                        sourceHoldingId: source.id,
+                        targetHoldingId: holding.id,
+                        targetQuantity: qty ?? 0,
+                        targetPrice: price,
+                        amount: amount,
+                        currency: holding.currency,
+                        occurredAt: when,
+                        note: noteCtrl.text.trim(),
+                      )
+                    : await service.record(
+                        accountId: holding.accountId,
+                        holdingId: (isShare || t == TransactionType.consume)
+                            ? holding.id
+                            : null,
+                        type: t,
+                        quantity: isShare &&
+                                t != TransactionType.dividend &&
+                                t != TransactionType.split
+                            ? qty
+                            : null,
+                        price: isShare &&
+                                t != TransactionType.dividend &&
+                                t != TransactionType.split
+                            ? price
+                            : null,
+                        amount: amount,
+                        cashSourceId: switch (t) {
+                          TransactionType.buy => cashId.value,
+                          TransactionType.transferIn => cashId.value,
+                          TransactionType.transferOut => holding.id,
+                          _ => null,
+                        },
+                        cashTargetId: switch (t) {
+                          TransactionType.sell ||
+                          TransactionType.dividend =>
+                            cashId.value,
+                          TransactionType.income ||
+                          TransactionType.expense =>
+                            holding.id,
+                          TransactionType.transferIn => holding.id,
+                          TransactionType.transferOut => cashId.value,
+                          _ => null,
+                        },
+                        note: noteCtrl.text.trim(),
+                        currency: holding.currency,
+                        occurredAt: when,
+                      );
             if (!context.mounted) return;
             Navigator.pop(context);
             if (result.ok) {
@@ -415,11 +486,6 @@ Future<void> showHoldingTransactionDialog(
               // 补录历史日期的流水会同时改变过去每一天的历史本金/收益
               // （金额型回放、产品收益日历都按流水日期重算），light 窗口
               // 覆盖不到更早的日子 —— 必须全量重建。
-              final when = occurredAt.value;
-              final now = DateTime.now();
-              final backdated = when.year != now.year ||
-                  when.month != now.month ||
-                  when.day != now.day;
               if (backdated) {
                 // Fire-and-forget, mirroring the dirty flag: keeps the save
                 // callback free of post-await BuildContext uses.

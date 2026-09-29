@@ -72,3 +72,6 @@ app.*.map.json
 /replay_verify_report.txt
 
 dist/
+/spike_diagnosis_report.txt
+/spike_holding_report.txt
+/replay_today_report.txt

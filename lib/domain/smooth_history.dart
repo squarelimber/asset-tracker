@@ -128,10 +128,12 @@ class SmoothHistoryCalculator {
     List<TransactionRow> flows, {
     required DateTime from,
     required DateTime to,
+    Map<int, double>? soldPrincipalById,
   }) {
     final result = <String, double>{};
     final dayTo = _dayOf(to);
-    for (final s in _amountSegments(h, flows, from: from, to: to)) {
+    for (final s in _principalSegments(h, flows,
+        from: from, to: to, soldPrincipalById: soldPrincipalById)) {
       for (var d = s.start;
           !d.isAfter(s.end) && !d.isAfter(dayTo);
           d = d.add(const Duration(days: 1))) {
@@ -158,19 +160,61 @@ class SmoothHistoryCalculator {
     List<TransactionRow> flows, {
     required DateTime from,
     required DateTime to,
-  }) {
-    final currentCost = h.costPrice > 0 ? h.costPrice : h.quantity;
+  }) =>
+      _segmentsFor(
+        h,
+        flows,
+        from: from,
+        to: to,
+        // The *value* curve mirrors the recorded cash amount: sell proceeds
+        // credit it by the move recorded on the row (costMovedAmount for
+        // post-fix rows, the raw amount for legacy ones).
+        deltaOf: (h, t) => _flowDelta(h, t),
+        current: h.costPrice > 0 ? h.costPrice : h.quantity,
+      );
 
+  /// Cost-side segments: like [_amountSegments], but a sell's proceeds
+  /// credit the cash cost by the *sold principal* (see [_flowDelta]) so the
+  /// unrealized gain of the sold lots stays on the cash side as gain, not
+  /// re-booked as new cost. Legacy rows written before costMovedAmount
+  /// existed carry only the raw amount; the caller supplies the sold
+  /// principal captured by the flow replay via [soldPrincipalById].
+  static List<({DateTime start, double principal, int days, DateTime end})>
+      _principalSegments(
+    HoldingRow h,
+    List<TransactionRow> flows, {
+    required DateTime from,
+    required DateTime to,
+    Map<int, double>? soldPrincipalById,
+  }) =>
+      _segmentsFor(
+        h,
+        flows,
+        from: from,
+        to: to,
+        deltaOf: (h, t) => _flowDelta(h, t, soldPrincipalById: soldPrincipalById),
+        current: h.costPrice > 0 ? h.costPrice : h.quantity,
+      );
+
+  static List<({DateTime start, double principal, int days, DateTime end})>
+      _segmentsFor(
+    HoldingRow h,
+    List<TransactionRow> flows, {
+    required DateTime from,
+    required DateTime to,
+    required double Function(HoldingRow, TransactionRow) deltaOf,
+    required double current,
+  }) {
     final sorted = [...flows]..sort((a, b) => a.occurredAt.compareTo(b.occurredAt));
     final events = <({DateTime at, double delta})>[];
     var deltaSum = 0.0;
     for (final t in sorted) {
-      final delta = _flowDelta(h, t);
+      final delta = deltaOf(h, t);
       if (delta == 0) continue;
       deltaSum += delta;
       events.add((at: _dayOf(t.occurredAt), delta: delta));
     }
-    final startCost = (currentCost - deltaSum).clamp(0.0, double.infinity);
+    final startCost = (current - deltaSum).clamp(0.0, double.infinity);
 
     // Segments: (startDate, principalAtStart, days, endDate).
     final segments =
@@ -224,7 +268,18 @@ class SmoothHistoryCalculator {
   /// by the account's unrealized gain, shifting every earlier day of a
   /// rebuilt history. Rows written before the column existed have no value;
   /// they keep the legacy `amount` behaviour.
-  static double _flowDelta(HoldingRow h, TransactionRow t) {
+  ///
+  /// A sell's proceeds credited to this holding are an exception: the cash
+  /// account must gain the *sold principal* (its own unrealized gain must
+  /// stay on the cash side), not the full proceeds. Rows recorded before
+  /// `costMovedAmount` existed carry only [TransactionRow.amount], so the
+  /// caller supplies the sold principal via [soldPrincipalById]
+  /// (transaction id -> principal) when it can derive it (a flow replay).
+  static double _flowDelta(
+    HoldingRow h,
+    TransactionRow t, {
+    Map<int, double>? soldPrincipalById,
+  }) {
     final type = TransactionType.fromStorage(t.type);
     final moved = t.costMovedAmount ?? t.amount;
     switch (type) {
@@ -242,11 +297,16 @@ class SmoothHistoryCalculator {
         if (t.cashSourceId == h.id) return -moved;
       case TransactionType.sell:
         // Sell proceeds credited to a cash holding move its invested
-        // amount; a redemption leg recorded on the amount-based holding
-        // itself (funded buy / standalone redemption) debits it. Ignoring
-        // these legs left the replayed balance/cost stuck at the
-        // pre-redemption level until today (visible as a cliff).
-        if (t.cashTargetId == h.id) return moved;
+        // amount by the *sold principal* (legacy rows without
+        // costMovedAmount fall back to the principal captured by the
+        // replay; the raw amount would re-book the sold gain as cash cost);
+        // a redemption leg recorded on the amount-based holding itself
+        // (funded buy / standalone redemption) debits it. Ignoring these
+        // legs left the replayed balance/cost stuck at the pre-redemption
+        // level until today (visible as a cliff).
+        if (t.cashTargetId == h.id) {
+          return t.costMovedAmount ?? soldPrincipalById?[t.id] ?? t.amount;
+        }
         if (t.holdingId == h.id &&
             AssetType.fromStorage(h.assetType).isAmountBased) {
           return -moved;

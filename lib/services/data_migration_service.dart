@@ -55,6 +55,7 @@ class DataMigrationService {
   /// other migration selects from the table.
   Future<void> run() async {
     await _migrateArchivedColumn();
+    await _migrateCategoryOverrideColumn();
     await _migrateAmountBased();
     await _migrateGoldSymbol();
     await _rebuildHoldingsTable();
@@ -70,13 +71,13 @@ class DataMigrationService {
   }
 
   /// SQLite cannot drop a UNIQUE constraint without rebuilding the table.
-  /// Recreate `holdings` with the full drift schema (17 columns) but without
+  /// Recreate `holdings` with the full drift schema but without
   /// UNIQUE(symbol) so the same market code can exist across multiple
   /// holdings/accounts.
   ///
-  /// cost_fx_rate, risk_level and archived may be absent from the old table
-  /// when this runs on an upgrade (they arrive with later migrations), so
-  /// the copy falls back to NULL / 0 for missing columns.
+  /// cost_fx_rate, risk_level, archived and category_override may be absent
+  /// from the old table when this runs on an upgrade (they arrive with later
+  /// migrations), so the copy falls back to NULL / 0 for missing columns.
   Future<void> _rebuildHoldingsTable() async {
     final marker = await _getSetting(_holdingsRebuilt);
     if (marker != null) return;
@@ -100,6 +101,7 @@ class DataMigrationService {
         cost_fx_rate REAL NULL,
         purchase_date INTEGER NULL,
         risk_level TEXT NULL,
+        category_override TEXT NULL,
         note TEXT NULL,
         archived INTEGER NOT NULL DEFAULT 0,
         created_at INTEGER NOT NULL DEFAULT (CAST(strftime('%s', CURRENT_TIMESTAMP) AS INTEGER)),
@@ -111,16 +113,19 @@ class DataMigrationService {
         oldColumns.contains('cost_fx_rate') ? 'cost_fx_rate' : 'NULL AS cost_fx_rate';
     final riskSelect =
         oldColumns.contains('risk_level') ? 'risk_level' : 'NULL AS risk_level';
+    final categorySelect = oldColumns.contains('category_override')
+        ? 'category_override'
+        : 'NULL AS category_override';
     final archivedSelect =
         oldColumns.contains('archived') ? 'archived' : '0 AS archived';
     await _db.customStatement('''
       INSERT INTO holdings (id, account_id, name, asset_type, market_source, symbol,
                             quantity, cost_price, latest_price, currency, cost_fx_rate,
-                            purchase_date, risk_level, note, archived,
+                            purchase_date, risk_level, category_override, note, archived,
                             created_at, updated_at)
       SELECT id, account_id, name, asset_type, market_source, symbol,
              quantity, cost_price, latest_price, currency, $costFxSelect,
-             purchase_date, $riskSelect, note, $archivedSelect,
+             purchase_date, $riskSelect, $categorySelect, note, $archivedSelect,
              created_at, updated_at
       FROM holdings_tmp;
     ''');
@@ -330,6 +335,21 @@ class DataMigrationService {
     try {
       await _db.customStatement(
         'ALTER TABLE holdings ADD COLUMN archived INTEGER NOT NULL DEFAULT 0;',
+      );
+    } catch (_) {
+      // Column already present.
+    }
+  }
+
+  /// Re-adds category_override to databases whose holdings table was rebuilt
+  /// by the old 17-column rebuild SQL (which ran on every fresh install and
+  /// dropped the v9 column). Without this, typing/writing a category override
+  /// — including backup import — fails with "no such column". Same defensive
+  /// pattern as [_migrateArchivedColumn]: no marker, no-op when present.
+  Future<void> _migrateCategoryOverrideColumn() async {
+    try {
+      await _db.customStatement(
+        'ALTER TABLE holdings ADD COLUMN category_override TEXT NULL;',
       );
     } catch (_) {
       // Column already present.

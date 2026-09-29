@@ -183,65 +183,92 @@ class _PortfolioPageState extends ConsumerState<PortfolioPage> {
           ],
         ),
         body: holdings.when(
-          data: (list) => list.isEmpty
-              ? const EmptyState(
-                  message: '还没有持仓数据\n去"持仓"页添加你的第一笔资产吧',
-                )
-              : ResponsiveShell(
-                  child: summary.when(
-                    data: (s) => RefreshIndicator(
-                      onRefresh: () => _refreshPrices(showSnack: true),
-                      child: ListView(
-                        physics: const AlwaysScrollableScrollPhysics(),
-                        padding: const EdgeInsets.all(T.s3),
-                        children: [
-                          Row(
-                            children: [
-                              const SessionChip(),
-                              const SizedBox(width: T.s2),
-                              if (_lastRefreshAt != null)
-                                Text(
-                                  '更新于 ${Formats.dateTime(_lastRefreshAt!)}',
-                                  style: T.mono(size: 11, color: T.text3),
-                                ),
-                              const Spacer(),
-                            ],
-                          ),
-                          const SizedBox(height: T.s2),
-                          _KpiRow(summary: s),
-                          const SizedBox(height: T.s3),
-                          if (Responsive.isPhone(context)) ...[
-                            NetWorthChart(),
-                            const SizedBox(height: T.s3),
-                            AllocationCard(summary: s),
-                          ] else ...[
-                            Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Expanded(flex: 2, child: NetWorthChart()),
-                                const SizedBox(width: T.s3),
-                                Expanded(flex: 1, child: AllocationCard(summary: s)),
-                              ],
-                            ),
-                            const SizedBox(height: T.s3),
-                          ],
-                          _CalendarEntries(),
-                        ],
-                      ),
-                    ),
-                    loading: () => const Center(child: CircularProgressIndicator()),
-                    error: (e, _) => ErrorState(
-                      message: '总览计算失败，请重试',
-                      onRetry: () => ref.invalidate(summaryProvider),
-                    ),
-                  ),
+          data: (list) {
+            if (list.isEmpty) {
+              return const EmptyState(
+                message: '还没有持仓数据\n去"持仓"页添加你的第一笔资产吧',
+              );
+            }
+            // 保留上一次成功的汇总值：行情/汇率后台刷新会 invalidate
+            // summaryProvider 使其短暂进入 loading —— 此时若用 when 的
+            // loading 分支会把整个 ListView（含净值趋势图）卸载，图表内部
+            // 的视图/区间/指数选择全部重置，表现成"总览页重新加载、跳回
+            // 总览"。用 valueOrNull 在重算期间继续渲染旧数据，只在真正
+            // 首次加载（无旧值）时显示全屏 loading。
+            final s = summary.valueOrNull;
+            if (s == null) {
+              return summary.when(
+                loading: () => const Center(child: CircularProgressIndicator()),
+                error: (e, _) => ErrorState(
+                  message: '总览计算失败，请重试',
+                  onRetry: () => ref.invalidate(summaryProvider),
                 ),
+                data: (v) => _buildBody(v),
+              );
+            }
+            return Stack(
+              children: [
+                _buildBody(s),
+                if (summary.isLoading)
+                  const Positioned(
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    child: LinearProgressIndicator(minHeight: 2),
+                  ),
+              ],
+            );
+          },
           loading: () => const Center(child: CircularProgressIndicator()),
           error: (e, _) => ErrorState(
             message: '持仓数据加载失败，请重试',
             onRetry: () => ref.invalidate(holdingsProvider),
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildBody(PortfolioSummary s) {
+    final context = this.context;
+    return RefreshIndicator(
+      onRefresh: () => _refreshPrices(showSnack: true),
+      child: ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.all(T.s3),
+        children: [
+          Row(
+            children: [
+              const SessionChip(),
+              const SizedBox(width: T.s2),
+              if (_lastRefreshAt != null)
+                Text(
+                  '更新于 ${Formats.dateTime(_lastRefreshAt!)}',
+                  style: T.mono(size: 11, color: T.text3),
+                ),
+              const Spacer(),
+            ],
+          ),
+          const SizedBox(height: T.s2),
+          _KpiRow(summary: s),
+          const SizedBox(height: T.s3),
+          if (Responsive.isPhone(context)) ...[
+            NetWorthChart(),
+            const SizedBox(height: T.s3),
+            AllocationCard(summary: s),
+          ] else ...[
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(flex: 2, child: NetWorthChart()),
+                const SizedBox(width: T.s3),
+                Expanded(flex: 1, child: AllocationCard(summary: s)),
+              ],
+            ),
+            const SizedBox(height: T.s3),
+          ],
+          _CalendarEntries(),
+        ],
       ),
     );
   }

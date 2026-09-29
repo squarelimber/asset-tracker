@@ -144,6 +144,122 @@ class TransactionService {
     }
   }
 
+  /// Records a **backdated** transaction.
+  ///
+  /// Backdated entries fill in history that was never recorded (e.g. a buy
+  /// made before the app grew a funding-source flow). They apply the same
+  /// balance/quantity effects as an ordinary record on the *current*
+  /// holdings — a backdated buy debits the funding cash holding, a sell
+  /// credits its proceeds — so every account always shows its true current
+  /// balance, and the history replay (backfill) re-derives each historical
+  /// day from the flows. The balance checks therefore use the current state
+  /// (an amount-based source must actually have the money); an account that
+  /// is drained today cannot fund a past buy, and the history will show the
+  /// account going negative in between.
+  ///
+  /// Validates the same shape constraints as [record].
+  Future<TransactionResult> recordHistorical({
+    required int accountId,
+    int? holdingId,
+    required TransactionType type,
+    double? quantity,
+    double? price,
+    required double amount,
+    String currency = 'CNY',
+    required DateTime occurredAt,
+    int? cashSourceId,
+    int? cashTargetId,
+    String? note,
+  }) async {
+    try {
+      if (occurredAt.isAfter(DateTime.now())) {
+        throw ArgumentError('发生日期不能晚于今天');
+      }
+      if (amount <= 0) throw ArgumentError('金额必须大于 0');
+      if ((type == TransactionType.buy ||
+              type == TransactionType.sell ||
+              type == TransactionType.split) &&
+          (quantity == null || quantity <= 0)) {
+        throw ArgumentError('数量必须大于 0');
+      }
+      final holdings = await _dao.getHoldings();
+      if (holdingId != null &&
+          !holdings.any((h) => h.id == holdingId)) {
+        throw ArgumentError('目标持仓不存在');
+      }
+      if (cashSourceId != null &&
+          !holdings.any((h) => h.id == cashSourceId)) {
+        throw ArgumentError('资金来源持仓不存在');
+      }
+      if (cashTargetId != null &&
+          !holdings.any((h) => h.id == cashTargetId)) {
+        throw ArgumentError('入账目标持仓不存在');
+      }
+
+      // Apply the same balance/quantity effects as an ordinary record so the
+      // current holdings stay in sync with the flows (no manual editing /
+      // rebuild to "fix" the balance afterwards).
+      double movedCost = 0;
+      await _dao.transaction(() async {
+        switch (type) {
+          case TransactionType.buy:
+            movedCost = await _applyBuy(
+              holdingId: holdingId,
+              quantity: quantity,
+              amount: amount,
+              cashSourceId: cashSourceId,
+            );
+          case TransactionType.sell:
+            movedCost = await _applySell(
+              holdingId: holdingId,
+              quantity: quantity,
+              amount: amount,
+              cashTargetId: cashTargetId,
+            );
+          case TransactionType.transferIn || TransactionType.transferOut:
+            movedCost = await _applyTransfer(
+              sourceId: cashSourceId,
+              targetId: cashTargetId,
+              amount: amount,
+            );
+          case TransactionType.dividend:
+            await _applyDividend(holdingId, amount, cashTargetId);
+          case TransactionType.income:
+            movedCost =
+                await _applyCashMove(cashTargetId, amount, invested: true);
+          case TransactionType.expense:
+            movedCost =
+                await _applyCashMove(cashTargetId, -amount, invested: true);
+          case TransactionType.consume:
+            await _applyConsume(holdingId, amount);
+          case TransactionType.split:
+            await _applySplit(holdingId, amount);
+        }
+
+        await _dao.createTransaction(TransactionsCompanion.insert(
+          accountId: accountId,
+          holdingId: holdingId == null ? const Value.absent() : Value(holdingId),
+          cashSourceId:
+              cashSourceId == null ? const Value.absent() : Value(cashSourceId),
+          cashTargetId:
+              cashTargetId == null ? const Value.absent() : Value(cashTargetId),
+          type: type.storageName,
+          quantity: quantity == null ? const Value.absent() : Value(quantity),
+          price: price == null ? const Value.absent() : Value(price),
+          amount: amount,
+          currency: Value(currency),
+          occurredAt: occurredAt,
+          note: note == null || note.isEmpty ? const Value.absent() : Value(note),
+          costMovedAmount: Value(movedCost),
+          internalMove: const Value(false),
+        ));
+      });
+      return TransactionResult.okWith(movedCost);
+    } catch (e) {
+      return TransactionResult.fail(_recordFailMessage(e));
+    }
+  }
+
   /// Records a purchase of [targetHoldingId] funded by redeeming
   /// [sourceHoldingId]: atomically writes a sell row for the source (the
   /// redemption, proceeds not parked in cash) and a buy row for the target,
@@ -251,12 +367,22 @@ class TransactionService {
   /// parked in any cash holding): a single sell row with the derived
   /// quantity. Used e.g. when a brand-new holding is created and its
   /// funding comes from redeeming an existing holding.
+  ///
+  /// [targetHoldingId] / [targetQuantity] / [targetPrice], when given, also
+  /// write the matching buy row for the funded holding, so a
+  /// redeem-to-create flows both legs (sell of the source + buy of the
+  /// target). The target holding row itself was created by the caller with
+  /// its quantity and cost already set, so the buy leg is recorded for
+  /// history only and must NOT re-apply the position.
   Future<TransactionResult> recordRedemption({
     required int sourceHoldingId,
     required double amount,
     String currency = 'CNY',
     DateTime? occurredAt,
     String? note,
+    int? targetHoldingId,
+    double? targetQuantity,
+    double? targetPrice,
   }) async {
     try {
       if (amount <= 0) throw ArgumentError('金额必须大于 0');
@@ -266,6 +392,7 @@ class TransactionService {
         throw ArgumentError('负债不能赎回');
       }
       final (unit, sourceQty) = _redemptionOf(source, sourceType, amount);
+      final when = occurredAt ?? DateTime.now();
 
       double moved = 0;
       await _dao.transaction(() async {
@@ -278,7 +405,7 @@ class TransactionService {
           price: Value(unit),
           amount: amount,
           currency: Value(currency),
-          occurredAt: occurredAt ?? DateTime.now(),
+          occurredAt: when,
           note: (note == null || note.isEmpty) ? const Value.absent() : Value(note),
           costMovedAmount: Value(moved),
           // A standalone redemption exists only to fund a brand-new holding
@@ -288,6 +415,22 @@ class TransactionService {
           // holding's cost basis to the principal that travelled.
           internalMove: const Value(true),
         ));
+        if (targetHoldingId != null && targetQuantity != null && targetQuantity > 0) {
+          final target = await _getHolding(targetHoldingId);
+          await _dao.createTransaction(TransactionsCompanion.insert(
+            accountId: target.accountId,
+            holdingId: Value(targetHoldingId),
+            type: TransactionType.buy.storageName,
+            quantity: Value(targetQuantity),
+            price: targetPrice == null ? const Value.absent() : Value(targetPrice),
+            amount: amount,
+            currency: Value(currency),
+            occurredAt: when,
+            note: (note == null || note.isEmpty) ? const Value.absent() : Value(note),
+            costMovedAmount: Value(moved),
+            internalMove: const Value(true),
+          ));
+        }
       });
       return TransactionResult.okWith(moved);
     } catch (e) {
@@ -656,9 +799,16 @@ class TransactionService {
       movedCost = costCredit;
       newCost = effectiveCostOf(holding) + costCredit;
     }
+    // 资产类账户不允许扣成负数（负债账户经 transfer 流转，不在这里）。
+    // 只有钱确实离开才校验：卖出回款入账（costCredit）与收入是流入，跳过。
+    final newQuantity = holding.quantity + delta;
+    if (type != AssetType.liability && newQuantity < -1e-6) {
+      throw ArgumentError(
+          '「${holding.name}」余额不足（可用 ${_fmt(holding.quantity)}）');
+    }
     await _updateHolding(
       holding,
-      quantity: holding.quantity + delta,
+      quantity: newQuantity,
       costPrice: newCost,
     );
     return movedCost;

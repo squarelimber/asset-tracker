@@ -109,8 +109,9 @@ Future<void> _confirmDelete(
     builder: (context) => AlertDialog(
       title: const Text('删除持仓'),
       content: Text(
-        '删除「${holding.name}」？历史流水与收益日历记录会保留，'
-        '但持仓本身无法恢复。',
+        '删除「${holding.name}」及其全部相关流水？'
+        '收益日历中该产品的历史收益将一并删除，无法恢复。'
+        '如需保留历史，可改用「归档」。',
       ),
       actions: [
         TextButton(

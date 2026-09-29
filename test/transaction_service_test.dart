@@ -1028,5 +1028,194 @@ void main() {
       expect((await dao.getHolding(mmf))!.quantity, 100);
       expect(await dao.getTransactions(), isEmpty);
     });
+
+    test('with target writes both sell and buy legs for history', () async {
+      // 赎回购买（新建持仓）：必须同时记 source 的卖出腿和 target 的买入腿，
+      // 否则历史回放会把新持仓当成凭空出现（如 五年国债ETF 2026-09-24）。
+      final acc = await addAccount('A');
+      final mmf = await addHolding(
+        accountId: acc, name: '现金账户', type: AssetType.cash,
+        quantity: 200000, costPrice: 200000, latestPrice: 1,
+      );
+      final etf = await addHolding(
+        accountId: acc, name: '五年国债ETF', type: AssetType.etf,
+        quantity: 800, costPrice: 140.7, latestPrice: 140.7,
+        symbol: 'sh511010',
+      );
+      final r = await service.recordRedemption(
+        sourceHoldingId: mmf,
+        amount: 112560,
+        currency: 'CNY',
+        targetHoldingId: etf,
+        targetQuantity: 800,
+        targetPrice: 140.7,
+        note: '赎回购买 五年国债ETF',
+      );
+      expect(r.ok, isTrue, reason: 'failed: ${r.message}');
+
+      final rows = await dao.getTransactions();
+      expect(rows, hasLength(2));
+      final sell = rows.firstWhere((t) => t.type == 'sell');
+      final buy = rows.firstWhere((t) => t.type == 'buy');
+      expect(sell.holdingId, mmf);
+      expect(sell.amount, closeTo(112560, 1e-6));
+      expect(sell.internalMove, isTrue);
+      expect(buy.holdingId, etf);
+      expect(buy.quantity, 800);
+      expect(buy.amount, closeTo(112560, 1e-6));
+      expect(buy.internalMove, isTrue);
+      // 目标持仓快照不应被买入腿二次累加（持仓由调用方创建时已初始化）。
+      expect((await dao.getHolding(etf))!.quantity, 800);
+    });
+  });
+
+  group('recordHistorical（补录历史流水）', () {
+    test('backdated buy settles balances like an ordinary record', () async {
+      final acc = await addAccount('A');
+      final cash = await addHolding(
+        accountId: acc, name: '现金', type: AssetType.cash,
+        quantity: 1000, costPrice: 1000, latestPrice: 1,
+      );
+      final fund = await addHolding(
+        accountId: acc, name: '基金', type: AssetType.mutualFund,
+        quantity: 0, costPrice: 0, latestPrice: 1.2,
+      );
+
+      final r = await service.recordHistorical(
+        accountId: acc,
+        holdingId: fund,
+        type: TransactionType.buy,
+        quantity: 100,
+        price: 1.0,
+        amount: 100,
+        cashSourceId: cash,
+        occurredAt: DateTime(2026, 1, 5),
+      );
+      expect(r.ok, isTrue, reason: r.message);
+
+      // 补录也会实时结算余额：现金来源扣款、目标持仓加仓，
+      // 与普通 record 完全一致（不再"只记流水不动快照"）。
+      expect((await dao.getHolding(cash))!.quantity, 900,
+          reason: '补录买入后现金余额应扣减：1000 - 100 = 900');
+      expect((await dao.getHolding(fund))!.quantity, 100,
+          reason: '补录买入后目标持仓数量应增加');
+      final txns = await dao.getTransactions();
+      expect(txns, hasLength(1));
+      expect(txns.single.type, TransactionType.buy.storageName);
+      expect(txns.single.occurredAt, DateTime(2026, 1, 5));
+      expect(txns.single.cashSourceId, cash);
+    });
+
+    test('backdated buy from drained source is rejected (balance >= 0)',
+        () async {
+      final acc = await addAccount('A');
+      final cash = await addHolding(
+        accountId: acc, name: '余额宝', type: AssetType.bankDeposit,
+        quantity: 0, costPrice: 0, latestPrice: 1,
+      );
+      final bond = await addHolding(
+        accountId: acc, name: '债券', type: AssetType.bond,
+        quantity: 43386.91, costPrice: 1.1524, latestPrice: 1.1551,
+      );
+
+      final r = await service.recordHistorical(
+        accountId: acc,
+        holdingId: bond,
+        type: TransactionType.buy,
+        quantity: 43386.91,
+        price: 1.1524,
+        amount: 49999.08,
+        cashSourceId: cash,
+        occurredAt: DateTime(2026, 9, 2),
+      );
+      // 资产类账户余额不能为负：当前余额 0 无法出资，补录理应被拒。
+      expect(r.ok, isFalse,
+          reason: '余额为 0 的来源不能补录买入（资产账户不允许为负）');
+      expect(r.message, contains('余额不足'));
+      expect((await dao.getHolding(cash))!.quantity, 0);
+      expect(await dao.getTransactions(), isEmpty);
+    });
+
+    test('backdated transfer settles both sides', () async {
+      final acc = await addAccount('A');
+      final from = await addHolding(
+        accountId: acc, name: '现金A', type: AssetType.cash,
+        quantity: 5000, costPrice: 5000, latestPrice: 1,
+      );
+      final to = await addHolding(
+        accountId: acc, name: '现金B', type: AssetType.cash,
+        quantity: 0, costPrice: 0, latestPrice: 1,
+      );
+
+      final r = await service.recordHistorical(
+        accountId: acc,
+        type: TransactionType.transferIn,
+        amount: 2000,
+        cashSourceId: from,
+        cashTargetId: to,
+        occurredAt: DateTime(2026, 2, 10),
+      );
+      expect(r.ok, isTrue, reason: r.message);
+      expect((await dao.getHolding(from))!.quantity, 3000,
+          reason: '转账后来源余额应扣减：5000 - 2000 = 3000');
+      expect((await dao.getHolding(to))!.quantity, 2000,
+          reason: '转账后目标余额应增加：0 + 2000 = 2000');
+      final txns = await dao.getTransactions();
+      expect(txns, hasLength(1));
+      expect(txns.single.type, TransactionType.transferIn.storageName);
+    });
+
+    test('rejects future-dated entries', () async {
+      final acc = await addAccount('A');
+      final cash = await addHolding(
+        accountId: acc, name: '现金', type: AssetType.cash,
+        quantity: 1000, costPrice: 1000, latestPrice: 1,
+      );
+      final r = await service.recordHistorical(
+        accountId: acc,
+        type: TransactionType.income,
+        amount: 100,
+        cashTargetId: cash,
+        occurredAt: DateTime.now().add(const Duration(days: 1)),
+      );
+      expect(r.ok, isFalse);
+      expect(r.message, contains('不能晚于今天'));
+    });
+  });
+
+  group('deleteHolding（删除持仓连带配对赎回腿）', () {
+    test('deleting redeem-to-create target removes both legs', () async {
+      final acc = await addAccount('A');
+      final cash = await addHolding(
+        accountId: acc, name: '余额宝', type: AssetType.bankDeposit,
+        quantity: 200000, costPrice: 200000, latestPrice: 1,
+      );
+      final etf = await addHolding(
+        accountId: acc, name: '十年国债ETF', type: AssetType.etf,
+        quantity: 300, costPrice: 134.798, latestPrice: 134.725,
+        symbol: 'sh511260',
+      );
+      // 赎回购买：写双腿（sell 余额宝 + buy ETF）。
+      final r = await service.recordRedemption(
+        sourceHoldingId: cash,
+        amount: 40439.4,
+        currency: 'CNY',
+        occurredAt: DateTime(2026, 9, 21),
+        note: '赎回购买 十年国债ETF',
+        targetHoldingId: etf,
+        targetQuantity: 300,
+        targetPrice: 134.798,
+      );
+      expect(r.ok, isTrue, reason: r.message);
+      expect(await dao.getTransactions(), hasLength(2));
+
+      // 删除目标持仓：配对的两条腿都应被清理，余额宝不再残留卖出腿。
+      await dao.deleteHolding(etf);
+      expect(await dao.getHolding(etf), null,
+          reason: '持仓应被删除');
+      final left = await dao.getTransactions();
+      expect(left, isEmpty,
+          reason: '删除目标持仓应连带删除配对的赎回卖出腿，防止残留孤儿流水');
+    });
   });
 }

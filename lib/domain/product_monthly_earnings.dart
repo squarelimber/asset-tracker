@@ -191,7 +191,9 @@ class ProductEarningsCalculator {
 /// historical position.
 ///
 /// Flow semantics (mirroring TransactionService):
-/// - buy:      quantity +q, total cost +amount
+/// - buy:      quantity +q, total cost +amount (funded buys move only the
+///   principal the cash leg actually travelled — costMovedAmount — so the
+///   cash account's unrealized gain is not re-booked as new cost)
 /// - sell:     quantity -q, total cost -q x unit cost (unit cost unchanged)
 /// - dividend: total cost -amount (capital repayment)
 /// - split:    quantity x ratio, total cost unchanged (ratio in amount)
@@ -201,7 +203,14 @@ class ProductEarningsCalculator {
 /// reversing the flows; when the holding is sold out the unit cost of the
 /// final emptying sell is unknown (0/0) and the per-unit sale price is used
 /// as a fallback.
-typedef _ReplayEvent = (DateTime day, TransactionType type, double qty, double amount);
+typedef _ReplayEvent = (
+  DateTime day,
+  TransactionType type,
+  double qty,
+  double amount,
+  double costBasis, // amount that enters/leaves the cost basis for this leg
+  int txnId,
+);
 
 class HoldingReplay {
   const HoldingReplay();
@@ -209,11 +218,19 @@ class HoldingReplay {
   /// Daily (quantity, totalCost) for [h] over [from]..[to] (both
   /// inclusive). [flows] may be in any order; only buy/sell/dividend/split
   /// rows of this holding are used.
+  ///
+  /// [capturedSellPrincipal], when given, receives each sell's principal
+  /// (quantity x unit cost at the moment of sale) keyed by transaction id —
+  /// the number a receiving cash account must credit to its own principal so
+  /// the sell's unrealized gain stays on the cash side (see
+  /// SmoothHistoryCalculator's sell-proceeds leg). Mirrors
+  /// TransactionService._applySell's soldPrincipal.
   Map<String, (double quantity, double cost)> replay(
     HoldingRow h,
     List<TransactionRow> flows, {
     required DateTime from,
     required DateTime to,
+    Map<int, double>? capturedSellPrincipal,
   }) {
     final fromDay = DateTime(from.year, from.month, from.day);
     final toDay = DateTime(to.year, to.month, to.day);
@@ -227,11 +244,21 @@ class HoldingReplay {
           type != TransactionType.split) {
         continue;
       }
+      // A buy funded from a tracked cash holding moves only the principal
+      // the cash leg actually travelled (costMovedAmount); an unfunded buy
+      // adds the full purchase price. Without this the cash account's
+      // unrealized gain is re-booked as new cost on every
+      // 卖出回款 → 现金 → 再买入 cycle (mirrors TransactionService._applyBuy).
+      final costBasis = type == TransactionType.buy && t.cashSourceId != null
+          ? (t.costMovedAmount ?? t.amount)
+          : t.amount;
       events.add((
         DateTime(t.occurredAt.year, t.occurredAt.month, t.occurredAt.day),
         type,
         t.quantity ?? 0,
         t.amount,
+        costBasis,
+        t.id,
       ));
     }
     events.sort((a, b) => a.$1.compareTo(b.$1)); // oldest first
@@ -246,7 +273,7 @@ class HoldingReplay {
         case TransactionType.buy:
           final qBefore = q - e.$3;
           if (qBefore > 0) {
-            u = (u * q - e.$4) / qBefore;
+            u = (u * q - e.$5) / qBefore;
           }
           q = qBefore;
         case TransactionType.sell:
@@ -274,8 +301,17 @@ class HoldingReplay {
     var i = 0;
     var curQ = q;
     var curU = u;
+    void captureIfSell(_ReplayEvent e, double qtyNow, double unitNow) {
+      if (capturedSellPrincipal == null || e.$2 != TransactionType.sell) return;
+      if (e.$3 <= 0) return;
+      // Principal of the sold shares = qty x unit cost at sale time, so the
+      // receiving cash account credits exactly this (not the full proceeds).
+      capturedSellPrincipal[e.$6] = e.$3 * unitNow;
+    }
+
     while (day.isBefore(toDay)) {
       while (i < events.length && !events[i].$1.isAfter(day)) {
+        captureIfSell(events[i], curQ, curU);
         (curQ, curU) = _apply(events[i], curQ, curU);
         i++;
       }
@@ -287,6 +323,7 @@ class HoldingReplay {
     // position equals today's actual holdings and past years show phantom
     // profits/losses on their last month.
     while (i < events.length && !events[i].$1.isAfter(toDay)) {
+      captureIfSell(events[i], curQ, curU);
       (curQ, curU) = _apply(events[i], curQ, curU);
       i++;
     }
@@ -299,7 +336,7 @@ class HoldingReplay {
       case TransactionType.buy:
         if (e.$3 <= 0) return (q, u);
         final newQ = q + e.$3;
-        final newU = newQ > 0 ? (u * q + e.$4) / newQ : 0.0;
+        final newU = newQ > 0 ? (u * q + e.$5) / newQ : 0.0;
         return (newQ, newU);
       case TransactionType.sell:
         final newQ = (q - e.$3).clamp(0.0, double.infinity);

@@ -228,43 +228,42 @@ class HistoryBackfillService {
     // 2020-08..2026-09 came out wrong). We collect failures and abort below
     // instead of writing bad rows.
     final failedSymbols = <String>[];
+    // Transaction id -> sold principal (quantity x unit cost at sale time),
+    // captured from every share-based holding's replay. A selling holding's
+    // proceeds credited to a cash account must move the cash principal by
+    // this number (not the full amount) so the sold gain stays a cash-side
+    // unrealized gain — mirrors TransactionService._applySell.
+    //
+    // Phase 1 runs in two passes: every share-based replay first (so the
+    // captured sell principals are complete *before* any amount-based cash
+    // account derives its principal), then the cash smooth computation.
+    final soldPrincipalById = <int, double>{};
+    // Share-based smoothed (manual-NAV) holdings, replayed in phase 1.
+    final smoothShareFlows = <int, List<TransactionRow>>{};
     for (final h in holdings) {
-      if (isSmoothedHolding(h)) {
+      final type = AssetType.fromStorage(h.assetType);
+      if (isSmoothedHolding(h) && !type.isAmountBased) {
         final flows = await _dao.getTransactionsForHolding(h.id);
-        if (AssetType.fromStorage(h.assetType).isAmountBased) {
-          smoothValues[h.id] = smoothCalc.amountHistory(
-            h,
-            flows,
-            from: windowStart,
-            to: current,
-            today: current,
-          );
-          smoothPrincipals[h.id] = smoothCalc.amountPrincipal(
-            h,
-            flows,
-            from: windowStart,
-            to: current,
-          );
-        } else {
-          // Share-based smoothed holdings (manual-NAV / FX-linked bank
-          // wealth) must replay their flows just like market-linked ones:
-          // pricing every historical day with the *current* quantity makes a
-          // full rebuild collapse the whole trend after a partial redemption
-          // (2026-09-24「月月宝 → 五年国债ETF」report — the redeemed ~107k of
-          // 223k shares vanished from every pre-redemption day).
-          replays[h.id] = const HoldingReplay().replay(
-            h,
-            flows,
-            from: windowStart,
-            to: current,
-          );
-        }
+        smoothShareFlows[h.id] = flows;
+        // Share-based smoothed holdings (manual-NAV / FX-linked bank
+        // wealth) must replay their flows just like market-linked ones:
+        // pricing every historical day with the *current* quantity makes a
+        // full rebuild collapse the whole trend after a partial redemption
+        // (2026-09-24「月月宝 → 五年国债ETF」report — the redeemed ~107k of
+        // 223k shares vanished from every pre-redemption day).
+        replays[h.id] = const HoldingReplay().replay(
+          h,
+          flows,
+          from: windowStart,
+          to: current,
+          capturedSellPrincipal: soldPrincipalById,
+        );
         continue;
       }
+      if (isSmoothedHolding(h)) continue; // amount-based cash: phase 2
       final source = MarketSource.fromStorage(h.marketSource);
       final adapter = _sources[source];
       if (adapter == null) continue;
-      final type = AssetType.fromStorage(h.assetType);
       var rawSymbol = (h.symbol != null && h.symbol!.isNotEmpty)
           ? h.symbol!
           : type.defaultSymbol;
@@ -275,8 +274,13 @@ class HistoryBackfillService {
       final symbol = rawSymbol;
       // Replay the holding's own flows for its historical quantity/cost.
       final flows = await _dao.getTransactionsForHolding(h.id);
-      replays[h.id] =
-          const HoldingReplay().replay(h, flows, from: windowStart, to: current);
+      replays[h.id] = const HoldingReplay().replay(
+        h,
+        flows,
+        from: windowStart,
+        to: current,
+        capturedSellPrincipal: soldPrincipalById,
+      );
       futures.add(() async {
         try {
           final history = await adapter.fetch(symbol, windowStart, current);
@@ -290,6 +294,27 @@ class HistoryBackfillService {
       }());
     }
     await Future.wait(futures);
+    // Phase 2: amount-based cash holdings — their principal must see the
+    // complete sell-principal map captured in phase 1.
+    for (final h in holdings) {
+      if (!isSmoothedHolding(h)) continue;
+      if (!AssetType.fromStorage(h.assetType).isAmountBased) continue;
+      final flows = await _dao.getTransactionsForHolding(h.id);
+      smoothValues[h.id] = smoothCalc.amountHistory(
+        h,
+        flows,
+        from: windowStart,
+        to: current,
+        today: current,
+      );
+      smoothPrincipals[h.id] = smoothCalc.amountPrincipal(
+        h,
+        flows,
+        from: windowStart,
+        to: current,
+        soldPrincipalById: soldPrincipalById,
+      );
+    }
     final coveredHoldings = fillers.length + smoothValues.length;
 
     // If any market-source fetch failed (e.g. network error), abort without

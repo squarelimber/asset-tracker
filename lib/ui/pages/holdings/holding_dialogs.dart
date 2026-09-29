@@ -643,6 +643,19 @@ Future<void> showAddHoldingDialog(BuildContext context, WidgetRef ref) async {
                 amount: redemptionAmount,
                 currency: finalCurrency,
                 note: '赎回购买 $name',
+                // 使用用户在对话框里选的买入日期，而不是默认今天：
+                // 补录历史「赎回购买」时日期必须落在发生日，否则历史回放
+                // 会把今天才记的流水放到错误的日子（净值当天凭空跳变）。
+                occurredAt: purchaseDate.value,
+                // Write the matching buy leg too, so the new holding has a
+                // real historical purchase flow (the holding row itself was
+                // just created with its quantity and cost). Before this, a
+                // redeem-to-create left no buy row and the history replay
+                // saw the position appear from nowhere (e.g. 五年国债ETF
+                // 2026-09-24), doubling the cost on that day.
+                targetHoldingId: createdId,
+                targetQuantity: qty,
+                targetPrice: userPrice,
               );
               if (!redemption.ok) {
                 if (context.mounted) {
@@ -1306,5 +1319,11 @@ Future<void> confirmDeleteHolding(
   if (ok == true) {
     await ref.read(daoProvider).deleteHolding(holding.id);
     ref.read(daoProvider).setSetting(historySyncDirtyKey, historyDirtySet);
+    if (context.mounted) {
+      Navigator.of(context).pop(); // 返回持仓列表/上一页
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('已删除「${holding.name}」及其全部流水')),
+      );
+    }
   }
 }

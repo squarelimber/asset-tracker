@@ -524,4 +524,73 @@ void main() {
     final after = (await dao.getHolding(h.id))!;
     expect(after.riskLevel, 'R4');
   });
+
+  test('fresh rebuild keeps category_override (no more no-such-column write)',
+      () async {
+    // A fresh-install shape table WITH category_override present: the rebuild
+    // (which runs first on any install without the marker) must carry the
+    // column over, otherwise writing a category override — including backup
+    // import — fails with "no such column".
+    await db.customStatement(
+      'ALTER TABLE holdings RENAME TO holdings_full;'
+      'CREATE TABLE holdings (id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT, '
+      'account_id INTEGER NOT NULL, name TEXT NOT NULL, asset_type TEXT NOT NULL, '
+      "market_source TEXT NOT NULL DEFAULT 'manual', symbol TEXT NULL, "
+      'quantity REAL NOT NULL DEFAULT 0.0, cost_price REAL NOT NULL DEFAULT 0.0, '
+      'latest_price REAL NOT NULL DEFAULT 0.0, currency TEXT NOT NULL DEFAULT \'CNY\', '
+      'cost_fx_rate REAL NULL, purchase_date INTEGER NULL, risk_level TEXT NULL, '
+      'category_override TEXT NULL, note TEXT NULL, archived INTEGER NOT NULL DEFAULT 0, '
+      'created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);'
+      'INSERT INTO holdings (account_id, name, asset_type, quantity, cost_price, '
+      'latest_price, risk_level, category_override, archived, created_at, updated_at) '
+      "VALUES (0, '黄金ETF', 'etf', 100, 1.0, 1.1, 'R2', 'gold', 0, 0, 0);"
+      'DROP TABLE holdings_full;',
+    );
+
+    await DataMigrationService(db).run();
+
+    final h = (await dao.getHoldings()).single;
+    expect(h.name, '黄金ETF');
+    expect(h.categoryOverride, 'gold'); // carried through the rebuild
+    // A typed write with category_override works again.
+    final stmt = db.update(db.holdings)..where((t) => t.id.equals(h.id));
+    await stmt.write(const HoldingsCompanion(categoryOverride: Value('commodity')));
+    final after = (await dao.getHolding(h.id))!;
+    expect(after.categoryOverride, 'commodity');
+  });
+
+  test('repairs databases where the old rebuild dropped category_override',
+      () async {
+    // Marker already set (so the rebuild will not run again), table lacks
+    // category_override: the defensive repair must re-add it so backup
+    // import / category writes work on upgraded installs.
+    await db.customStatement(
+      'ALTER TABLE holdings RENAME TO holdings_buggy;'
+      'CREATE TABLE holdings (id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT, '
+      'account_id INTEGER NOT NULL, name TEXT NOT NULL, asset_type TEXT NOT NULL, '
+      "market_source TEXT NOT NULL DEFAULT 'manual', symbol TEXT NULL, "
+      'quantity REAL NOT NULL DEFAULT 0.0, cost_price REAL NOT NULL DEFAULT 0.0, '
+      'latest_price REAL NOT NULL DEFAULT 0.0, currency TEXT NOT NULL DEFAULT \'CNY\', '
+      'cost_fx_rate REAL NULL, purchase_date INTEGER NULL, risk_level TEXT NULL, '
+      'note TEXT NULL, archived INTEGER NOT NULL DEFAULT 0, '
+      'created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);'
+      'INSERT INTO holdings (account_id, name, asset_type, quantity, cost_price, '
+      'latest_price, created_at, updated_at) '
+      "VALUES (0, '旧持仓', 'bank_wealth', 100, 1.0, 1.1, 0, 0);"
+      'DROP TABLE holdings_buggy;',
+    );
+    await dao.setSetting('holdings_rebuilt_v5', '1');
+
+    await DataMigrationService(db).run();
+
+    final columns = await _columnsOf(db, 'holdings');
+    expect(columns, contains('category_override'));
+    final h = (await dao.getHoldings()).single;
+    expect(h.name, '旧持仓');
+    // A typed write with category_override works again.
+    final stmt = db.update(db.holdings)..where((t) => t.id.equals(h.id));
+    await stmt.write(const HoldingsCompanion(categoryOverride: Value('bond')));
+    final after = (await dao.getHolding(h.id))!;
+    expect(after.categoryOverride, 'bond');
+  });
 }

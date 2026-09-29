@@ -311,4 +311,81 @@ void main() {
       closeTo(principal['2026-09-18']! - principal['2026-09-17']!, 1e-6),
     );
   });
+
+  test('卖出回款进现金：本金按被卖份额成本而非全额（浮盈不记成本）', () {
+    // A legacy sell row (written before costMovedAmount existed) parks the
+    // full proceeds in the cash account. The cash principal must grow by the
+    // *sold principal* (qty x unit cost), not the full proceeds — otherwise
+    // the sell's unrealized gain is re-booked as cash cost and the rebuild
+    // shows a phantom loss of that size on the sell day.
+    final h = _amountHolding(quantity: 10000, cost: 10000);
+    final sell = TransactionRow(
+      id: 9,
+      accountId: 1,
+      holdingId: 5,
+      cashSourceId: null,
+      cashTargetId: 1,
+      type: 'sell',
+      quantity: 1000,
+      price: 1.8,
+      amount: 1800, // proceeds = 1000 x 1.8
+      currency: 'CNY',
+      occurredAt: DateTime(2026, 1, 5),
+      note: null,
+      costMoved: true,
+      internalMove: false,
+      updatedAt: DateTime(2026, 1, 5),
+    );
+    final from = DateTime(2026, 1, 1);
+    final to = DateTime(2026, 1, 11);
+
+    // Without the replay-captured sold principal, the legacy row falls back
+    // to the full amount (backward compatible with pre-fix data).
+    final legacy = calc.amountPrincipal(h, [sell], from: from, to: to);
+    expect(legacy['2026-01-04'], closeTo(8200, 1e-6),
+        reason: 'current cost 10000 minus full proceeds 1800');
+    expect(legacy['2026-01-05'], closeTo(10000, 1e-6),
+        reason: 'legacy rows without costMovedAmount keep the full-amount '
+            'behaviour (they stay as recorded)');
+
+    // With the sold principal (qty x unit cost = 1000 x 1.0 = 1000) supplied
+    // by the replay, only that principal enters the cash cost.
+    final fixed = calc.amountPrincipal(h, [sell],
+        from: from, to: to, soldPrincipalById: {9: 1000});
+    expect(fixed['2026-01-04'], closeTo(9000, 1e-6),
+        reason: 'pre-sell principal = 10000 - sold principal 1000');
+    expect(fixed['2026-01-05'], closeTo(10000, 1e-6),
+        reason: 'the sold principal (1000), not the proceeds (1800), credits '
+            'the cash cost — the 800 gain stays unrealized on the cash side');
+  });
+
+  test('卖出回款腿优先用 costMovedAmount（新流水直接记录份额成本）', () {
+    final h = _amountHolding(quantity: 10000, cost: 10000);
+    final sell = TransactionRow(
+      id: 10,
+      accountId: 1,
+      holdingId: 5,
+      cashSourceId: null,
+      cashTargetId: 1,
+      type: 'sell',
+      quantity: 1000,
+      price: 1.8,
+      amount: 1800,
+      currency: 'CNY',
+      occurredAt: DateTime(2026, 1, 5),
+      note: null,
+      costMoved: true,
+      internalMove: false,
+      costMovedAmount: 1000, // recorded at write time
+      updatedAt: DateTime(2026, 1, 5),
+    );
+
+    final map = calc.amountPrincipal(h, [sell],
+        from: DateTime(2026, 1, 1), to: DateTime(2026, 1, 11));
+    expect(map['2026-01-04'], closeTo(9000, 1e-6),
+        reason: 'pre-sell principal = 10000 - recorded sold principal 1000');
+    expect(map['2026-01-05'], closeTo(10000, 1e-6),
+        reason: 'costMovedAmount (the recorded sold principal) wins over '
+            'the raw amount');
+  });
 }
