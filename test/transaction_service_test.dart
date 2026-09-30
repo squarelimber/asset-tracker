@@ -1242,7 +1242,6 @@ void main() {
       );
 
       final startCost = await portfolioCost();
-      var cashBal = 100000.0;
       var fundQty = 0.0;
       var when = DateTime(2026, 9, 10, 10, 0, 0); // 错开时间避免 UNIQUE 时间冲突
       for (var i = 0; i < 3; i++) {
@@ -1253,7 +1252,6 @@ void main() {
           cashSourceId: cash, occurredAt: when,
         );
         expect(buy.ok, isTrue, reason: 'loop $i buy: ${buy.message}');
-        cashBal -= 10000;
         fundQty += 10000;
         when = when.add(const Duration(minutes: 1));
         // 全卖回款到现金
@@ -1263,7 +1261,6 @@ void main() {
           cashTargetId: cash, occurredAt: when,
         );
         expect(sell.ok, isTrue, reason: 'loop $i sell: ${sell.message}');
-        cashBal += fundQty;
         fundQty = 0;
         when = when.add(const Duration(minutes: 1));
       }
