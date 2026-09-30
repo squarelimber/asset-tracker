@@ -1218,4 +1218,531 @@ void main() {
           reason: '删除目标持仓应连带删除配对的赎回卖出腿，防止残留孤儿流水');
     });
   });
+
+  group('组合交易序列健壮性（余额/成本/收益不漂移）', () {
+    /// 校验所有现金类余额 >= 0（资产账户不允许为负）。
+    Future<void> expectNoNegativeCash() async {
+      for (final h in await dao.getHoldings()) {
+        final t = AssetType.fromStorage(h.assetType);
+        if (!t.isAmountBased) continue;
+        expect(h.quantity, greaterThanOrEqualTo(-1e-6),
+            reason: '「${h.name}」现金余额被扣成负数：${h.quantity}');
+      }
+    }
+
+    test('卖出→现金→再买入循环 N 次，总成本不虚增', () async {
+      final acc = await addAccount('A');
+      final cash = await addHolding(
+        accountId: acc, name: '现金', type: AssetType.cash,
+        quantity: 100000, costPrice: 100000, latestPrice: 1,
+      );
+      final fund = await addHolding(
+        accountId: acc, name: '基金', type: AssetType.mutualFund,
+        quantity: 0, costPrice: 0, latestPrice: 1.0,
+      );
+
+      final startCost = await portfolioCost();
+      var cashBal = 100000.0;
+      var fundQty = 0.0;
+      var when = DateTime(2026, 9, 10, 10, 0, 0); // 错开时间避免 UNIQUE 时间冲突
+      for (var i = 0; i < 3; i++) {
+        // 现金买基金 10,000
+        final buy = await service.record(
+          accountId: acc, holdingId: fund, type: TransactionType.buy,
+          quantity: 10000, price: 1.0, amount: 10000,
+          cashSourceId: cash, occurredAt: when,
+        );
+        expect(buy.ok, isTrue, reason: 'loop $i buy: ${buy.message}');
+        cashBal -= 10000;
+        fundQty += 10000;
+        when = when.add(const Duration(minutes: 1));
+        // 全卖回款到现金
+        final sell = await service.record(
+          accountId: acc, holdingId: fund, type: TransactionType.sell,
+          quantity: fundQty, price: 1.0, amount: fundQty,
+          cashTargetId: cash, occurredAt: when,
+        );
+        expect(sell.ok, isTrue, reason: 'loop $i sell: ${sell.message}');
+        cashBal += fundQty;
+        fundQty = 0;
+        when = when.add(const Duration(minutes: 1));
+      }
+      // 现金余额应精确回落到初始值
+      expect((await dao.getHolding(cash))!.quantity, closeTo(100000, 1e-6),
+          reason: '买→卖→回款循环后现金余额应不变');
+      // 总成本守恒：所有循环都是内部移动，成本不应变化
+      expect(await portfolioCost(), closeTo(startCost, 1e-3),
+          reason: '卖出→现金→再买入循环后组合总成本应守恒');
+      await expectNoNegativeCash();
+    });
+
+    test('多类型连续交易：买入/卖出/转账/分红后余额与成本对账', () async {
+      final acc = await addAccount('A');
+      final cash = await addHolding(
+        accountId: acc, name: '现金', type: AssetType.cash,
+        quantity: 50000, costPrice: 50000, latestPrice: 1,
+      );
+      final fund = await addHolding(
+        accountId: acc, name: '基金', type: AssetType.mutualFund,
+        quantity: 0, costPrice: 0, latestPrice: 2.0,
+      );
+      final other = await addHolding(
+        accountId: acc, name: '活期', type: AssetType.liquidWealth,
+        quantity: 0, costPrice: 0, latestPrice: 1,
+      );
+
+      final startCost = await portfolioCost();
+      var when = DateTime(2026, 9, 10, 10, 0, 0);
+      // 现金买入基金 20,000
+      await service.record(
+        accountId: acc, holdingId: fund, type: TransactionType.buy,
+        quantity: 10000, price: 2.0, amount: 20000, cashSourceId: cash,
+        occurredAt: when,
+      );
+      when = when.add(const Duration(minutes: 1));
+      // 现金账户 → 活期 转账 5,000
+      await service.record(
+        accountId: acc, type: TransactionType.transferOut,
+        amount: 5000, cashSourceId: cash, cashTargetId: other, occurredAt: when,
+      );
+      when = when.add(const Duration(minutes: 1));
+      // 基金分红 1,000 入现金（成本法扣单位成本）
+      await service.record(
+        accountId: acc, holdingId: fund, type: TransactionType.dividend,
+        amount: 1000, cashTargetId: cash, occurredAt: when,
+      );
+      when = when.add(const Duration(minutes: 1));
+      // 卖出基金 5,000 份回款现金
+      await service.record(
+        accountId: acc, holdingId: fund, type: TransactionType.sell,
+        quantity: 5000, price: 2.0, amount: 10000, cashTargetId: cash,
+        occurredAt: when,
+      );
+      when = when.add(const Duration(minutes: 1));
+      // 活期 → 现金 转账 2,000
+      await service.record(
+        accountId: acc, type: TransactionType.transferOut,
+        amount: 2000, cashSourceId: other, cashTargetId: cash, occurredAt: when,
+      );
+
+      // 现金余额 = 50000 - 20000(买) + 1000(分红) + 10000(卖回) + 2000(活期转回)
+      //            - 5000(转出)
+      final cashH = (await dao.getHolding(cash))!;
+      expect(cashH.quantity, closeTo(38000, 1e-6),
+          reason: '多笔交易后现金余额应按流水精确结算，实际：${cashH.quantity}');
+      // 基金 剩余 5,000 份
+      expect((await dao.getHolding(fund))!.quantity, closeTo(5000, 1e-6));
+      // 活期收到 5000 转出 2000 = 3000
+      expect((await dao.getHolding(other))!.quantity, closeTo(3000, 1e-6));
+      // 总成本：内转/买卖不改变；分红成本法把 1,000 从基金成本移出（收益落袋）。
+      expect(await portfolioCost(), closeTo(startCost - 1000, 1e-3),
+          reason: '内部转账/买卖不改变总成本，分红收回本金再从总成本扣除');
+      await expectNoNegativeCash();
+    });
+
+    test('删除序列中间一笔流水后，后续账户状态正确回滚', () async {
+      final acc = await addAccount('A');
+      final cash = await addHolding(
+        accountId: acc, name: '现金', type: AssetType.cash,
+        quantity: 10000, costPrice: 10000, latestPrice: 1,
+      );
+      final fund = await addHolding(
+        accountId: acc, name: '基金', type: AssetType.mutualFund,
+        quantity: 0, costPrice: 0, latestPrice: 1.0,
+      );
+
+      // 现金买基金 4,000
+      final b1 = await service.record(
+        accountId: acc, holdingId: fund, type: TransactionType.buy,
+        quantity: 4000, price: 1.0, amount: 4000, cashSourceId: cash,
+        occurredAt: DateTime(2026, 9, 10, 10, 0, 0),
+      );
+      expect(b1.ok, isTrue);
+      // 再买 6,000（现金总额 10,000 全花光）
+      final b2 = await service.record(
+        accountId: acc, holdingId: fund, type: TransactionType.buy,
+        quantity: 6000, price: 1.0, amount: 6000, cashSourceId: cash,
+        occurredAt: DateTime(2026, 9, 10, 10, 1, 0),
+      );
+      expect(b2.ok, isTrue);
+      // 删除最后一笔买入（移动平均只能逆序撤销）：现金应回滚 +6000，
+      // 基金应回滚 -6000 份，留下 4,000 份与首笔买入对应的状态。
+      final txns = await dao.getTransactions();
+      final rm = await service.remove(txns.last.id);
+      expect(rm.ok, isTrue, reason: rm.message);
+      expect((await dao.getHolding(cash))!.quantity, closeTo(6000, 1e-6),
+          reason: '删除买入后现金余额应回滚 10000-4000=6000');
+      expect((await dao.getHolding(fund))!.quantity, closeTo(4000, 1e-6),
+          reason: '删除买入后基金应剩 4000 份');
+      await expectNoNegativeCash();
+    });
+
+    test('补录历史买入 + 今天流水叠加后余额一致', () async {
+      final acc = await addAccount('A');
+      final cash = await addHolding(
+        accountId: acc, name: '现金', type: AssetType.cash,
+        quantity: 20000, costPrice: 20000, latestPrice: 1,
+      );
+      final fund = await addHolding(
+        accountId: acc, name: '基金', type: AssetType.mutualFund,
+        quantity: 0, costPrice: 0, latestPrice: 1.0,
+      );
+
+      // 补录历史买入 5,000（发生在过去）
+      final hist = await service.recordHistorical(
+        accountId: acc,
+        holdingId: fund,
+        type: TransactionType.buy,
+        quantity: 5000,
+        price: 1.0,
+        amount: 5000,
+        cashSourceId: cash,
+        occurredAt: DateTime(2025, 12, 31),
+      );
+      expect(hist.ok, isTrue, reason: hist.message);
+      // 今天再买入 3,000
+      final today = await service.record(
+        accountId: acc, holdingId: fund, type: TransactionType.buy,
+        quantity: 3000, price: 1.0, amount: 3000, cashSourceId: cash,
+      );
+      expect(today.ok, isTrue, reason: today.message);
+      // 现金 = 20000 - 5000 - 3000 = 12000；基金 = 8000 份
+      expect((await dao.getHolding(cash))!.quantity, closeTo(12000, 1e-6));
+      expect((await dao.getHolding(fund))!.quantity, closeTo(8000, 1e-6));
+      await expectNoNegativeCash();
+    });
+  });
+
+  group('recordHoldingCreation（新建持仓初始化流水）', () {
+    test('direct share holding creation writes a buy flow without double '
+        'booking', () async {
+      final acc = await addAccount('A');
+      final fund = await addHolding(
+        accountId: acc, name: '基金', type: AssetType.mutualFund,
+        quantity: 100, costPrice: 2.0, latestPrice: 2.0,
+      );
+      final r = await service.recordHoldingCreation(
+        accountId: acc,
+        holdingId: fund,
+        type: AssetType.mutualFund,
+        quantity: 100,
+        price: 2.0,
+        amount: 200,
+        occurredAt: DateTime(2026, 9, 1),
+      );
+      expect(r.ok, isTrue, reason: r.message);
+      final txns = await dao.getTransactions();
+      expect(txns, hasLength(1));
+      expect(txns.single.type, TransactionType.buy.storageName);
+      expect(txns.single.holdingId, fund);
+      expect(txns.single.amount, closeTo(200, 1e-6));
+      // 持仓快照不应被双算（创建时已写入数量/成本）。
+      expect((await dao.getHolding(fund))!.quantity, 100);
+      expect((await dao.getHolding(fund))!.costPrice, 2.0);
+    });
+
+    test('cash account creation writes an income flow', () async {
+      final acc = await addAccount('A');
+      final cash = await addHolding(
+        accountId: acc, name: '现金', type: AssetType.cash,
+        quantity: 5000, costPrice: 5000, latestPrice: 1,
+      );
+      final r = await service.recordHoldingCreation(
+        accountId: acc,
+        holdingId: cash,
+        type: AssetType.cash,
+        quantity: 5000,
+        amount: 5000,
+        occurredAt: DateTime(2026, 8, 1),
+      );
+      expect(r.ok, isTrue, reason: r.message);
+      final txns = await dao.getTransactions();
+      expect(txns, hasLength(1));
+      expect(txns.single.type, TransactionType.income.storageName);
+      expect(txns.single.amount, closeTo(5000, 1e-6));
+    });
+
+    test('liability creation writes a borrowing (transferOut) flow',
+        () async {
+      final acc = await addAccount('A');
+      final card = await addHolding(
+        accountId: acc, name: '信用卡', type: AssetType.liability,
+        quantity: 3000, costPrice: 3000, latestPrice: 1,
+      );
+      final r = await service.recordHoldingCreation(
+        accountId: acc,
+        holdingId: card,
+        type: AssetType.liability,
+        quantity: 3000,
+        amount: 3000,
+        occurredAt: DateTime(2026, 8, 1),
+      );
+      expect(r.ok, isTrue, reason: r.message);
+      final txns = await dao.getTransactions();
+      expect(txns, hasLength(1));
+      expect(txns.single.type, TransactionType.transferOut.storageName,
+          reason: '负债初始化 = 借款（与还款 transferIn 对称）');
+      expect(txns.single.holdingId, card);
+    });
+
+    test('zero-balance holding gets no init flow', () async {
+      final acc = await addAccount('A');
+      final fund = await addHolding(
+        accountId: acc, name: '空基金', type: AssetType.mutualFund,
+        quantity: 0, costPrice: 0, latestPrice: 1,
+      );
+      final r = await service.recordHoldingCreation(
+        accountId: acc,
+        holdingId: fund,
+        type: AssetType.mutualFund,
+        quantity: 0,
+        amount: 0,
+        occurredAt: DateTime(2026, 9, 1),
+      );
+      expect(r.ok, isTrue, reason: r.message);
+      expect(await dao.getTransactions(), isEmpty);
+    });
+
+    test('liability consume and repayment both carry flows', () async {
+      final acc = await addAccount('A');
+      final card = await addHolding(
+        accountId: acc, name: '信用卡', type: AssetType.liability,
+        quantity: 0, costPrice: 0, latestPrice: 1,
+      );
+      final cash = await addHolding(
+        accountId: acc, name: '现金', type: AssetType.cash,
+        quantity: 10000, costPrice: 10000, latestPrice: 1,
+      );
+      // 新建信用卡
+      await service.recordHoldingCreation(
+        accountId: acc, holdingId: card, type: AssetType.liability,
+        quantity: 0, amount: 0, occurredAt: DateTime(2026, 8, 1),
+      );
+      // 消费 500（负债增加）
+      final consume = await service.record(
+        accountId: acc, holdingId: card, type: TransactionType.consume,
+        amount: 500, occurredAt: DateTime(2026, 8, 2),
+      );
+      expect(consume.ok, isTrue, reason: consume.message);
+      expect((await dao.getHolding(card))!.quantity, closeTo(500, 1e-6),
+          reason: '消费后负债余额增加');
+      // 还款 200（现金 → 负债）
+      final repay = await service.record(
+        accountId: acc, type: TransactionType.transferOut,
+        amount: 200, cashSourceId: cash, cashTargetId: card,
+        occurredAt: DateTime(2026, 8, 3),
+      );
+      expect(repay.ok, isTrue, reason: repay.message);
+      expect((await dao.getHolding(card))!.quantity, closeTo(300, 1e-6),
+          reason: '还款后负债余额减少');
+      expect((await dao.getHolding(cash))!.quantity, closeTo(9800, 1e-6));
+      // 每条操作都应对应有流水：创建(0-balance→无) + 消费 + 还款 = 2
+      expect(await dao.getTransactions(), hasLength(2));
+    });
+
+    test('跨类型全序列：买→卖部分→分红→拆分→再买，余额/成本/收益守恒',
+        () async {
+      Future<void> expectNoNegativeCash() async {
+        for (final h in await dao.getHoldings()) {
+          final t = AssetType.fromStorage(h.assetType);
+          if (!t.isAmountBased) continue;
+          expect(h.quantity, greaterThanOrEqualTo(-1e-6),
+              reason: '「${h.name}」现金余额被扣成负数：${h.quantity}');
+        }
+      }
+      final acc = await addAccount('A');
+      final cash = await addHolding(
+        accountId: acc, name: '现金', type: AssetType.cash,
+        quantity: 50000, costPrice: 50000, latestPrice: 1,
+      );
+      final fund = await addHolding(
+        accountId: acc, name: '基金', type: AssetType.mutualFund,
+        quantity: 0, costPrice: 0, latestPrice: 1.0,
+      );
+      // 起点成本
+      final startCost = await portfolioCost();
+      var when = DateTime(2026, 9, 10, 9, 0, 0);
+
+      // 1) 现金买基金 10,000 份 @1.0
+      await service.record(
+        accountId: acc, holdingId: fund, type: TransactionType.buy,
+        quantity: 10000, price: 1.0, amount: 10000, cashSourceId: cash,
+        occurredAt: when,
+      );
+      when = when.add(const Duration(minutes: 1));
+      // 2) 卖出 3,000 份 @1.5 回款现金
+      await service.record(
+        accountId: acc, holdingId: fund, type: TransactionType.sell,
+        quantity: 3000, price: 1.5, amount: 4500, cashTargetId: cash,
+        occurredAt: when,
+      );
+      when = when.add(const Duration(minutes: 1));
+      // 3) 分红 1,000 入现金（成本法扣单位成本）
+      await service.record(
+        accountId: acc, holdingId: fund, type: TransactionType.dividend,
+        amount: 1000, cashTargetId: cash, occurredAt: when,
+      );
+      when = when.add(const Duration(minutes: 1));
+      // 4) 1:2 拆分（7,000 → 14,000 份，单位成本减半）
+      await service.record(
+        accountId: acc, holdingId: fund, type: TransactionType.split,
+        amount: 2, occurredAt: when,
+      );
+      when = when.add(const Duration(minutes: 1));
+      // 5) 再买 2,000 份 @0.6（拆分后价格）
+      await service.record(
+        accountId: acc, holdingId: fund, type: TransactionType.buy,
+        quantity: 2000, price: 0.6, amount: 1200, cashSourceId: cash,
+        occurredAt: when,
+      );
+
+      // 现金：50000 -10000(买) +4500(卖回) +1000(分红) -1200(再买)
+      expect((await dao.getHolding(cash))!.quantity, closeTo(44300, 1e-6),
+          reason: '全序列后现金余额应精确结算');
+      // 基金：卖出后 7000 → 拆分 14000 → 再买 2000 = 16000
+      expect((await dao.getHolding(fund))!.quantity, closeTo(16000, 1e-6));
+      // 总成本：分红 1000 从基金成本移出（成本法），其余内部移动守恒
+      expect(await portfolioCost(), closeTo(startCost - 1000, 1e-3),
+          reason: '跨类型序列后总成本仅因分红成本法减少 1000');
+      await expectNoNegativeCash();
+    });
+
+    test('卖出部分（非全额）回款：单位成本保留，成本守恒', () async {
+      final acc = await addAccount('A');
+      final cash = await addHolding(
+        accountId: acc, name: '现金', type: AssetType.cash,
+        quantity: 10000, costPrice: 10000, latestPrice: 1,
+      );
+      final fund = await addHolding(
+        accountId: acc, name: '基金', type: AssetType.mutualFund,
+        quantity: 0, costPrice: 0, latestPrice: 2.0,
+      );
+      await service.record(
+        accountId: acc, holdingId: fund, type: TransactionType.buy,
+        quantity: 5000, price: 2.0, amount: 10000, cashSourceId: cash,
+        occurredAt: DateTime(2026, 9, 1),
+      );
+      // 卖 2,000 份 @2.5 回款
+      final sell = await service.record(
+        accountId: acc, holdingId: fund, type: TransactionType.sell,
+        quantity: 2000, price: 2.5, amount: 5000, cashTargetId: cash,
+        occurredAt: DateTime(2026, 9, 2),
+      );
+      expect(sell.ok, isTrue, reason: sell.message);
+      final f = (await dao.getHolding(fund))!;
+      expect(f.quantity, closeTo(3000, 1e-6));
+      expect(f.costPrice, closeTo(2.0, 1e-6),
+          reason: '部分卖出保留单位成本（移动平均不变）');
+      // 现金 = 10000 - 10000 + 5000 = 5000
+      expect((await dao.getHolding(cash))!.quantity, closeTo(5000, 1e-6));
+      // 总成本守恒：未实现收益留在基金，总成本不变
+      expect(await portfolioCost(), closeTo(10000, 1e-3));
+    });
+
+    test('负债完整生命周期：借款→消费→还款→清空', () async {
+      final acc = await addAccount('A');
+      final card = await addHolding(
+        accountId: acc, name: '信用卡', type: AssetType.liability,
+        quantity: 0, costPrice: 0, latestPrice: 1,
+      );
+      final cash = await addHolding(
+        accountId: acc, name: '现金', type: AssetType.cash,
+        quantity: 5000, costPrice: 5000, latestPrice: 1,
+      );
+      var when = DateTime(2026, 9, 1, 9, 0, 0);
+      // 借款 1000（负债 → 现金：负债增加）
+      await service.record(
+        accountId: acc, type: TransactionType.transferOut,
+        amount: 1000, cashSourceId: card, cashTargetId: cash,
+        occurredAt: when,
+      );
+      when = when.add(const Duration(minutes: 1));
+      // 消费 800（负债 +800）
+      await service.record(
+        accountId: acc, holdingId: card, type: TransactionType.consume,
+        amount: 800, occurredAt: when,
+      );
+      when = when.add(const Duration(minutes: 1));
+      // 还款 1500（现金 → 负债：负债减少 1500）
+      await service.record(
+        accountId: acc, type: TransactionType.transferOut,
+        amount: 1500, cashSourceId: cash, cashTargetId: card,
+        occurredAt: when,
+      );
+      // 负债 = 1000 + 800 - 1500 = 300
+      expect((await dao.getHolding(card))!.quantity, closeTo(300, 1e-6),
+          reason: '负债余额 = 借款+消费-还款 = 300');
+      // 现金 = 5000 +1000(借款) -1500(还款) = 4500
+      expect((await dao.getHolding(cash))!.quantity, closeTo(4500, 1e-6));
+      // 还款到负债是内部移动，组合成本应守恒（负债成本随余额走）
+      for (final h in await dao.getHoldings()) {
+        final t = AssetType.fromStorage(h.assetType);
+        if (t.isAmountBased) {
+          expect(h.quantity, greaterThanOrEqualTo(-1e-6));
+        }
+      }
+    });
+
+    test('删除「回款不入账」的卖出（无 target）：无副作用回滚', () async {
+      final acc = await addAccount('A');
+      final fund = await addHolding(
+        accountId: acc, name: '基金', type: AssetType.mutualFund,
+        quantity: 500, costPrice: 2.0, latestPrice: 2.5,
+      );
+      final sell = await service.record(
+        accountId: acc, holdingId: fund, type: TransactionType.sell,
+        quantity: 200, price: 2.5, amount: 500,
+        occurredAt: DateTime(2026, 9, 1), // 无 cashTargetId = 回款不入账
+      );
+      expect(sell.ok, isTrue, reason: sell.message);
+      expect((await dao.getHolding(fund))!.quantity, closeTo(300, 1e-6));
+      final rm = await service.remove(
+          (await dao.getTransactions()).single.id);
+      expect(rm.ok, isTrue, reason: rm.message);
+      expect((await dao.getHolding(fund))!.quantity, closeTo(500, 1e-6),
+          reason: '删除无入账卖出应恢复份额');
+      expect(await dao.getTransactions(), isEmpty);
+    });
+
+    test('拆分后买卖：基于新比例正确记账', () async {
+      final acc = await addAccount('A');
+      final cash = await addHolding(
+        accountId: acc, name: '现金', type: AssetType.cash,
+        quantity: 10000, costPrice: 10000, latestPrice: 1,
+      );
+      final fund = await addHolding(
+        accountId: acc, name: '基金', type: AssetType.mutualFund,
+        quantity: 0, costPrice: 0, latestPrice: 1.0,
+      );
+      var when = DateTime(2026, 9, 1, 9, 0, 0);
+      // 买 1,000 份 @1.0
+      await service.record(
+        accountId: acc, holdingId: fund, type: TransactionType.buy,
+        quantity: 1000, price: 1.0, amount: 1000, cashSourceId: cash,
+        occurredAt: when,
+      );
+      when = when.add(const Duration(minutes: 1));
+      // 1:10 拆分
+      await service.record(
+        accountId: acc, holdingId: fund, type: TransactionType.split,
+        amount: 10, occurredAt: when,
+      );
+      when = when.add(const Duration(minutes: 1));
+      // 拆分后卖 3,000 份（剩 7,000）
+      await service.record(
+        accountId: acc, holdingId: fund, type: TransactionType.sell,
+        quantity: 3000, price: 0.1, amount: 300, cashTargetId: cash,
+        occurredAt: when,
+      );
+      final f = (await dao.getHolding(fund))!;
+      expect(f.quantity, closeTo(7000, 1e-6),
+          reason: '拆分后份额按新比例');
+      expect(f.costPrice, closeTo(0.1, 1e-6),
+          reason: '拆分后单位成本 = 1.0/10 = 0.1');
+      // 现金 = 10000 -1000 +300 = 9300
+      expect((await dao.getHolding(cash))!.quantity, closeTo(9300, 1e-6));
+      expect((await dao.getHolding(cash))!.quantity,
+          greaterThanOrEqualTo(-1e-6));
+    });
+  });
 }

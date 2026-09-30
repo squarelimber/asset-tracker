@@ -685,6 +685,34 @@ Future<void> showAddHoldingDialog(BuildContext context, WidgetRef ref) async {
                   );
                 }
               }
+            } else {
+              // 直接新增（无赎回来源）：写一条初始化流水，让资产的出现有据
+              // 可查（share→买、现金类→收入、负债→借款）。否则历史回放把
+              // 新建持仓当"凭空出现"，净值在购入日虚增。
+              final initAmount = isAmount
+                  ? (investedResult ?? qty).toDouble()
+                  : (invested ?? qty * (userPrice ?? 0));
+              if (initAmount > 0 && qty > 0) {
+                final created = await ref
+                    .read(transactionServiceProvider)
+                    .recordHoldingCreation(
+                  accountId: accountId.value!,
+                  holdingId: createdId,
+                  type: type,
+                  quantity: qty,
+                  price: userPrice,
+                  amount: initAmount,
+                  currency: finalCurrency,
+                  occurredAt: purchaseDate.value!,
+                  note: '新建持仓：$name',
+                );
+                if (context.mounted && !created.ok) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('持仓已创建，但初始化流水记录失败：'
+                        '${created.message ?? ''}')),
+                  );
+                }
+              }
             }
             if (context.mounted) Navigator.pop(context);
 

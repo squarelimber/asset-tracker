@@ -260,6 +260,73 @@ class TransactionService {
     }
   }
 
+  /// Records the **initial** flow behind a newly created holding.
+  ///
+  /// A holding created without a funding source (直接新增, as opposed to
+  /// "赎回购买" which writes a sell+buy pair) carries its quantity and cost
+  /// on the holding row already — this writes the flow that explains where
+  /// that value came from, without touching the holding (it was just
+  /// created):
+  /// - share-based (funds/stocks/ETF/gold...): a `buy` with no source —
+  ///   external money entered the portfolio, asset AND cost rise together;
+  /// - amount-based assets (cash/deposit/liquid wealth): an `income` (new
+  ///   capital);
+  /// - liability: a `transferOut` (借款) — the mirror of repayment
+  ///   (transferIn).
+  ///
+  /// Without this row the history replay would see the position appear from
+  /// nowhere on its purchase date (value +cost with no corresponding flow),
+  /// which is exactly how "凭空持仓" spikes happened. The row is NOT
+  /// internal: external money genuinely entered, so it participates in the
+  /// cash-flow stats.
+  Future<TransactionResult> recordHoldingCreation({
+    required int accountId,
+    required int holdingId,
+    required AssetType type,
+    required double quantity,
+    double? price,
+    required double amount,
+    String currency = 'CNY',
+    required DateTime occurredAt,
+    String? note,
+  }) async {
+    try {
+      final holding = await _getHolding(holdingId);
+      // 零余额/零数量持仓不需要初始化流水（负债也只在有余额时记借款）。
+      if (quantity <= 0 && holding.quantity <= 0 && amount <= 0) {
+        return TransactionResult.success;
+      }
+      if (amount <= 0) throw ArgumentError('金额必须大于 0');
+      final isAmountAsset = type.isAmountBased;
+      final isLiability = type == AssetType.liability;
+      final txnType = isLiability
+          ? TransactionType.transferOut
+          : (isAmountAsset ? TransactionType.income : TransactionType.buy);
+
+      await _dao.createTransaction(TransactionsCompanion.insert(
+        accountId: accountId,
+        holdingId: Value(holdingId),
+        cashSourceId: isLiability ? Value(holdingId) : const Value.absent(),
+        cashTargetId:
+            isAmountAsset || isLiability ? Value(holdingId) : const Value.absent(),
+        type: txnType.storageName,
+        quantity: isAmountAsset || isLiability
+            ? const Value.absent()
+            : Value(quantity),
+        price: isAmountAsset || isLiability ? const Value.absent() : Value(price),
+        amount: amount,
+        currency: Value(currency),
+        occurredAt: occurredAt,
+        note: note == null || note.isEmpty ? const Value.absent() : Value(note),
+        costMovedAmount: Value(amount),
+        internalMove: const Value(false),
+      ));
+      return TransactionResult.success;
+    } catch (e) {
+      return TransactionResult.fail(_recordFailMessage(e));
+    }
+  }
+
   /// Records a purchase of [targetHoldingId] funded by redeeming
   /// [sourceHoldingId]: atomically writes a sell row for the source (the
   /// redemption, proceeds not parked in cash) and a buy row for the target,
