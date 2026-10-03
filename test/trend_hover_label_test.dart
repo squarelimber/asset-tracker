@@ -1,4 +1,4 @@
-import 'package:flutter_test/flutter_test.dart';
+﻿import 'package:flutter_test/flutter_test.dart';
 
 import 'package:asset_tracker/data/database.dart';
 import 'package:asset_tracker/ui/pages/portfolio/portfolio_widgets.dart';
@@ -21,7 +21,7 @@ void main() {
   ];
   final rates = [0.0, 1.0, -0.5]; // 累计收益率（百分数）
 
-  test('净值模式：日期 / 金额 / 较前日（资产口径）', () {
+  test('净值模式：日期 / 金额 / 较昨日（资产口径）', () {
     final lines = trendHoverLabelLines(
       list: list,
       isRate: false,
@@ -32,12 +32,12 @@ void main() {
     expect(lines, hasLength(3));
     expect(lines[0], contains('09-16'));
     expect(lines[1], contains('101,000'));
-    // 较前日：101000+500 − 100000 = 1500（正号）。
-    expect(lines[2], contains('较前日 +'));
+    // 较昨日：101000+500 − 100000 = 1500（正号）。
+    expect(lines[2], contains('较昨日 +'));
     expect(lines[2], contains('1,500'));
   });
 
-  test('净值模式：index 0 无较前日', () {
+  test('净值模式：index 0 无较昨日', () {
     final lines = trendHoverLabelLines(
       list: list,
       isRate: false,
@@ -59,11 +59,11 @@ void main() {
     );
     expect(lines[1], startsWith('¥'));
     expect(lines[1], isNot(contains('101,000')));
-    expect(lines[2], contains('较前日'));
+    expect(lines[2], contains('较昨日'));
     expect(lines[2], isNot(contains('1,500')));
   });
 
-  test('收益率模式：累计涨跌 + 较前日百分点', () {
+  test('收益率模式：累计涨跌 + 较昨日百分点', () {
     final lines = trendHoverLabelLines(
       list: list,
       isRate: true,
@@ -74,9 +74,9 @@ void main() {
     expect(lines, hasLength(3));
     expect(lines[1], startsWith('-'));
     expect(lines[1], contains('-0.5'));
-    expect(lines[2], contains('较前日 '));
-    expect(lines[2], startsWith('较前日 -'));
-    // 较前日：-0.5 − 1.0 = -1.5 个百分点 → -1.5%。
+    expect(lines[2], contains('较昨日 '));
+    expect(lines[2], startsWith('较昨日 -'));
+    // 较昨日：-0.5 − 1.0 = -1.5 个百分点 → -1.5%。
     expect(lines[2], contains('1.5'));
   });
 

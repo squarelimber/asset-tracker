@@ -4,15 +4,16 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../app/providers.dart';
+import '../../../core/enums.dart';
 import '../../../core/formats.dart';
 import '../../../core/responsive.dart';
 import '../../../domain/daily_earnings.dart';
+import '../../../services/history_backfill_service.dart';
 import '../../components/app_bar_actions.dart';
 import '../../components/error_state.dart';
 import '../../components/heat_cell.dart';
 import '../../components/terminal_card.dart';
 import '../../tokens.dart';
-import '../portfolio/day_detail_sheet.dart';
 
 final earningsProvider = FutureProvider<List<DailyEarning>>((ref) async {
   final snapshots = ref.watch(snapshotsProvider).value ?? const [];
@@ -23,7 +24,8 @@ class EarningsCalendarPage extends ConsumerStatefulWidget {
   const EarningsCalendarPage({super.key});
 
   @override
-  ConsumerState<EarningsCalendarPage> createState() => _EarningsCalendarPageState();
+  ConsumerState<EarningsCalendarPage> createState() =>
+      _EarningsCalendarPageState();
 }
 
 enum _CalView { month, year }
@@ -33,6 +35,7 @@ class _EarningsCalendarPageState extends ConsumerState<EarningsCalendarPage> {
   late int _year;
   late int _month;
   _CalView _view = _CalView.month;
+  DateTime? _selectedDate;
 
   @override
   void initState() {
@@ -63,6 +66,19 @@ class _EarningsCalendarPageState extends ConsumerState<EarningsCalendarPage> {
           month: _month,
           view: _view,
           calc: _calc,
+          selectedDate: _selectedDate,
+          onDayTap: (d) {
+            setState(() {
+              if (_selectedDate != null &&
+                  _selectedDate!.year == d.year &&
+                  _selectedDate!.month == d.month &&
+                  _selectedDate!.day == d.day) {
+                _selectedDate = null; // toggle off
+              } else {
+                _selectedDate = d;
+              }
+            });
+          },
           onRefresh: () => ref.invalidate(earningsProvider),
           onPrev: () => _shift(-1),
           onNext: () => _shift(1),
@@ -108,6 +124,8 @@ class _CalendarBody extends StatelessWidget {
     required this.onNext,
     required this.onOpenMonth,
     required this.onViewChanged,
+    this.selectedDate,
+    this.onDayTap,
   });
 
   final List<DailyEarning> earnings;
@@ -120,6 +138,10 @@ class _CalendarBody extends StatelessWidget {
   final VoidCallback onNext;
   final ValueChanged<int> onOpenMonth;
   final ValueChanged<_CalView> onViewChanged;
+
+  /// Selected day (products are shown inline below the calendar).
+  final DateTime? selectedDate;
+  final ValueChanged<DateTime>? onDayTap;
 
   static const _weekdays = ['一', '二', '三', '四', '五', '六', '日'];
 
@@ -149,49 +171,62 @@ class _CalendarBody extends StatelessWidget {
           children: [
             Center(
               child: SegmentedButton<_CalView>(
-              segments: const [
-                ButtonSegment(value: _CalView.month, label: Text('月')),
-                ButtonSegment(value: _CalView.year, label: Text('年')),
-              ],
-              selected: {view},
-              onSelectionChanged: (s) => onViewChanged(s.first),
+                segments: const [
+                  ButtonSegment(value: _CalView.month, label: Text('月')),
+                  ButtonSegment(value: _CalView.year, label: Text('年')),
+                ],
+                selected: {view},
+                onSelectionChanged: (s) => onViewChanged(s.first),
+              ),
             ),
-          ),
-          const SizedBox(height: T.s3),
-          if (isYearView) ...[
-            _YearSummary(year: yearSummary!),
-            const SizedBox(height: T.s2),
-            _navRow('$year年'),
-            const SizedBox(height: T.s2),
-            _YearGrid(year: year, earnings: earnings, onTapMonth: onOpenMonth),
-          ] else ...[
-            _MonthSummary(month: monthSummary),
-            const SizedBox(height: T.s2),
-            _navRow('$year年$month月'),
-            const SizedBox(height: T.s2),
-            Row(
-              children: [
-                for (final w in _weekdays)
-                  Expanded(child: Center(child: Text(w, style: T.label()))),
-              ],
-            ),
-            const SizedBox(height: T.s1),
-            _buildGrid(
-              context,
-              leadingBlanks: leadingBlanks,
-              daysInMonth: daysInMonth,
-              byDate: byDate,
-              minProfit: minProfit,
-              maxProfit: maxProfit,
-            ),
-          ],
             const SizedBox(height: T.s3),
-            Text('盈亏 = 当日净资产 − 前日净资产；负债变动不计入当日盈亏', style: T.label()),
+            if (isYearView) ...[
+              _YearSummary(year: yearSummary!),
+              const SizedBox(height: T.s2),
+              _navRow('$year年'),
+              const SizedBox(height: T.s2),
+              _YearGrid(
+                year: year,
+                earnings: earnings,
+                onTapMonth: onOpenMonth,
+              ),
+            ] else ...[
+              _MonthSummary(month: monthSummary),
+              const SizedBox(height: T.s2),
+              _navRow('$year年$month月'),
+              const SizedBox(height: T.s2),
+              Row(
+                children: [
+                  for (final w in _weekdays)
+                    Expanded(
+                      child: Center(child: Text(w, style: T.label())),
+                    ),
+                ],
+              ),
+              const SizedBox(height: T.s1),
+              _buildGrid(
+                context,
+                leadingBlanks: leadingBlanks,
+                daysInMonth: daysInMonth,
+                byDate: byDate,
+                minProfit: minProfit,
+                maxProfit: maxProfit,
+              ),
+              if (selectedDate != null) ...[
+                const SizedBox(height: T.s3),
+                _DayEarningsPanel(date: selectedDate!),
+              ],
+            ],
+            const SizedBox(height: T.s3),
+            Text(
+              '盈亏 = 当日净资产 − 前日净资产；负债变动不计入当日盈亏；点击日期查看当日各产品收益',
+              style: T.label(),
+            ),
           ],
-          ),
         ),
-      );
-    }
+      ),
+    );
+  }
 
   Widget _navRow(String label) {
     return Row(
@@ -201,7 +236,10 @@ class _CalendarBody extends StatelessWidget {
         SizedBox(
           width: 96,
           child: Center(
-            child: Text(label, style: T.mono(size: 14, weight: FontWeight.w600)),
+            child: Text(
+              label,
+              style: T.mono(size: 14, weight: FontWeight.w600),
+            ),
           ),
         ),
         IconButton(onPressed: onNext, icon: const Icon(Icons.chevron_right)),
@@ -238,7 +276,12 @@ class _CalendarBody extends StatelessWidget {
               date: date,
               minProfit: minProfit,
               maxProfit: maxProfit,
-              onTap: earning == null ? null : () => _openDay(context, date),
+              selected:
+                  selectedDate != null &&
+                  selectedDate!.year == date.year &&
+                  selectedDate!.month == date.month &&
+                  selectedDate!.day == date.day,
+              onTap: earning == null ? null : () => onDayTap?.call(date),
             ),
           );
           day++;
@@ -248,19 +291,8 @@ class _CalendarBody extends StatelessWidget {
     }
     return Table(
       defaultVerticalAlignment: TableCellVerticalAlignment.middle,
-      columnWidths: {
-        for (var i = 0; i < 7; i++) i: const FlexColumnWidth(),
-      },
+      columnWidths: {for (var i = 0; i < 7; i++) i: const FlexColumnWidth()},
       children: rows,
-    );
-  }
-
-  void _openDay(BuildContext context, DateTime date) {
-    showModalBottomSheet(
-      context: context,
-      showDragHandle: true,
-      isScrollControlled: true,
-      builder: (_) => DayDetailSheet(date: date),
     );
   }
 }
@@ -272,6 +304,7 @@ class _DayCell extends StatelessWidget {
     required this.date,
     required this.minProfit,
     required this.maxProfit,
+    this.selected = false,
     this.onTap,
   });
 
@@ -280,6 +313,7 @@ class _DayCell extends StatelessWidget {
   final DateTime date;
   final double minProfit;
   final double maxProfit;
+  final bool selected;
   final VoidCallback? onTap;
 
   @override
@@ -293,6 +327,7 @@ class _DayCell extends StatelessWidget {
       max: maxProfit,
       height: 44,
       onTap: onTap,
+      borderColor: selected ? T.accent : null,
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -309,8 +344,8 @@ class _DayCell extends StatelessWidget {
             earning == null
                 ? ''
                 : hasEarning
-                    ? '${profit >= 0 ? '+' : ''}${Formats.amountCompact(profit)}'
-                    : '0',
+                ? '${profit >= 0 ? '+' : ''}${Formats.amountCompact(profit)}'
+                : '0',
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: T.mono(
@@ -445,8 +480,18 @@ class _YearGrid extends StatelessWidget {
   final ValueChanged<int> onTapMonth;
 
   static const _monthNames = [
-    '1月', '2月', '3月', '4月', '5月', '6月',
-    '7月', '8月', '9月', '10月', '11月', '12月',
+    '1月',
+    '2月',
+    '3月',
+    '4月',
+    '5月',
+    '6月',
+    '7月',
+    '8月',
+    '9月',
+    '10月',
+    '11月',
+    '12月',
   ];
 
   @override
@@ -475,9 +520,7 @@ class _YearGrid extends StatelessWidget {
     }
     return Table(
       defaultVerticalAlignment: TableCellVerticalAlignment.middle,
-      columnWidths: {
-        for (var i = 0; i < 3; i++) i: const FlexColumnWidth(),
-      },
+      columnWidths: {for (var i = 0; i < 3; i++) i: const FlexColumnWidth()},
       children: rows,
     );
   }
@@ -503,7 +546,7 @@ class _MonthTile extends StatelessWidget {
     final frac = maxAbs == 0
         ? 0.0
         : (month.total.abs() / maxAbs).clamp(0.0, 1.0);
-    return TerminalCard(
+    final tile = TerminalCard(
       margin: EdgeInsets.zero,
       padding: const EdgeInsets.symmetric(horizontal: T.s2, vertical: T.s2),
       onTap: onTap,
@@ -516,8 +559,8 @@ class _MonthTile extends StatelessWidget {
             !hasData
                 ? '--'
                 : hasEarning
-                    ? '${month.total >= 0 ? '+' : ''}${Formats.amountCompact(month.total)}'
-                    : '0',
+                ? '${month.total >= 0 ? '+' : ''}${Formats.amountCompact(month.total)}'
+                : '0',
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: T.mono(
@@ -536,6 +579,168 @@ class _MonthTile extends StatelessWidget {
               valueColor: AlwaysStoppedAnimation(
                 hasEarning ? T.changeColor(month.total) : T.text3,
               ),
+            ),
+          ),
+        ],
+      ),
+    );
+    return tile;
+  }
+}
+
+/// Inline panel under the calendar showing each product's **day** earnings
+/// on the selected date (same cost-basis convention as the calendar:
+/// Δ(value − cost), CNY-converted, one row per product). Products that lost
+/// money that day render negative and red, so the source of a negative
+/// calendar day is directly visible.
+class _DayEarningsPanel extends ConsumerWidget {
+  const _DayEarningsPanel({required this.date});
+
+  final DateTime date;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final hideAmounts = ref.watch(hideAmountsProvider);
+    // 当天与前一天的逐持仓 (value, cost) —— 与快照回放同一口径，因此
+    // 合计严格等于收益日历格子数字（不再用 productEarnings 的独立路径，
+    // 两条路径曾彼此漂移）。
+    final todayAsync = ref.watch(dayHoldingsBreakdownProvider(date));
+    final prevDay = DateTime(date.year, date.month, date.day - 1);
+    final prevAsync = ref.watch(dayHoldingsBreakdownProvider(prevDay));
+
+    String money(double v) => hideAmounts ? Formats.masked() : Formats.money(v);
+
+    final loading = todayAsync.isLoading || prevAsync.isLoading;
+    final error = todayAsync.hasError || prevAsync.hasError
+        ? (todayAsync.error ?? prevAsync.error)
+        : null;
+    if (loading) {
+      return TerminalCard(
+        padding: const EdgeInsets.fromLTRB(T.s3, T.s3, T.s3, T.s2),
+        child: const SizedBox(
+          height: 80,
+          child: Center(child: CircularProgressIndicator()),
+        ),
+      );
+    }
+    if (error != null) {
+      return TerminalCard(
+        padding: const EdgeInsets.fromLTRB(T.s3, T.s3, T.s3, T.s2),
+        child: Row(
+          children: [
+            const Text('明细加载失败', style: TextStyle(color: T.text2)),
+            const SizedBox(width: 8),
+            TextButton(
+              onPressed: () {
+                ref.invalidate(dayHoldingsBreakdownProvider(date));
+                ref.invalidate(dayHoldingsBreakdownProvider(prevDay));
+              },
+              child: const Text('重试'),
+            ),
+          ],
+        ),
+      );
+    }
+
+    final today = todayAsync.value ?? const <DayHoldingValue>[];
+    final prev = prevAsync.value ?? const <DayHoldingValue>[];
+    // 按持仓 id 合并：当日 vs 前日的 (value − cost)。
+    final prevByHolding = {for (final p in prev) p.holdingId: p};
+    final rows = <_DayRow>[];
+    for (final t in today) {
+      if (t.liability) continue; // 负债不进入产品收益行
+      final p = prevByHolding[t.holdingId];
+      final profit = p == null ? 0.0 : (t.value - t.cost) - (p.value - p.cost);
+      rows.add(
+        _DayRow(name: t.name, type: t.type, value: t.value, profit: profit),
+      );
+    }
+    rows.sort((a, b) => b.profit.compareTo(a.profit));
+    final totalProfit = rows.fold(0.0, (s, r) => s + r.profit);
+    if (rows.isEmpty) {
+      return TerminalCard(
+        padding: const EdgeInsets.fromLTRB(T.s3, T.s3, T.s3, T.s2),
+        child: const SizedBox(
+          height: 60,
+          child: Center(
+            child: Text('当日无产品数据', style: TextStyle(color: T.text3)),
+          ),
+        ),
+      );
+    }
+    return TerminalCard(
+      padding: const EdgeInsets.fromLTRB(T.s3, T.s3, T.s3, T.s2),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '${Formats.date(date)} 产品收益（当日）',
+            style: const TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+              color: T.text1,
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            '合计 ${totalProfit >= 0 ? '+' : ''}${money(totalProfit)}'
+            ' · 与本日历当日一致',
+            style: T.mono(size: 11, color: T.text3),
+          ),
+          const SizedBox(height: T.s2),
+          for (final r in rows) _DayRowTile(row: r, money: money),
+        ],
+      ),
+    );
+  }
+}
+
+class _DayRow {
+  const _DayRow({
+    required this.name,
+    required this.type,
+    required this.value,
+    required this.profit,
+  });
+
+  final String name;
+  final AssetType type;
+  final double value;
+  final double profit;
+}
+
+class _DayRowTile extends StatelessWidget {
+  const _DayRowTile({required this.row, required this.money});
+
+  final _DayRow row;
+  final String Function(double) money;
+
+  @override
+  Widget build(BuildContext context) {
+    final hasProfit = row.profit != 0;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 5),
+      child: Row(
+        children: [
+          Icon(row.type.icon, size: 16, color: row.type.color),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              row.name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 13, color: T.text1),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            hasProfit
+                ? '${row.profit >= 0 ? '+' : ''}${money(row.profit)}'
+                : '--',
+            style: T.mono(
+              size: 13,
+              weight: FontWeight.w600,
+              color: hasProfit ? T.changeColor(row.profit) : T.text3,
             ),
           ),
         ],

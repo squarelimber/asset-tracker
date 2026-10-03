@@ -86,14 +86,15 @@ class HistoryBackfillService {
     this._dao, {
     Map<MarketSource, HistoryDataSource>? sources,
     MarketService? market,
-  }) : _sources = sources ??
-            {
-              MarketSource.eastmoney: EastmoneyHistorySource(),
-              // Tencent qfq (adjusted) klines keep unit splits/ex-rights
-              // continuous over time, so backfilled history has no jumps.
-              MarketSource.sina: TencentHistorySource(),
-              MarketSource.sge: XauGoldHistorySource(),
-            } {
+  }) : _sources =
+           sources ??
+           {
+             MarketSource.eastmoney: EastmoneyHistorySource(),
+             // Tencent qfq (adjusted) klines keep unit splits/ex-rights
+             // continuous over time, so backfilled history has no jumps.
+             MarketSource.sina: TencentHistorySource(),
+             MarketSource.sge: XauGoldHistorySource(),
+           } {
     _market = market;
   }
 
@@ -150,7 +151,10 @@ class HistoryBackfillService {
   /// By default only missing days are filled. With [forceRebuild], the whole
   /// window (including already-snapshot days) is recomputed and overwritten,
   /// which merges newly added / edited / removed holdings into the history.
-  Future<BackfillResult> backfill({DateTime? now, bool forceRebuild = false}) async {
+  Future<BackfillResult> backfill({
+    DateTime? now,
+    bool forceRebuild = false,
+  }) async {
     // The Sina/Eastmoney history endpoints have no CORS support; the web
     // build cannot backfill history. Use the desktop/mobile app for this.
     if (kIsWeb) {
@@ -166,7 +170,12 @@ class HistoryBackfillService {
 
     final holdings = await _dao.getHoldings();
     if (holdings.isEmpty) {
-      return const BackfillResult(ok: false, days: 0, holdings: 0, message: '暂无持仓');
+      return const BackfillResult(
+        ok: false,
+        days: 0,
+        holdings: 0,
+        message: '暂无持仓',
+      );
     }
 
     // Earliest purchase date across holdings defines the window start.
@@ -175,7 +184,9 @@ class HistoryBackfillService {
       final d = h.purchaseDate ?? h.createdAt;
       if (earliest == null || d.isBefore(earliest)) earliest = d;
     }
-    if (earliest == null) return const BackfillResult(ok: false, days: 0, holdings: 0);
+    if (earliest == null) {
+      return const BackfillResult(ok: false, days: 0, holdings: 0);
+    }
     final windowStart = earliest;
 
     // Current FX rates for converting foreign-currency holdings to CNY
@@ -203,7 +214,8 @@ class HistoryBackfillService {
         days: 0,
         holdings: 0,
         historyUnavailable: true,
-        message: '缺少汇率（${missingRates.join('、')}），本次未写入任何快照，'
+        message:
+            '缺少汇率（${missingRates.join('、')}），本次未写入任何快照，'
             '请检查网络后重试',
       );
     }
@@ -336,8 +348,8 @@ class HistoryBackfillService {
 
     final firstTimeRebuild =
         await _dao.getSetting(_backfillV3Marker) == null ||
-            await _dao.getSetting(_shareReplayMarker) == null ||
-            await _dao.getSetting(_smoothShareReplayMarker) == null;
+        await _dao.getSetting(_shareReplayMarker) == null ||
+        await _dao.getSetting(_smoothShareReplayMarker) == null;
     // A type switch that crossed the amount-based boundary changes the
     // *meaning* of the stored numbers (see holding_type_conversion.dart); the
     // days written under the old semantics must not survive a light run (a
@@ -364,16 +376,19 @@ class HistoryBackfillService {
       // the first launch after upgrading re-derives just one day and leaves a
       // frozen day (the bug being repaired) in place for good.
       lastRun = _parseDay(await _dao.getSetting(_lastRunKey));
-      var reopenFrom = lastRun ??
+      var reopenFrom =
+          lastRun ??
           DateTime(
             todayDate.year,
             todayDate.month,
             todayDate.day - _firstRunLookbackDays,
           );
       if (reopenFrom.isAfter(todayDate)) reopenFrom = todayDate;
-      for (var d = reopenFrom;
-          !d.isAfter(todayDate);
-          d = d.add(const Duration(days: 1))) {
+      for (
+        var d = reopenFrom;
+        !d.isAfter(todayDate);
+        d = d.add(const Duration(days: 1))
+      ) {
         existingDates.remove(todayKey(d));
       }
     }
@@ -419,14 +434,23 @@ class HistoryBackfillService {
           // together and transfers never leak into the daily return.
           final principal = type.isAmountBased
               ? (smoothPrincipals[h.id]?[key] ??
-                  (h.costPrice > 0 ? h.costPrice : h.quantity))
+                    (h.costPrice > 0 ? h.costPrice : h.quantity))
               // Replayed total cost for share-based smoothed holdings too.
               : (replays[h.id]?[key]?.$2 ?? h.quantity * h.costPrice);
           cost += principal * costRateOf(h, cnyRates);
           continue;
         }
         final filler = fillers[h.id];
-        final price = filler?.priceOnOrBefore(key) ?? h.latestPrice;
+        final hist = filler?.priceOnOrBefore(key);
+        // TODAY prices with the LIVE latest price, unconditionally (mirroring
+        // [dayHoldingsBreakdown]): after a refresh the cached quote is newer
+        // than the history series and is exactly the figure the portfolio
+        // page / live snapshot shows — so the last day of a rebuild sums to
+        // the same numbers. Whether the history series already contains
+        // today's close is irrelevant (it may also lag midday). Historical
+        // days keep the forward-fill semantics.
+        final isToday = key == todayKey(todayDate);
+        final price = isToday ? h.latestPrice : (hist ?? h.latestPrice);
         if (price > 0) hasPrice = true;
         // Historical quantity/cost from the flow replay: a sold-out fund
         // still shows its real market value on the days it was held (v8).
@@ -442,21 +466,24 @@ class HistoryBackfillService {
           // Amount-based assets store the cumulative invested amount in
           // costPrice; share-based ones use the replayed total cost (unit
           // cost moves through buys/sells/dividends/splits).
-          cost += (type.isAmountBased
+          cost +=
+              (type.isAmountBased
                   ? (h.costPrice > 0 ? h.costPrice : h.quantity)
                   : replayed?.$2 ?? shares * h.costPrice) *
               costRateOf(h, cnyRates);
         }
       }
       if (hasPrice) {
-        rows.add(SnapshotRow(
-          date: key,
-          currency: 'CNY',
-          totalValue: assets - liabilities,
-          totalCost: cost,
-          liabilities: liabilities,
-          createdAt: current,
-        ));
+        rows.add(
+          SnapshotRow(
+            date: key,
+            currency: 'CNY',
+            totalValue: assets - liabilities,
+            totalCost: cost,
+            liabilities: liabilities,
+            createdAt: current,
+          ),
+        );
       }
       day = day.add(const Duration(days: 1));
     }
@@ -472,9 +499,18 @@ class HistoryBackfillService {
     }
     // Mark the one-time rebuild done only after a successful swap.
     if (firstTimeRebuild) {
-      await _dao.setSetting(_backfillV3Marker, '${current.millisecondsSinceEpoch}');
-      await _dao.setSetting(_shareReplayMarker, '${current.millisecondsSinceEpoch}');
-      await _dao.setSetting(_smoothShareReplayMarker, '${current.millisecondsSinceEpoch}');
+      await _dao.setSetting(
+        _backfillV3Marker,
+        '${current.millisecondsSinceEpoch}',
+      );
+      await _dao.setSetting(
+        _shareReplayMarker,
+        '${current.millisecondsSinceEpoch}',
+      );
+      await _dao.setSetting(
+        _smoothShareReplayMarker,
+        '${current.millisecondsSinceEpoch}',
+      );
     }
     // Clear the forced-full-rebuild marker only after the swap succeeded,
     // so a run aborted by a network failure retries the full rebuild next
@@ -516,4 +552,194 @@ class HistoryBackfillService {
     if (year == null || month == null || day == null) return null;
     return DateTime(year, month, day);
   }
+
+  static bool _isSameDay(DateTime a, DateTime b) =>
+      a.year == b.year && a.month == b.month && a.day == b.day;
+
+  /// Per-holding (value, cost) on [day], in CNY, computed with the EXACT
+  /// same pricing/replay rules as [backfill] — the day-detail panel under
+  /// the earnings calendar uses this so its per-product sum equals the
+  /// calendar cell (they previously drifted via a separate
+  /// ProductEarningsService path). Returns one entry per holding owned on
+  /// [day]; liabilities carry [DayHoldingValue.liability] == true.
+  Future<List<DayHoldingValue>> dayHoldingsBreakdown(DateTime day) async {
+    final holdings = await _dao.getHoldings();
+    if (holdings.isEmpty) return const [];
+    final target = DateTime(day.year, day.month, day.day);
+    // A FIXED window start (the earliest holding purchase), identical to
+    // [backfill]. Smooth/interpolated holdings price the day by its index
+    // within this single window, so querying two consecutive days uses the
+    // SAME interpolation and their difference is the day's change. Using the
+    // queried day as the window start (as first written) made every smoothed
+    // holding price day D at its window's first index — i.e. at the cost
+    // price — while today priced at the latest price, so the panel showed the
+    // all-time gain instead of the day change (2026-10-02 汇利日盈 +1718.64).
+    DateTime? earliest;
+    for (final h in holdings) {
+      final d = h.purchaseDate ?? h.createdAt;
+      if (earliest == null || d.isBefore(earliest)) earliest = d;
+    }
+    final windowStart = earliest ?? target;
+    final current = DateTime.now();
+
+    final currencies = holdings
+        .where((h) => h.currency != 'CNY' && !isFxLinked(h))
+        .map((h) => h.currency)
+        .toSet()
+        .toList();
+    final market = _market;
+    final cnyRates = market == null
+        ? const <String, double>{}
+        : await market.loadCnyRates(currencies);
+
+    final smoothCalc = const SmoothHistoryCalculator();
+    final smoothValues = <int, Map<String, double>>{};
+    final smoothPrincipals = <int, Map<String, double>>{};
+    final fillers = <int, HistoryPriceLookup>{};
+    final replays = <int, Map<String, (double, double)>>{};
+    final soldPrincipalById = <int, double>{};
+    final futures = <Future<void>>[];
+
+    for (final h in holdings) {
+      final type = AssetType.fromStorage(h.assetType);
+      final source = MarketSource.fromStorage(h.marketSource);
+      if (isSmoothedHolding(h)) {
+        if (!type.isAmountBased) {
+          final flows = await _dao.getTransactionsForHolding(h.id);
+          replays[h.id] = const HoldingReplay().replay(
+            h,
+            flows,
+            from: windowStart,
+            to: current,
+            capturedSellPrincipal: soldPrincipalById,
+          );
+        }
+        continue;
+      }
+      final adapter = _sources[source];
+      if (adapter == null) continue;
+      var rawSymbol = (h.symbol != null && h.symbol!.isNotEmpty)
+          ? h.symbol!
+          : type.defaultSymbol;
+      if (rawSymbol == null) continue;
+      if (source == MarketSource.sina) {
+        rawSymbol = normalizeSinaSymbol(rawSymbol);
+      }
+      final symbol = rawSymbol;
+      final flows = await _dao.getTransactionsForHolding(h.id);
+      replays[h.id] = const HoldingReplay().replay(
+        h,
+        flows,
+        from: windowStart,
+        to: current,
+        capturedSellPrincipal: soldPrincipalById,
+      );
+      futures.add(() async {
+        try {
+          final history = await adapter.fetch(symbol, windowStart, current);
+          if (history.isNotEmpty) fillers[h.id] = HistoryPriceLookup(history);
+        } catch (_) {
+          // Ignore a single source failure; fall back to latest price below.
+        }
+      }());
+    }
+    await Future.wait(futures);
+
+    for (final h in holdings) {
+      if (!isSmoothedHolding(h)) continue;
+      if (!AssetType.fromStorage(h.assetType).isAmountBased) continue;
+      final flows = await _dao.getTransactionsForHolding(h.id);
+      smoothValues[h.id] = smoothCalc.amountHistory(
+        h,
+        flows,
+        from: windowStart,
+        to: current,
+        today: current,
+      );
+      smoothPrincipals[h.id] = smoothCalc.amountPrincipal(
+        h,
+        flows,
+        from: windowStart,
+        to: current,
+        soldPrincipalById: soldPrincipalById,
+      );
+    }
+
+    final key = todayKey(target);
+    final out = <DayHoldingValue>[];
+    for (final h in holdings) {
+      final buy = h.purchaseDate ?? h.createdAt;
+      final buyDay = DateTime(buy.year, buy.month, buy.day);
+      if (target.isBefore(buyDay)) continue;
+      final type = AssetType.fromStorage(h.assetType);
+      final double value;
+      final double cost;
+      if (isSmoothedHolding(h)) {
+        final double v;
+        if (type.isAmountBased) {
+          v = smoothValues[h.id]?[key] ?? h.quantity;
+        } else {
+          final price = smoothCalc.sharePrice(h, target, windowStart, current);
+          final replayed = replays[h.id]?[key];
+          final qty = replayed?.$1 ?? h.quantity;
+          v = qty * price;
+        }
+        value = v * valueRateOf(h, cnyRates);
+        final principal = type.isAmountBased
+            ? (smoothPrincipals[h.id]?[key] ??
+                  (h.costPrice > 0 ? h.costPrice : h.quantity))
+            : (replays[h.id]?[key]?.$2 ?? h.quantity * h.costPrice);
+        cost = principal * costRateOf(h, cnyRates);
+      } else {
+        final filler = fillers[h.id];
+        final hist = filler?.priceOnOrBefore(key);
+        // TODAY prices with the LIVE latest price, unconditionally — the
+        // same rule [backfill] uses, so the day detail sums to the snapshot
+        // the rebuild wrote. Historical days keep forward-fill semantics.
+        final price = _isSameDay(target, DateTime.now())
+            ? h.latestPrice
+            : (hist ?? h.latestPrice);
+        final replayed = replays[h.id]?[key];
+        final shares = replayed?.$1 ?? h.quantity;
+        value = shares * price * valueRateOf(h, cnyRates);
+        cost =
+            (type.isAmountBased
+                ? (h.costPrice > 0 ? h.costPrice : h.quantity)
+                : replayed?.$2 ?? shares * h.costPrice) *
+            costRateOf(h, cnyRates);
+      }
+      out.add(
+        DayHoldingValue(
+          holdingId: h.id,
+          name: h.name,
+          type: type,
+          value: value,
+          cost: cost,
+          liability: type == AssetType.liability,
+        ),
+      );
+    }
+    return out;
+  }
+}
+
+/// One holding's (market value, cost) on a specific day, in CNY — computed
+/// with the EXACT same pricing/replay rules as the net-worth snapshots, so a
+/// per-holding breakdown sums to the day's snapshot totals.
+class DayHoldingValue {
+  const DayHoldingValue({
+    required this.holdingId,
+    required this.name,
+    required this.type,
+    required this.value,
+    required this.cost,
+    required this.liability,
+  });
+
+  final int holdingId;
+  final String name;
+  final AssetType type;
+  final double value;
+  final double cost;
+  final bool liability;
 }

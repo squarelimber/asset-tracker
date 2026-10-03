@@ -1,4 +1,4 @@
-﻿import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_test/flutter_test.dart';
 
 import 'package:asset_tracker/sync/sync_format.dart';
 import 'package:asset_tracker/sync/sync_merge.dart';
@@ -267,6 +267,111 @@ void main() {
       localTombstones: const [],
     );
     expect(out.tables[SyncTables.snapshots], hasLength(2));
+  });
+
+  test('同一逻辑持仓在两设备自增id不同 → merge 后应去重', () {
+    // 场景：手机端建仓黄金ETF id=58；服务器端（历史/另一设备）也有一份
+    // 同一持仓但 id=99。rowKey 用自增 id，merge 会视为两条 → 复现
+    // 「同步后多出重复黄金ETF」。
+    final localSnap = {
+      SyncTables.holdings: [
+        {
+          ..._holding(58),
+          'name': '黄金ETF',
+          'symbol': '518880',
+          'assetType': 'etf',
+          'quantity': 4900.0,
+          'costPrice': 8.986,
+          'updatedAt': '2026-10-01T00:00:00.000Z',
+        },
+      ],
+    };
+    final remoteSnap = {
+      SyncTables.holdings: [
+        {
+          ..._holding(99),
+          'name': '黄金ETF',
+          'symbol': '518880',
+          'assetType': 'etf',
+          'quantity': 4900.0,
+          'costPrice': 8.986,
+          'updatedAt': '2026-09-30T00:00:00.000Z',
+        },
+      ],
+    };
+    final out = merger.merge(
+      local: localSnap,
+      remote: remoteSnap,
+      remoteTombstones: const [],
+      localTombstones: const [],
+    );
+    // 同一逻辑持仓应合并为一条（同一 symbol+name+account 视为同一实体）。
+    // 当前实现按自增 id 去重 → 会留下两条（bug 复现点）。
+    final rows = out.tables[SyncTables.holdings]!;
+    // ignore: avoid_print
+    print('merge 后持仓行数: ${rows.length} '
+        'ids: ${rows.map((r) => r['id']).toList()}');
+    expect(
+      rows.length,
+      1,
+      reason: '同一黄金ETF落在两设备不同自增id，同步后应去重为一条，'
+          '否则出现重复持仓并污染曲线',
+    );
+  });
+
+  test('同 id 流水不同 updatedAt 的冲突按 LWW 合并为一条', () {
+    final local = {
+      SyncTables.transactions: [
+        {
+          'id': 48,
+          'accountId': 5,
+          'holdingId': 58,
+          'cashSourceId': 23,
+          'cashTargetId': null,
+          'type': 'buy',
+          'quantity': 4900.0,
+          'price': 8.986,
+          'amount': 44031.4,
+          'currency': 'CNY',
+          'occurredAt': '2026-09-21T00:00:00.000Z',
+          'note': 'gold buy',
+          'costMoved': null,
+          'costMovedAmount': 44031.4,
+          'internalMove': false,
+          'updatedAt': '2026-10-01T08:00:00.000Z',
+        },
+      ],
+    };
+    final remote = {
+      SyncTables.transactions: [
+        {
+          'id': 48,
+          'accountId': 5,
+          'holdingId': 58,
+          'cashSourceId': 23,
+          'cashTargetId': null,
+          'type': 'buy',
+          'quantity': 4900.0,
+          'price': 8.986,
+          'amount': 44031.4,
+          'currency': 'CNY',
+          'occurredAt': '2026-09-21T00:00:00.000Z',
+          'note': 'gold buy',
+          'costMoved': null,
+          'costMovedAmount': 44031.4,
+          'internalMove': false,
+          'updatedAt': '2026-10-01T09:00:00.000Z',
+        },
+      ],
+    };
+    final out = merger.merge(
+      local: local,
+      remote: remote,
+      remoteTombstones: const [],
+      localTombstones: const [],
+    );
+    expect(out.tables[SyncTables.transactions], hasLength(1),
+        reason: '同 id 流水 LWW 只保留一条');
   });
 }
 

@@ -27,12 +27,13 @@ class ProductEarningsService {
     this._dao, {
     Map<MarketSource, HistoryDataSource>? sources,
     MarketService? market,
-  }) : _sources = sources ??
-            {
-              MarketSource.eastmoney: EastmoneyHistorySource(),
-              MarketSource.sina: TencentHistorySource(),
-              MarketSource.sge: XauGoldHistorySource(),
-            } {
+  }) : _sources =
+           sources ??
+           {
+             MarketSource.eastmoney: EastmoneyHistorySource(),
+             MarketSource.sina: TencentHistorySource(),
+             MarketSource.sge: XauGoldHistorySource(),
+           } {
     _market = market;
   }
 
@@ -66,10 +67,12 @@ class ProductEarningsService {
     // affected holdings instead of showing a wrong number beside right ones.
     final missingFx = missingCnyRates(currencies, cnyRates).toSet();
     final skippedFx = holdings
-        .where((h) =>
-            h.currency != 'CNY' &&
-            !isFxLinked(h) &&
-            missingFx.contains(h.currency.toUpperCase()))
+        .where(
+          (h) =>
+              h.currency != 'CNY' &&
+              !isFxLinked(h) &&
+              missingFx.contains(h.currency.toUpperCase()),
+        )
         .map((h) => h.id)
         .toSet();
 
@@ -89,10 +92,19 @@ class ProductEarningsService {
       if (isSmoothedHolding(h)) {
         final flows = await _dao.getTransactionsForHolding(h.id);
         if (type.isAmountBased) {
-          smoothValues[h.id] =
-              smoothCalc.amountHistory(h, flows, from: from, to: current, today: current);
-          smoothPrincipals[h.id] =
-              smoothCalc.amountPrincipal(h, flows, from: from, to: current);
+          smoothValues[h.id] = smoothCalc.amountHistory(
+            h,
+            flows,
+            from: from,
+            to: current,
+            today: current,
+          );
+          smoothPrincipals[h.id] = smoothCalc.amountPrincipal(
+            h,
+            flows,
+            from: from,
+            to: current,
+          );
         } else {
           // Share-based smoothed holdings (manual-NAV / FX-linked bank
           // wealth) replay their flows too, so a partial redemption does not
@@ -143,28 +155,34 @@ class ProductEarningsService {
           final principals = smoothPrincipals[h.id] ?? const <String, double>{};
           final dates = values.keys.toList()..sort();
           for (final key in dates) {
-            days.add(HoldingDay(
-              date: key,
-              value: values[key]! * valueRate,
-              cost: (principals[key] ?? h.quantity) * costRate,
-            ));
+            days.add(
+              HoldingDay(
+                date: key,
+                value: values[key]! * valueRate,
+                cost: (principals[key] ?? h.quantity) * costRate,
+              ),
+            );
           }
         } else {
           final replayMap = replays[h.id] ?? const <String, (double, double)>{};
-          for (var day = DateTime(from.year, from.month, from.day);
-              !day.isAfter(current);
-              day = day.add(const Duration(days: 1))) {
+          for (
+            var day = DateTime(from.year, from.month, from.day);
+            !day.isAfter(current);
+            day = day.add(const Duration(days: 1))
+          ) {
             final key = todayKey(day);
             final price = smoothCalc.sharePrice(h, day, from, current);
             // The replayed quantity/cost, so pre-redemption days keep the
             // pre-redemption position.
             final rc = replayMap[key];
             final qty = rc?.$1 ?? h.quantity;
-            days.add(HoldingDay(
-              date: key,
-              value: qty * price * valueRate,
-              cost: (rc?.$2 ?? qty * h.costPrice) * costRate,
-            ));
+            days.add(
+              HoldingDay(
+                date: key,
+                value: qty * price * valueRate,
+                cost: (rc?.$2 ?? qty * h.costPrice) * costRate,
+              ),
+            );
           }
         }
       } else {
@@ -182,31 +200,47 @@ class ProductEarningsService {
             // so mark the pre-sell position at the recorded sell price —
             // the realized gain then shows up as this day's profit.
             final pre = i > 0 ? replayMap[keys[i - 1]]! : rc;
-            days.add(HoldingDay(
-              date: key,
-              value: pre.$1 * mark * valueRate,
-              cost: pre.$2 * costRate,
-            ));
+            days.add(
+              HoldingDay(
+                date: key,
+                value: pre.$1 * mark * valueRate,
+                cost: pre.$2 * costRate,
+              ),
+            );
             continue;
           }
           if (rc.$1 <= 0) continue;
-          final price = filler.priceOnOrBefore(key);
+          // Prefer the live latest price for TODAY when the history feed
+          // lags behind (e.g. NAV published after the kline updated, or a
+          // market holiday where gold/FX still trade): the day detail then
+          // matches the snapshot/calendar total. Historical days keep the
+          // forward-fill semantics.
+          final isToday = _isSameDay(DateTime.now(), DateTime.parse(key));
+          final price = isToday
+              ? (h.latestPrice > 0
+                    ? h.latestPrice
+                    : filler.priceOnOrBefore(key))
+              : filler.priceOnOrBefore(key);
           if (price == null || price <= 0) continue;
-          days.add(HoldingDay(
-            date: key,
-            value: rc.$1 * price * valueRate,
-            cost: rc.$2 * costRate,
-          ));
+          days.add(
+            HoldingDay(
+              date: key,
+              value: rc.$1 * price * valueRate,
+              cost: rc.$2 * costRate,
+            ),
+          );
         }
       }
       if (days.isEmpty) continue;
-      seriesList.add(HoldingSeries(
-        holdingId: h.id,
-        name: h.name,
-        type: type,
-        closed: closed,
-        days: days,
-      ));
+      seriesList.add(
+        HoldingSeries(
+          holdingId: h.id,
+          name: h.name,
+          type: type,
+          closed: closed,
+          days: days,
+        ),
+      );
     }
 
     final products = calc.compute(seriesList);
@@ -217,6 +251,11 @@ class ProductEarningsService {
     });
     return products;
   }
+
+  /// Sell days -> per-unit sale price (amount / quantity), used to mark the
+  /// position at the sell price on the sell day.
+  static bool _isSameDay(DateTime a, DateTime b) =>
+      a.year == b.year && a.month == b.month && a.day == b.day;
 
   /// Sell days -> per-unit sale price (amount / quantity), used to mark the
   /// position at the sell price on the sell day.

@@ -2,17 +2,21 @@ import 'sync_format.dart';
 
 /// A tombstone entry as transmitted over the wire.
 class TombstoneEntry {
-  const TombstoneEntry({required this.table, required this.rowKey, required this.deletedAt});
+  const TombstoneEntry({
+    required this.table,
+    required this.rowKey,
+    required this.deletedAt,
+  });
 
   final String table;
   final String rowKey;
   final DateTime deletedAt;
 
   Map<String, dynamic> toJson() => {
-        'table': table,
-        'rowKey': rowKey,
-        'deletedAt': deletedAt.toIso8601String(),
-      };
+    'table': table,
+    'rowKey': rowKey,
+    'deletedAt': deletedAt.toIso8601String(),
+  };
 
   static TombstoneEntry? fromJson(Object? value) {
     if (value is! Map<String, dynamic>) return null;
@@ -150,6 +154,22 @@ class SyncMerger {
       }
     }
 
+    // Holdings 实体级去重：同一账户 + 同一行情代码（symbol 非空时）的
+    // 多个持仓视为同一实体。跨设备自增 id 不同会导致 merge 把同一持仓
+    // 当成两条保留——正是「同步后多出重复黄金ETF」的根源（row key 是
+    // 自增 id，无法跨设备识别同一实体）。这里合并为一条（保留
+    // updatedAt 最新），避免重复持仓污染净值曲线。
+    final deduped = _dedupeHoldings(tables[SyncTables.holdings] ?? const []);
+    if (deduped.rows.length !=
+        (tables[SyncTables.holdings] ?? const []).length) {
+      tables[SyncTables.holdings] = deduped.rows;
+      deletedKeys[SyncTables.holdings] = [
+        ...?deletedKeys[SyncTables.holdings],
+        ...deduped.removedKeys,
+      ];
+      dataChanged = true;
+    }
+
     // Drop a tombstone when the merged row is alive and newer than the
     // tombstone (the row win is propagated by simply not carrying the
     // tombstone).
@@ -187,8 +207,7 @@ class SyncMerger {
       for (final r in remoteRows) syncRowKey(table, r): r,
     };
     final tombstoneByKey = {
-      for (final t in tombstones.where((t) => t.table == table))
-        t.rowKey: t,
+      for (final t in tombstones.where((t) => t.table == table)) t.rowKey: t,
     };
 
     final merged = <String, Map<String, dynamic>>{};
@@ -207,7 +226,7 @@ class SyncMerger {
         // The tombstone wins when no live row is newer than it.
         final tombWins =
             (localTs == null || !localTs.isAfter(tombstone.deletedAt)) &&
-                (remoteTs == null || !remoteTs.isAfter(tombstone.deletedAt));
+            (remoteTs == null || !remoteTs.isAfter(tombstone.deletedAt));
         if (tombWins) {
           if (local != null) {
             deleteKeys.add(key);
@@ -220,7 +239,9 @@ class SyncMerger {
         final winner = _newerOf(local, remote);
         if (winner != null) {
           merged[key] = winner;
-          if (local != null && remote != null && !_same(local, remote)) conflicts++;
+          if (local != null && remote != null && !_same(local, remote)) {
+            conflicts++;
+          }
           if (local == null || !_same(local, winner)) changed++;
         }
         continue;
@@ -308,9 +329,58 @@ class SyncMerger {
     return x == y;
   }
 
-  static List<Map<String, dynamic>> _rowsOf(Map<String, dynamic> snapshot, String table) {
+  static List<Map<String, dynamic>> _rowsOf(
+    Map<String, dynamic> snapshot,
+    String table,
+  ) {
     final v = snapshot[table];
     if (v is! List) return const [];
     return v.whereType<Map<String, dynamic>>().toList();
+  }
+
+  /// Deduplicates holdings that represent the SAME market instrument in the
+  /// SAME account but carry different local auto-increment ids (one per
+  /// device). The LWW key is the numeric id, so without this a device's
+  /// "黄金ETF 518880" and the server's copy of it survive the merge as two
+  /// rows — the duplicated holding behind a sync-triggered net-worth jump.
+  ///
+  /// Identity: same `accountId` AND same non-empty `symbol` (the market
+  /// code uniquely identifies an instrument; manual assets with no code stay
+  /// untouched — name-based matching would wrongly merge two manual funds
+  /// with the same display name in the same account). Among the duplicates,
+  /// the row with the newest `updatedAt` wins; the others' keys are returned
+  /// for deletion (and are not pushed back).
+  static ({List<Map<String, dynamic>> rows, List<String> removedKeys})
+  _dedupeHoldings(List<Map<String, dynamic>> rows) {
+    if (rows.length < 2) return (rows: rows, removedKeys: const []);
+    final removed = <String>[];
+    final index = <String, Map<String, dynamic>>{};
+    final out = <Map<String, dynamic>>[];
+    for (final row in rows) {
+      final symbol = row['symbol'];
+      if (symbol == null || '$symbol'.isEmpty) {
+        out.add(row);
+        continue;
+      }
+      final key = '${row['accountId']}|$symbol';
+      final existing = index[key];
+      if (existing == null) {
+        index[key] = row;
+        out.add(row);
+        continue;
+      }
+      // Same instrument in the same account: keep the newer.
+      final keep = _newerOf(existing, row)!;
+      final drop = identical(keep, existing) ? row : existing;
+      if (identical(keep, existing)) {
+        index[key] = keep;
+      } else {
+        index[key] = keep;
+        out.remove(existing);
+        out.add(keep);
+      }
+      removed.add('${drop['id']}');
+    }
+    return (rows: out, removedKeys: removed);
   }
 }

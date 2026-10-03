@@ -77,18 +77,15 @@ class SmoothHistoryCalculator {
       // withdrawal (interpolating would do exactly that, and for a
       // zero-length span it would hand it the whole accrued gain).
       final empty = s.principal <= 0;
-      for (var d = s.start;
-          !d.isAfter(s.end) && !d.isAfter(dayTo);
-          d = d.add(const Duration(days: 1))) {
+      for (
+        var d = s.start;
+        !d.isAfter(s.end) && !d.isAfter(dayTo);
+        d = d.add(const Duration(days: 1))
+      ) {
         final index = d.difference(s.start).inDays;
         result[todayKey(d)] = empty
             ? 0
-            : geometricInterpolate(
-                startValue,
-                endValue,
-                index,
-                s.days,
-              );
+            : geometricInterpolate(startValue, endValue, index, s.days);
       }
     }
     // When [to] is today (or later), the final day is exactly the current
@@ -132,13 +129,31 @@ class SmoothHistoryCalculator {
   }) {
     final result = <String, double>{};
     final dayTo = _dayOf(to);
-    for (final s in _principalSegments(h, flows,
-        from: from, to: to, soldPrincipalById: soldPrincipalById)) {
-      for (var d = s.start;
-          !d.isAfter(s.end) && !d.isAfter(dayTo);
-          d = d.add(const Duration(days: 1))) {
+    for (final s in _principalSegments(
+      h,
+      flows,
+      from: from,
+      to: to,
+      soldPrincipalById: soldPrincipalById,
+    )) {
+      for (
+        var d = s.start;
+        !d.isAfter(s.end) && !d.isAfter(dayTo);
+        d = d.add(const Duration(days: 1))
+      ) {
         result[todayKey(d)] = s.principal;
       }
+    }
+    // Symmetric to [amountHistory]'s last-day pin. The reverse segment walk
+    // can end ABOVE the true invested amount when an intermediate dip got
+    // clamped at 0 (a flow that momentarily exceeded the replayed principal):
+    // the discarded excess then lives on in every later day's principal.
+    // Without this pin the cost side stayed inflated while the value side
+    // was already pinned to the live balance, so the day after the clamp the
+    // product's Δ(value−cost) reported a phantom loss equal to the whole
+    // clamped amount (2026-10-02 现金账户 −2,342.69 in the day-detail panel).
+    if (!to.isBefore(_dayOf(DateTime.now()))) {
+      result[todayKey(dayTo)] = h.costPrice > 0 ? h.costPrice : h.quantity;
     }
     return result;
   }
@@ -155,23 +170,22 @@ class SmoothHistoryCalculator {
   /// value side had already dropped to the current balance, which surfaced
   /// as one day of fake loss equal to the whole transfer.
   static List<({DateTime start, double principal, int days, DateTime end})>
-      _amountSegments(
+  _amountSegments(
     HoldingRow h,
     List<TransactionRow> flows, {
     required DateTime from,
     required DateTime to,
-  }) =>
-      _segmentsFor(
-        h,
-        flows,
-        from: from,
-        to: to,
-        // The *value* curve mirrors the recorded cash amount: sell proceeds
-        // credit it by the move recorded on the row (costMovedAmount for
-        // post-fix rows, the raw amount for legacy ones).
-        deltaOf: (h, t) => _flowDelta(h, t),
-        current: h.costPrice > 0 ? h.costPrice : h.quantity,
-      );
+  }) => _segmentsFor(
+    h,
+    flows,
+    from: from,
+    to: to,
+    // The *value* curve mirrors the recorded cash amount: sell proceeds
+    // credit it by the move recorded on the row (costMovedAmount for
+    // post-fix rows, the raw amount for legacy ones).
+    deltaOf: (h, t) => _flowDelta(h, t),
+    current: h.costPrice > 0 ? h.costPrice : h.quantity,
+  );
 
   /// Cost-side segments: like [_amountSegments], but a sell's proceeds
   /// credit the cash cost by the *sold principal* (see [_flowDelta]) so the
@@ -180,24 +194,23 @@ class SmoothHistoryCalculator {
   /// existed carry only the raw amount; the caller supplies the sold
   /// principal captured by the flow replay via [soldPrincipalById].
   static List<({DateTime start, double principal, int days, DateTime end})>
-      _principalSegments(
+  _principalSegments(
     HoldingRow h,
     List<TransactionRow> flows, {
     required DateTime from,
     required DateTime to,
     Map<int, double>? soldPrincipalById,
-  }) =>
-      _segmentsFor(
-        h,
-        flows,
-        from: from,
-        to: to,
-        deltaOf: (h, t) => _flowDelta(h, t, soldPrincipalById: soldPrincipalById),
-        current: h.costPrice > 0 ? h.costPrice : h.quantity,
-      );
+  }) => _segmentsFor(
+    h,
+    flows,
+    from: from,
+    to: to,
+    deltaOf: (h, t) => _flowDelta(h, t, soldPrincipalById: soldPrincipalById),
+    current: h.costPrice > 0 ? h.costPrice : h.quantity,
+  );
 
   static List<({DateTime start, double principal, int days, DateTime end})>
-      _segmentsFor(
+  _segmentsFor(
     HoldingRow h,
     List<TransactionRow> flows, {
     required DateTime from,
@@ -205,7 +218,8 @@ class SmoothHistoryCalculator {
     required double Function(HoldingRow, TransactionRow) deltaOf,
     required double current,
   }) {
-    final sorted = [...flows]..sort((a, b) => a.occurredAt.compareTo(b.occurredAt));
+    final sorted = [...flows]
+      ..sort((a, b) => a.occurredAt.compareTo(b.occurredAt));
     final events = <({DateTime at, double delta})>[];
     var deltaSum = 0.0;
     for (final t in sorted) {
@@ -214,7 +228,7 @@ class SmoothHistoryCalculator {
       deltaSum += delta;
       events.add((at: _dayOf(t.occurredAt), delta: delta));
     }
-    final startCost = (current - deltaSum).clamp(0.0, double.infinity);
+    final startCost = current - deltaSum;
 
     // Segments: (startDate, principalAtStart, days, endDate).
     final segments =
@@ -226,7 +240,11 @@ class SmoothHistoryCalculator {
       if (day.isAfter(to)) break;
       if (day.isBefore(from)) {
         // Flow before the window: just advance the principal.
-        principal = (principal + e.delta).clamp(0.0, double.infinity);
+        // NO clamp: clamping a negative excursion here discards money and
+        // leaves every later segment's principal above the truth — the
+        // 2026-10-02 现金账户 −2,342.69 phantom loss (value pinned to the
+        // real balance while the cost stayed inflated).
+        principal += e.delta;
         continue;
       }
       segStart ??= _dayOf(from);
@@ -240,7 +258,7 @@ class SmoothHistoryCalculator {
           end: end,
         ));
       }
-      principal = (principal + e.delta).clamp(0.0, double.infinity);
+      principal += e.delta;
       segStart = end;
     }
     segStart ??= _dayOf(from);
@@ -312,8 +330,8 @@ class SmoothHistoryCalculator {
           return -moved;
         }
       case TransactionType.dividend ||
-            TransactionType.consume ||
-            TransactionType.split:
+          TransactionType.consume ||
+          TransactionType.split:
         return 0;
     }
     return 0;

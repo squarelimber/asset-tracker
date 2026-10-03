@@ -13,6 +13,8 @@ import '../services/alert_notification_service.dart';
 import '../services/history_backfill_service.dart';
 import '../services/notification_service.dart';
 import '../services/market/market_service.dart';
+import '../services/market/trading_calendar_service.dart';
+import '../core/market_session.dart';
 import '../services/product_earnings_service.dart';
 import '../services/snapshot_service.dart';
 
@@ -45,7 +47,9 @@ final appVersionProvider = FutureProvider<String>((ref) async {
 });
 
 /// Data access layer.
-final daoProvider = Provider<AssetDao>((ref) => AssetDao(ref.watch(databaseProvider)));
+final daoProvider = Provider<AssetDao>(
+  (ref) => AssetDao(ref.watch(databaseProvider)),
+);
 
 /// Transaction recording / linkage engine.
 final transactionServiceProvider = Provider<TransactionService>(
@@ -73,6 +77,25 @@ final marketServiceProvider = Provider<MarketService>(
   (ref) => MarketService(ref.watch(daoProvider)),
 );
 
+/// A-share trading-day calendar fetched from Eastmoney and installed into
+/// the session helpers ([setLiveTradingDays]) so A-share session/holiday
+/// decisions use the authoritative calendar (including 调休). Reads the
+/// cached set immediately; re-fetches on the Dec 1 rollover (next year) or
+/// when the current year's entry is missing.
+final tradingCalendarProvider = FutureProvider<void>((ref) async {
+  final calendar = TradingCalendarService(ref.watch(daoProvider));
+  final now = DateTime.now();
+  // Ensure this year's calendar is fetched/cached.
+  await calendar.isTradingDay(now);
+  // December rollover: pull next year now so it is ready on Jan 1.
+  if (now.month == 12) {
+    await calendar.isTradingDay(DateTime(now.year + 1, 1, 1));
+  }
+  final all = await calendar.allTradingDays();
+  setLiveTradingDays(all.isEmpty ? null : all);
+  return;
+});
+
 /// Local notification wrapper. Shared singleton (see notification_service.dart):
 /// re-initializing the plugin would re-trigger the Android permission prompt.
 final notificationServiceProvider = Provider<NotificationService>(
@@ -95,6 +118,15 @@ final historyBackfillServiceProvider = Provider<HistoryBackfillService>(
   ),
 );
 
+/// Per-holding (value, cost) on a given day, using the exact same snapshot
+/// replay rules — the earnings-calendar day panel uses this so its per-product
+/// sum equals the calendar cell (previously drifted via a separate
+/// ProductEarningsService path).
+final dayHoldingsBreakdownProvider = FutureProvider.autoDispose
+    .family<List<DayHoldingValue>, DateTime>((ref, day) async {
+      return ref.read(historyBackfillServiceProvider).dayHoldingsBreakdown(day);
+    });
+
 /// Records one net-worth snapshot per day.
 final snapshotServiceProvider = Provider<SnapshotService>(
   (ref) => SnapshotService(
@@ -113,8 +145,7 @@ const historySyncV6Key = 'history_sync_v6';
 /// calendar's today cell. Null when today's snapshot is missing — see
 /// [todayEarningOf], which refuses to relabel an earlier day's move as
 /// today's.
-final todayEarningProvider =
-    Provider<({double profit, double? pct})?>((ref) {
+final todayEarningProvider = Provider<({double profit, double? pct})?>((ref) {
   final list = ref.watch(snapshotsProvider).value;
   if (list == null) return null;
   return todayEarningOf(list, now: DateTime.now());
@@ -133,46 +164,47 @@ final historyDirtyFlagProvider = StreamProvider<String?>(
 /// both pages watch it to trigger/refresh.
 final historySyncProvider = FutureProvider<BackfillResult?>((ref) async {
   final dao = ref.read(daoProvider);
+  // Load the A-share trading calendar (Dec rollover included) so snapshot /
+  // session decisions today use the authoritative holiday calendar.
+  ref.watch(tradingCalendarProvider);
   // React to the dirty flag flipping: a startup auto-sync that merges
   // source rows sets it AFTER this provider may already have computed a
   // light pass — watching the flag rebuilds derived snapshots in-session.
   ref.watch(historyDirtyFlagProvider);
   final dirty = await dao.getSetting(historySyncDirtyKey);
   final firstRun = await dao.getSetting(historySyncV6Key) == null;
-  final result = await ref.read(historyBackfillServiceProvider).backfill(
-        forceRebuild: dirty == historyDirtySet || firstRun,
-      );
+  // Refresh quotes FIRST so the backfill prices today from fresh quotes:
+  // its today row then uses the exact same figures as the live dashboard.
+  // (A failed refresh does not abort — the backfill falls back to the
+  // cached quote / history series, and the fetch-failure abort below leaves
+  // any pre-existing today row alone.)
+  await ref.read(marketServiceProvider).refreshAll();
+  final result = await ref
+      .read(historyBackfillServiceProvider)
+      .backfill(forceRebuild: dirty == historyDirtySet || firstRun);
   if (dirty == historyDirtySet) {
     await dao.setSetting(historySyncDirtyKey, historyDirtyClear);
   }
   if (firstRun) {
     await dao.setSetting(historySyncV6Key, '1');
   }
-  // Refresh today's snapshot so the calendar's today matches the
-  // dashboard's live summary.
+  // Today is covered by the backfill itself, with replay rules identical to
+  // every earlier day (today priced at the refreshed live quote), so its
+  // cost basis is the SAME as yesterday's — the calendar and the per-product
+  // day panel cannot drift apart. Overwriting today afterwards with
+  // PortfolioCalculator (quantity × current costPrice) gave today a DIFFERENT
+  // cost basis than yesterday (the −863/−883 phantom: backfill cost 2,257,903
+  // on 10/1 vs live cost 2,258,766 on 10/2).
   //
   // Skipped when the run was aborted because a price history could not be
   // fetched: in that state the quotes behind today's figures are not
   // trustworthy either, and rewriting the day would overwrite whatever was
-  // already recorded with a stale derivation. A platform that simply has no
-  // backfill (web) still gets its snapshot — only the fetch-failure abort
-  // sets [BackfillResult.historyUnavailable].
+  // already recorded with a stale derivation.
   //
-  // When the backfill DID write today, it priced the day from the cached
-  // quote / historical series — not fresh live quotes. Letting that stand
-  // left "today" stale on every cold start until the user hit refresh
-  // (v0.9.9 skipped this branch on `wroteToday` for fear of overwriting the
-  // series-consistent day with a *cache* price; the safer fix is to refresh
-  // the quotes first and then force-rewrite today with the verified-fresh
-  // prices — the same gate the manual "重建历史快照" uses). A failed refresh
-  // keeps the day the backfill just wrote.
-  if (!result.historyUnavailable) {
-    final refresh = await ref.read(marketServiceProvider).refreshAll();
-    if (refresh.allOk) {
-      await ref
-          .read(snapshotServiceProvider)
-          .ensureTodaySnapshot(force: true);
-    }
+  // SnapshotService remains the fallback ONLY when the backfill could not
+  // write today (web / history fetch unavailable).
+  if (!result.historyUnavailable && !result.wroteToday) {
+    await ref.read(snapshotServiceProvider).ensureTodaySnapshot(force: true);
   }
   return result;
 });
@@ -192,14 +224,16 @@ final productEarningsServiceProvider = Provider<ProductEarningsService>(
 /// year navigation on the page is client-side over this result.
 final productEarningsProvider = FutureProvider.autoDispose
     .family<List<ProductEarnings>, int>((ref, year) async {
-  ref.watch(historySyncProvider);
-  final now = DateTime.now();
-  final from = DateTime(year - 1, 12, 1);
-  final to = year < now.year
-      ? DateTime(year, 12, 31)
-      : DateTime(now.year, now.month, now.day);
-  return ref.watch(productEarningsServiceProvider).compute(from: from, to: to);
-});
+      ref.watch(historySyncProvider);
+      final now = DateTime.now();
+      final from = DateTime(year - 1, 12, 1);
+      final to = year < now.year
+          ? DateTime(year, 12, 31)
+          : DateTime(now.year, now.month, now.day);
+      return ref
+          .watch(productEarningsServiceProvider)
+          .compute(from: from, to: to);
+    });
 
 // ---------------------------------------------------------------------------
 // Accounts
@@ -231,17 +265,17 @@ final holdingsByAccountProvider = StreamProvider.family<List<HoldingRow>, int>(
 
 /// Cached quotes by normalized cache symbol, keyed the same way
 /// `MarketService` writes them. Invalidated after every market refresh.
-final priceCacheProvider = FutureProvider<Map<String, PriceCacheRow>>(
-  (ref) async {
-    final holdings = await ref.watch(holdingsProvider.future);
-    final symbols = holdings
-        .map(cacheSymbolFor)
-        .whereType<String>()
-        .toSet()
-        .toList();
-    return ref.read(daoProvider).getCachedPrices(symbols);
-  },
-);
+final priceCacheProvider = FutureProvider<Map<String, PriceCacheRow>>((
+  ref,
+) async {
+  final holdings = await ref.watch(holdingsProvider.future);
+  final symbols = holdings
+      .map(cacheSymbolFor)
+      .whereType<String>()
+      .toSet()
+      .toList();
+  return ref.read(daoProvider).getCachedPrices(symbols);
+});
 
 // ---------------------------------------------------------------------------
 // Transactions
@@ -251,13 +285,17 @@ final transactionsProvider = StreamProvider<List<TransactionRow>>(
   (ref) => ref.watch(daoProvider).watchTransactions(),
 );
 
-final transactionsByAccountProvider = StreamProvider.family<List<TransactionRow>, int>(
-  (ref, accountId) => ref.watch(daoProvider).watchTransactionsByAccount(accountId),
-);
+final transactionsByAccountProvider =
+    StreamProvider.family<List<TransactionRow>, int>(
+      (ref, accountId) =>
+          ref.watch(daoProvider).watchTransactionsByAccount(accountId),
+    );
 
-final transactionsByHoldingProvider = StreamProvider.family<List<TransactionRow>, int>(
-  (ref, holdingId) => ref.watch(daoProvider).watchTransactionsByHolding(holdingId),
-);
+final transactionsByHoldingProvider =
+    StreamProvider.family<List<TransactionRow>, int>(
+      (ref, holdingId) =>
+          ref.watch(daoProvider).watchTransactionsByHolding(holdingId),
+    );
 
 // ---------------------------------------------------------------------------
 // Snapshots

@@ -42,10 +42,7 @@ class SettingsPage extends ConsumerWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const SectionHeader(label: '数据备份'),
-              Text(
-                '所有数据仅保存在本机。建议定期导出备份，可在其他设备导入恢复。',
-                style: T.label(),
-              ),
+              Text('所有数据仅保存在本机。建议定期导出备份，可在其他设备导入恢复。', style: T.label()),
               const SizedBox(height: T.s3),
               TerminalCard(
                 child: Column(
@@ -89,14 +86,16 @@ class SettingsPage extends ConsumerWidget {
                       title: '导出持仓 CSV',
                       subtitle: const Text('账户、持仓明细、市值与收益'),
                       trailing: const SizedBox.shrink(),
-                      onTap: () => _exportCsv(context, ref, csv: true, holdings: true),
+                      onTap: () =>
+                          _exportCsv(context, ref, csv: true, holdings: true),
                     ),
                     DataRow(
                       leading: const Icon(Icons.receipt_long_outlined),
                       title: '导出流水 CSV',
                       subtitle: const Text('全部交易记录'),
                       trailing: const SizedBox.shrink(),
-                      onTap: () => _exportCsv(context, ref, csv: true, holdings: false),
+                      onTap: () =>
+                          _exportCsv(context, ref, csv: true, holdings: false),
                     ),
                   ],
                 ),
@@ -261,28 +260,27 @@ class SettingsPage extends ConsumerWidget {
     if (confirm != true || !context.mounted) return;
 
     final navigator = Navigator.of(context, rootNavigator: true);
-    unawaited(showDialog<void>(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => const _RebuildProgressDialog(),
-    ));
+    unawaited(
+      showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => const _RebuildProgressDialog(),
+      ),
+    );
 
     BackfillResult result;
     try {
+      // Refresh quotes FIRST so the forced rebuild prices today from fresh
+      // quotes; the rebuild itself covers today with the same replay cost
+      // basis as every earlier day. Overwriting today afterwards with
+      // PortfolioCalculator would give it a different cost basis (the
+      // replay-vs-current cost gaps on traded holdings), surfacing as a fake
+      // daily return.
+      await ref.read(marketServiceProvider).refreshAll();
       result = await ref
           .read(historyBackfillServiceProvider)
           .backfill(forceRebuild: true);
-      // Mirror the portfolio page's refresh gate: pull fresh quotes first and
-      // only then rewrite today, so every figure — history and today alike —
-      // ends up derived from verified-fresh data. A failed refresh simply
-      // leaves the day the backfill just wrote in place.
-      if (result.ok && !result.historyUnavailable) {
-        final refresh = await ref.read(marketServiceProvider).refreshAll();
-        if (refresh.allOk) {
-          await ref.read(snapshotServiceProvider).ensureTodaySnapshot(force: true);
-        }
-        ref.invalidate(cnyRatesProvider);
-      }
+      ref.invalidate(cnyRatesProvider);
     } catch (error) {
       result = BackfillResult(
         ok: false,
@@ -356,8 +354,9 @@ class _NotificationsSectionState extends ConsumerState<_NotificationsSection> {
   }
 
   Future<void> _load() async {
-    final value =
-        await ref.read(daoProvider).getSetting(AlertNotificationService.enabledKey);
+    final value = await ref
+        .read(daoProvider)
+        .getSetting(AlertNotificationService.enabledKey);
     if (!mounted) return;
     setState(() => _enabled = value != 'false');
   }
@@ -366,7 +365,10 @@ class _NotificationsSectionState extends ConsumerState<_NotificationsSection> {
     setState(() => _enabled = value);
     await ref
         .read(daoProvider)
-        .setSetting(AlertNotificationService.enabledKey, value ? 'true' : 'false');
+        .setSetting(
+          AlertNotificationService.enabledKey,
+          value ? 'true' : 'false',
+        );
     if (!value) return;
     // Re-enabling: make sure the OS permission is actually granted (this
     // re-checks silently if the user fixed it in system settings).
@@ -375,9 +377,7 @@ class _NotificationsSectionState extends ConsumerState<_NotificationsSection> {
     final granted = await notifications.refreshPermission();
     if (!granted && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('未获得系统通知权限，请在系统设置中允许 Asset Tracker 发送通知'),
-        ),
+        const SnackBar(content: Text('未获得系统通知权限，请在系统设置中允许 Asset Tracker 发送通知')),
       );
     }
   }

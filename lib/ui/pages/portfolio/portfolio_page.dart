@@ -93,14 +93,15 @@ class _PortfolioPageState extends ConsumerState<PortfolioPage> {
     Object? error;
     try {
       result = await ref.read(marketServiceProvider).refreshAll();
-      // Rewrite today's snapshot only when every quote came back. A failed
-      // refresh leaves the holdings on their cached prices; recomputing the
-      // day from those would persist a wrong figure — and, because a
-      // snapshot is the day's only record, it would replace a correct value
-      // with a stale one instead of merely leaving it alone.
-      if (result.allOk) {
-        await ref.read(snapshotServiceProvider).ensureTodaySnapshot(force: true);
-      }
+      // Refresh quotes only — DO NOT rewrite today's snapshot here. Today's
+      // row is owned by the history backfill, which prices it from these
+      // fresh quotes with the SAME replay cost basis as every earlier day;
+      // overwriting it with PortfolioCalculator (current quantity × current
+      // costPrice) gave today a different cost basis than yesterday, showing
+      // a fake daily return (the 有色/能源化工/五年国债/guozhaiEtf
+      // replay-vs-current cost gaps). The backfill runs on its own trigger
+      // (historySyncProvider) and reacts to the refresh.
+      ref.invalidate(historySyncProvider);
       // FX rates may have changed with the refresh.
       ref.invalidate(cnyRatesProvider);
       // Prices are fresh: re-evaluate alert rules and notify for anything
@@ -116,11 +117,13 @@ class _PortfolioPageState extends ConsumerState<PortfolioPage> {
     if (showSnack) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(error != null
-              ? '行情刷新失败，请稍后重试'
-              : result.failed == 0
-                  ? '行情已更新 (${result.updated} 项)'
-                  : '更新 ${result.updated} 项，失败 ${result.failed} 项'),
+          content: Text(
+            error != null
+                ? '行情刷新失败，请稍后重试'
+                : result.failed == 0
+                ? '行情已更新 (${result.updated} 项)'
+                : '更新 ${result.updated} 项，失败 ${result.failed} 项',
+          ),
         ),
       );
     }
@@ -138,9 +141,9 @@ class _PortfolioPageState extends ConsumerState<PortfolioPage> {
       if (result == null || !result.ok) return;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(result.message ?? '历史净值已是最新')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(result.message ?? '历史净值已是最新')));
       });
     });
     return KeyShortcuts(
@@ -154,18 +157,22 @@ class _PortfolioPageState extends ConsumerState<PortfolioPage> {
             const TerminalAppBarActions(),
             // 手机端眼睛已移入资产总览卡内（银行卡右上角）；桌面保留 AppBar 入口。
             if (MediaQuery.sizeOf(context).width >= 1100)
-              Consumer(builder: (context, ref, _) {
-                final hidden = ref.watch(hideAmountsProvider);
-                return IconButton(
-                  tooltip: hidden ? '显示金额' : '隐藏金额',
-                  onPressed: () =>
-                      ref.read(hideAmountsProvider.notifier).state = !hidden,
-                  icon: Icon(
-                    hidden ? Icons.visibility_off_outlined : Icons.visibility_outlined,
-                    color: T.text2,
-                  ),
-                );
-              }),
+              Consumer(
+                builder: (context, ref, _) {
+                  final hidden = ref.watch(hideAmountsProvider);
+                  return IconButton(
+                    tooltip: hidden ? '显示金额' : '隐藏金额',
+                    onPressed: () =>
+                        ref.read(hideAmountsProvider.notifier).state = !hidden,
+                    icon: Icon(
+                      hidden
+                          ? Icons.visibility_off_outlined
+                          : Icons.visibility_outlined,
+                      color: T.text2,
+                    ),
+                  );
+                },
+              ),
             ValueListenableBuilder<bool>(
               valueListenable: _refreshing,
               builder: (context, refreshing, _) => IconButton(
@@ -185,9 +192,7 @@ class _PortfolioPageState extends ConsumerState<PortfolioPage> {
         body: holdings.when(
           data: (list) {
             if (list.isEmpty) {
-              return const EmptyState(
-                message: '还没有持仓数据\n去"持仓"页添加你的第一笔资产吧',
-              );
+              return const EmptyState(message: '还没有持仓数据\n去"持仓"页添加你的第一笔资产吧');
             }
             // 保留上一次成功的汇总值：行情/汇率后台刷新会 invalidate
             // summaryProvider 使其短暂进入 loading —— 此时若用 when 的
@@ -253,6 +258,7 @@ class _PortfolioPageState extends ConsumerState<PortfolioPage> {
           _KpiRow(summary: s),
           const SizedBox(height: T.s3),
           if (Responsive.isPhone(context)) ...[
+            // 趋势面板与上方净资产卡左右对齐（等宽），横向完整拉伸。
             NetWorthChart(),
             const SizedBox(height: T.s3),
             AllocationCard(summary: s),
@@ -260,9 +266,9 @@ class _PortfolioPageState extends ConsumerState<PortfolioPage> {
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Expanded(flex: 2, child: NetWorthChart()),
+                Expanded(flex: 3, child: NetWorthChart()),
                 const SizedBox(width: T.s3),
-                Expanded(flex: 1, child: AllocationCard(summary: s)),
+                Expanded(flex: 2, child: AllocationCard(summary: s)),
               ],
             ),
             const SizedBox(height: T.s3),
@@ -334,7 +340,11 @@ class _CalendarEntries extends StatelessWidget {
 }
 
 class _EntryTile extends StatelessWidget {
-  const _EntryTile({required this.icon, required this.label, required this.onTap});
+  const _EntryTile({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
 
   final IconData icon;
   final String label;

@@ -15,18 +15,23 @@ class HeatCell extends StatelessWidget {
     this.onTap,
     this.width,
     this.height = 34,
+    this.borderColor,
   });
 
   final double value;
   final double min;
   final double max;
   final String? label;
+
   /// Custom content (e.g. day number + profit); overrides [label].
   final Widget? child;
   final double labelSize;
   final VoidCallback? onTap;
   final double? width;
   final double height;
+
+  /// Highlight border (e.g. the selected calendar day).
+  final Color? borderColor;
 
   @override
   Widget build(BuildContext context) {
@@ -36,15 +41,30 @@ class HeatCell extends StatelessWidget {
       decoration: BoxDecoration(
         color: T.heat(value, min, max),
         borderRadius: BorderRadius.circular(4),
-        border: Border.all(color: T.borderSoft),
+        border: Border.all(
+          color: borderColor ?? T.borderSoft,
+          width: borderColor == null ? 1 : 2,
+        ),
       ),
       alignment: Alignment.center,
-      child: child ??
+      child:
+          child ??
           (label == null || label!.isEmpty
               ? null
-              : Text(label!, style: T.mono(size: labelSize, color: T.changeColor(value), weight: FontWeight.w600))),
+              : Text(
+                  label!,
+                  style: T.mono(
+                    size: labelSize,
+                    color: T.changeColor(value),
+                    weight: FontWeight.w600,
+                  ),
+                )),
     );
     if (onTap == null) return cell;
-    return InkWell(borderRadius: BorderRadius.circular(4), onTap: onTap, child: cell);
+    return InkWell(
+      borderRadius: BorderRadius.circular(4),
+      onTap: onTap,
+      child: cell,
+    );
   }
 }

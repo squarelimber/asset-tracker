@@ -11,6 +11,7 @@ class T {
   static const Color borderSoft = Color(0xFF1C2128);
   static const Color text1 = Color(0xFFE6EDF3);
   static const Color text2 = Color(0xFF8B949E);
+
   /// Faint text / disabled. Bright enough for WCAG AA (≥4.5:1) on [bg].
   static const Color text3 = Color(0xFF768390);
   static const Color up = Color(0xFFF85149);
@@ -38,27 +39,26 @@ class T {
     double size = 14,
     Color? color,
     FontWeight weight = FontWeight.w400,
-  }) =>
-      TextStyle(
-        fontSize: size,
-        color: color ?? text1,
-        fontWeight: weight,
-        fontFamily: 'monospace',
-        fontFamilyFallback: const [
-          'Consolas',
-          'Menlo',
-          'Droid Sans Mono',
-          'Courier New',
-        ],
-        fontFeatures: const [FontFeature.tabularFigures()],
-      );
+  }) => TextStyle(
+    fontSize: size,
+    color: color ?? text1,
+    fontWeight: weight,
+    fontFamily: 'monospace',
+    fontFamilyFallback: const [
+      'Consolas',
+      'Menlo',
+      'Droid Sans Mono',
+      'Courier New',
+    ],
+    fontFeatures: const [FontFeature.tabularFigures()],
+  );
 
   static TextStyle label({double size = 11, Color? color}) => TextStyle(
-        fontSize: size,
-        color: color ?? text2,
-        fontWeight: FontWeight.w500,
-        letterSpacing: 0.4,
-      );
+    fontSize: size,
+    color: color ?? text2,
+    fontWeight: FontWeight.w500,
+    letterSpacing: 0.4,
+  );
 
   /// Red for positive, green for negative (China convention).
   static Color changeColor(double value) => value >= 0 ? up : down;

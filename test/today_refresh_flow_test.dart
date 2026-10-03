@@ -98,16 +98,16 @@ void main() {
     ));
     await tester.pumpAndSettle();
 
-    // 回填写完今天（旧价 1.0×100=100）后，自动刷新并以新价重写今天。
+    // 刷新先行：backfill 写今天时用已刷新的最新价（1.5×100=150），
+    // 不再需要第二个覆盖步骤 —— 今天与历史日同源同法。
     expect(fakeMarket.refreshed, isTrue,
-        reason: '旧行为：wroteToday 后跳过刷新，今天停留在旧价，'
-            '今日收益需手动刷新才对');
+        reason: '刷新必须在回填前完成，backfill 才能用新价写今天');
     final now = DateTime.now();
     final key =
         '${now.year.toString().padLeft(4, '0')}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
     final today = await dao.getSnapshot(key, 'CNY');
     expect(today!.totalValue, closeTo(150, 1e-6),
-        reason: '刷新后新价 1.5 × 100 份 = 150');
+        reason: '刷新后新价 1.5 × 100 份 = 150（backfill 今天用最新价）');
 
     await db.close();
     await tester.pump();

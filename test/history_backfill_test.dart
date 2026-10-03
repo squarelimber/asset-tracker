@@ -109,11 +109,17 @@ void main() {
     final today = snapshots.where((s) => s.date == '2026-07-08');
     // Today used to be written by the live-quote path only and was excluded
     // from the rebuild, which is how a disagreement between the two paths
-    // became a single-day spike. The rebuild now owns today as well, priced
-    // from the same series as every other day.
+    // became a single-day spike. The rebuild now owns today as well; like
+    // the live path (and the day-detail panel) it prices TODAY from the
+    // refreshed latest price, and every earlier day from the history series.
     expect(today, hasLength(1));
-    expect(today.single.totalValue, closeTo(260, 1e-6));
+    expect(today.single.totalValue, closeTo(290, 1e-6));
     expect((await dao.getSnapshot('2026-07-08', 'CNY'))?.date, '2026-07-08');
+    // History days still use the series price.
+    expect(
+      snapshots.firstWhere((s) => s.date == '2026-07-03').totalValue,
+      closeTo(260, 1e-6),
+    );
   });
 
   test('weekend snapshots forward-fill to the last trading day price', () async {
@@ -130,10 +136,16 @@ void main() {
 
     final snapshots = await dao.getSnapshots();
     // Weekend (07-04, 07-05) and beyond must use 2.6 (last trading day),
-    // NOT the current latest price 2.9 -> no weekly jumps.
+    // NOT the current latest price 2.9 -> no weekly jumps. Only TODAY
+    // (07-08) prices from the refreshed latest price.
     for (final s in snapshots) {
-      expect(s.totalValue, closeTo(260, 1e-6),
-          reason: 'snapshot ${s.date} should carry the last trading-day price');
+      if (s.date == '2026-07-08') {
+        expect(s.totalValue, closeTo(290, 1e-6),
+            reason: 'today prices from the live latest price');
+      } else {
+        expect(s.totalValue, closeTo(260, 1e-6),
+            reason: 'snapshot ${s.date} should carry the last trading-day price');
+      }
     }
   });
 
@@ -449,8 +461,10 @@ void main() {
         createdAt: Value(DateTime(2026, 7, 7, 13, 45)),
       ));
 
-      // Next launch on 07-08. With only today re-derived the frozen 07-07
-      // stayed put and 07-08 reported 260 - 290 = -30 instead of 0.
+      // Next launch on 07-08. The frozen 07-07 goes back to the closing
+      // series; TODAY (07-08) prices from the live latest price 2.9, so
+      // the day reports the real move from the 07-07 close (260 → 290 = 30)
+      // instead of the frozen day staying put (260 − 290 = −30 phantom).
       await service.backfill(now: DateTime(2026, 7, 8));
 
       final snapshots = await dao.getSnapshots();
@@ -462,7 +476,8 @@ void main() {
       final earning = const DailyEarningsCalculator()
           .compute(snapshots)
           .firstWhere((e) => e.date == '2026-07-08');
-      expect(earning.profit, closeTo(0, 1e-6));
+      expect(earning.profit, closeTo(30, 1e-6),
+          reason: 'today (live latest 2.9 × 100) vs yesterday close (2.6 × 100)');
     });
 
     test('even after a long gap between launches', () async {
@@ -648,5 +663,89 @@ void main() {
     // Only the cash account's own 33.34 of accrued loss, not -117,327.38.
     expect(earning.profit, closeTo(0, 100),
         reason: 'a full transfer-out must not be booked as a one-day loss');
+  });
+
+  test('dayHoldingsBreakdown 求和 == 快照差（收益日历口径一致）', () async {
+    // latest == 历史收盘（2.8），未引入「今天=最新价」分歧——该分歧由
+    // 注入 now 与 DateTime.now() 的时差造成，不属于本测试主题。
+    await seedFundHolding(purchaseDate: DateTime(2026, 7, 1), latest: 2.8);
+    final fake = _FakeHistorySource();
+    // 价格 7/1=2.6, 7/2=2.7, 7/3=2.8（每天 +0.1 → 当日收益 +10）。
+    fake.data['110022'] = {
+      '2026-07-01': 2.6,
+      '2026-07-02': 2.7,
+      '2026-07-03': 2.8,
+    };
+
+    final service = HistoryBackfillService(
+      dao,
+      sources: {MarketSource.eastmoney: fake},
+    );
+    final result = await service.backfill(now: DateTime(2026, 7, 3));
+    expect(result.ok, isTrue);
+
+    final snapshots = await dao.getSnapshots();
+    // 日历数字（快照差）:
+    double assetProfit(SnapshotRow s) =>
+        (s.totalValue + s.liabilities) - s.totalCost;
+    final byDate = {for (final s in snapshots) s.date: s};
+    final p1 = assetProfit(byDate['2026-07-02']!);
+    final p2 = assetProfit(byDate['2026-07-03']!);
+    final calendarProfit = p2 - p1;
+
+    // 明细面板: dayHoldingsBreakdown 两天合计差。
+    Future<double> sumOf(DateTime day) async {
+      final list = await service.dayHoldingsBreakdown(day);
+      var s = 0.0;
+      for (final h in list) {
+        if (h.liability) continue;
+        s += h.value - h.cost;
+      }
+      return s;
+    }
+
+    final sumD1 = await sumOf(DateTime(2026, 7, 2));
+    final sumD2 = await sumOf(DateTime(2026, 7, 3));
+    final detailProfit = sumD2 - sumD1;
+
+    expect(detailProfit, closeTo(calendarProfit, 1e-6),
+        reason: '收益日历明细合计必须严格等于日历格子数字（同一口径）');
+  });
+
+  test('平滑份额持仓的当日变动是当日差，而非全程累计', () async {
+    // 银行理财份额型：manual 源 → 平滑插值（costPrice → latestPrice 跨
+    // 固定窗口）。两天查询必须用同一窗口，差值才是当日变动（曾因窗口
+    // 起点用了查询日，历史日被顶在成本价 ⇒ 显示全程累计收益）。
+    final accountId = await dao.createAccount(AccountsCompanion.insert(
+      name: '测试账户',
+      type: 'general',
+    ));
+    final holdingId = await dao.createHolding(HoldingsCompanion.insert(
+      accountId: accountId,
+      name: '银行理财',
+      assetType: AssetType.bankWealth.storageName,
+      marketSource: Value(MarketSource.manual.storageName),
+      quantity: const Value(1000),
+      costPrice: const Value(1.0),
+      latestPrice: const Value(1.5),
+      purchaseDate: Value(DateTime(2026, 6, 1)),
+    ));
+    expect(holdingId, greaterThan(0));
+
+    final service = HistoryBackfillService(dao, sources: const {});
+    // 两天同在窗口内（6/1 起），同为插值（cost 1.0 → latest 1.5）。
+    final d1 = await service.dayHoldingsBreakdown(DateTime(2026, 7, 1));
+    final d2 = await service.dayHoldingsBreakdown(DateTime(2026, 7, 2));
+    final v1 = d1.single.value;
+    final v2 = d2.single.value;
+    // 全程累计 = (1.5 - 1.0) * 1000 = 500；单日变动应远小于 500。
+    final allTime = (1000 * 1.5) - (1000 * 1.0);
+    final dayChange = v2 - v1;
+    expect(dayChange.abs(), lessThan(allTime.abs() / 4),
+        reason: '单日平滑份额变动不能等于全程累计收益');
+    expect(v1, closeTo(1000 * 1.0, allTime),
+        reason: '首日估值从成本价起插值');
+    // 两日估值递增（价格上行）。
+    expect(v2, greaterThan(v1));
   });
 }
