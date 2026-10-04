@@ -2,7 +2,6 @@ import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 
 import '../../../app/providers.dart';
 import '../../../core/enums.dart';
@@ -18,13 +17,12 @@ import '../../../domain/target_allocation.dart';
 import '../../../services/market/history_lookup.dart';
 import '../../../services/market/history_source.dart';
 import '../../../services/market/tencent_history_source.dart';
-import '../../components/allocation_bars.dart';
 import '../../components/section_header.dart';
 import '../../components/terminal_card.dart';
 import '../../tokens.dart';
 import 'day_detail_sheet.dart';
 
-/// Asset allocation by type (top slices + bars), terminal style.
+/// Asset allocation: donut + table (实际/目标/偏离), reference-mock layout.
 class AllocationCard extends ConsumerWidget {
   const AllocationCard({super.key, required this.summary});
 
@@ -49,33 +47,250 @@ class AllocationCard extends ConsumerWidget {
     final plan =
         ref.watch(targetAllocationProvider).value ??
         const <AssetCategory, double>{};
-    final entries = [
-      for (final entry in byCat.entries)
-        AllocationEntry(
-          label: entry.key.label,
-          color:
-              Color.lerp(entry.key.color, Colors.white, 0.15) ??
-              entry.key.color,
-          value: entry.value,
-          pct: total == 0 ? 0 : entry.value / total,
-          // The plan stores whole percentages (40 = 40%); the bar component
-          // works in 0..1 ratios like [pct], so convert here.
-          targetPct: (plan[entry.key] ?? 0) / 100,
-        ),
+    final catEntries = [
+      for (final entry in byCat.entries) (cat: entry.key, value: entry.value),
     ]..sort((a, b) => b.value.compareTo(a.value));
+
+    String amount(double v) => hidden ? Formats.masked() : Formats.money(v);
+    // 偏离以「百分点」表述（42% − 40% = +2pp）。偏离由两个百分比相减
+    // 得出，不涉及具体金额，因此不受「隐藏金额」开关影响——masked 后
+    // 只剩红绿 '--' 反而比数字更暴露结构且无意义。
+    String pp(double dev) {
+      final v = dev * 100;
+      final s = v >= 0 ? '+${v.toStringAsFixed(0)}' : v.toStringAsFixed(0);
+      return '$s pp';
+    }
+
+    final hasPlan = catEntries.any((e) => (plan[e.cat] ?? 0) > 0);
+    final narrow = MediaQuery.sizeOf(context).width < 400;
+    // 紧凑金额（表格列内使用，宽列时可读性优先）。
+    String amountCompact(double v) =>
+        hidden ? Formats.masked() : Formats.amountCompact(v);
+    // 表格列宽：0=类别（贴内容，不让它吃掉剩余宽度造成松散），
+    // 1=实际%，2=金额/目标，3=目标/偏离。窄屏把「金额」并入实际列
+    // 下方小字，只保留 4 列。整表右对齐，与环形图形成「左图右数」。
+    final colWidths = <int, TableColumnWidth>{
+      0: const IntrinsicColumnWidth(),
+      1: narrow ? const FixedColumnWidth(46) : const FixedColumnWidth(38),
+      2: narrow ? const FixedColumnWidth(32) : const FixedColumnWidth(64),
+      3: narrow ? const FixedColumnWidth(42) : const FixedColumnWidth(32),
+      if (!narrow) 4: const FixedColumnWidth(42),
+    };
+
     return TerminalCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const SectionHeader(label: '资产配置 · 实际/计划'),
-          AllocationBars(
-            entries: entries,
-            amountFormat: hidden ? (_) => Formats.masked() : null,
-            onSelect: (e) => context.go('/holdings', extra: e.label),
+          const SectionHeader(label: '资产配置'),
+          const SizedBox(height: T.s2),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              // 左：环形图（中心显示总资产）。窄屏缩一号避免挤压表格；
+              // 与右侧表格垂直居中对齐。
+              SizedBox(
+                width: narrow ? 116 : 148,
+                height: narrow ? 116 : 148,
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    PieChart(
+                      PieChartData(
+                        sectionsSpace: 2,
+                        centerSpaceRadius: 44,
+                        startDegreeOffset: -90,
+                        sections: [
+                          for (final e in catEntries)
+                            PieChartSectionData(
+                              value: e.value,
+                              color: e.cat.color,
+                              radius: 22,
+                              showTitle: false,
+                            ),
+                        ],
+                      ),
+                    ),
+                    Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text('总资产', style: T.label(color: T.text3)),
+                        const SizedBox(height: 2),
+                        Text(
+                          narrow ? amountCompact(total) : amount(total),
+                          style: T.mono(
+                            size: narrow ? 13 : 15,
+                            weight: FontWeight.w700,
+                            color: T.text1,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: T.s2),
+              // 右：Table 布局（表头与数据行列宽固定对齐，不错位）。
+              // 整表贴右缘：类别列贴内容宽度，数字列与表头严格成列。
+              Expanded(
+                child: Align(
+                  alignment: Alignment.centerRight,
+                  child: Table(
+                    defaultVerticalAlignment: TableCellVerticalAlignment.middle,
+                    columnWidths: colWidths,
+                    children: [
+                      // 表头（第一列留空对齐类别）。
+                      TableRow(
+                        children: [
+                          const Text(''),
+                          Text(
+                            '实际',
+                            textAlign: TextAlign.end,
+                            style: T.label(color: T.text3),
+                          ),
+                          if (!narrow)
+                            Text(
+                              '金额',
+                              textAlign: TextAlign.end,
+                              style: T.label(color: T.text3),
+                            ),
+                          Text(
+                            '目标',
+                            textAlign: TextAlign.end,
+                            style: T.label(color: T.text3),
+                          ),
+                          Text(
+                            '偏离',
+                            textAlign: TextAlign.end,
+                            style: T.label(color: T.text3),
+                          ),
+                        ],
+                      ),
+                      for (final e in catEntries)
+                        TableRow(
+                          children: [
+                            // 类别（色点 + 名称）。
+                            Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 4),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Container(
+                                    width: 8,
+                                    height: 8,
+                                    decoration: BoxDecoration(
+                                      color: e.cat.color,
+                                      shape: BoxShape.circle,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 5),
+                                  Text(
+                                    e.cat.label,
+                                    style: const TextStyle(
+                                      fontSize: 12,
+                                      color: T.text1,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            // 实际列：% 上、金额折行下（窄屏）；宽屏换紧凑金额。
+                            Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 4),
+                              child: narrow
+                                  ? Column(
+                                      mainAxisSize: MainAxisSize.min,
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.end,
+                                      children: [
+                                        Text(
+                                          total == 0
+                                              ? '--'
+                                              : Formats.pct0(e.value / total),
+                                          style: T.mono(
+                                            size: 12,
+                                            color: T.text2,
+                                          ),
+                                        ),
+                                        // 隐藏金额时显示掩码占位，保留
+                                        // 行高与对齐（不留空变形）。
+                                        Text(
+                                          amountCompact(e.value),
+                                          style: T.mono(
+                                            size: 9,
+                                            color: T.text3,
+                                          ),
+                                        ),
+                                      ],
+                                    )
+                                  : Text(
+                                      total == 0
+                                          ? '--'
+                                          : Formats.pct0(e.value / total),
+                                      textAlign: TextAlign.end,
+                                      style: T.mono(size: 12, color: T.text2),
+                                    ),
+                            ),
+                            if (!narrow)
+                              Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 4,
+                                ),
+                                child: Text(
+                                  amountCompact(e.value),
+                                  textAlign: TextAlign.end,
+                                  style: T.mono(size: 11, color: T.text3),
+                                ),
+                              ),
+                            // 目标%：计划启用后每类都显示 —— 计划里没写的类按 0% 处理
+                            //（「不该持有」也是明确目标，超配照常提醒）。
+                            Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 4),
+                              child: Text(
+                                hasPlan
+                                    ? Formats.pct0((plan[e.cat] ?? 0) / 100)
+                                    : '--',
+                                textAlign: TextAlign.end,
+                                style: T.mono(size: 12, color: T.text2),
+                              ),
+                            ),
+                            // 偏离 pp：超配红 / 低配绿 / 无计划灰。
+                            Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 4),
+                              child: Text(
+                                hasPlan && total > 0
+                                    ? pp(
+                                        e.value / total -
+                                            (plan[e.cat] ?? 0) / 100,
+                                      )
+                                    : '',
+                                textAlign: TextAlign.end,
+                                style: T.mono(
+                                  size: 11,
+                                  weight: FontWeight.w600,
+                                  color: _devColor(
+                                    e.value / total - (plan[e.cat] ?? 0) / 100,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
           ),
         ],
       ),
     );
+  }
+
+  /// 偏离着色：超配（实际 > 目标）红、低配绿、±0.5pp 内视为持平灰。
+  static Color _devColor(double dev) {
+    if (dev > 0.005) return T.up;
+    if (dev < -0.005) return T.down;
+    return T.text3;
   }
 }
 

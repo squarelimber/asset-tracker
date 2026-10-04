@@ -2,6 +2,14 @@
 
 All notable changes to Asset Tracker. Entries are condensed from the commit history; dates follow the release tags.
 
+## [Unreleased]
+
+### Changed
+
+- 总览页资产配置改为环形图+数表版式：中心显示总资产，右侧按类别列出实际占比/金额、目标配比与偏离（百分点）
+- 偏离着色语义：超配红、低配绿、持平灰；偏离与目标均为百分比口径，不受「隐藏金额」开关影响
+- 计划配比启用后各资产类别均展示目标（未配置的类别按 0% 处理）；金额隐藏时以掩码占位保持对齐
+
 ## [0.10.3] - 2026-10-03
 
 ### Fixed

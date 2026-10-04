@@ -14,6 +14,7 @@ class Formats {
   );
   static final NumberFormat _pct = NumberFormat('0.00%');
   static final NumberFormat _pct1 = NumberFormat('0.0%');
+  static final NumberFormat _pct0 = NumberFormat('0%');
   static final NumberFormat _num = NumberFormat('#,##0.####');
   static final DateFormat _date = DateFormat('yyyy-MM-dd');
   static final DateFormat _dateTime = DateFormat('MM-dd HH:mm');
@@ -25,6 +26,7 @@ class Formats {
 
   static String pct(double v) => _pct.format(v);
   static String pct1(double v) => _pct1.format(v);
+  static String pct0(double v) => _pct0.format(v);
 
   static String num(double v) => _num.format(v);
 
@@ -32,7 +34,8 @@ class Formats {
   static String masked() => '¥•••••';
 
   /// Signed amount with explicit +/-, e.g. "+1,234.50".
-  static String signedAmount(double v) => v >= 0 ? '+${_amount.format(v)}' : _amount.format(v);
+  static String signedAmount(double v) =>
+      v >= 0 ? '+${_amount.format(v)}' : _amount.format(v);
 
   static String date(DateTime d) => _date.format(d);
   static String dateTime(DateTime d) => _dateTime.format(d);
@@ -45,24 +48,26 @@ class Formats {
 
   /// Currency symbol for common ISO codes, null when unknown.
   static String? _currencySymbol(String code) => switch (code.toUpperCase()) {
-        'CNY' || 'RMB' => '¥',
-        'USD' => '\$',
-        'EUR' => '€',
-        'HKD' => 'HK\$',
-        'GBP' => '£',
-        'JPY' => 'JP¥',
-        'AUD' => 'A\$',
-        'CAD' => 'C\$',
-        'CHF' => 'CHF ',
-        'SGD' => 'S\$',
-        _ => null,
-      };
+    'CNY' || 'RMB' => '¥',
+    'USD' => '\$',
+    'EUR' => '€',
+    'HKD' => 'HK\$',
+    'GBP' => '£',
+    'JPY' => 'JP¥',
+    'AUD' => 'A\$',
+    'CAD' => 'C\$',
+    'CHF' => 'CHF ',
+    'SGD' => 'S\$',
+    _ => null,
+  };
 
   /// Money value with the right currency symbol:
   /// e.g. money(1234.5, 'USD') -> "$1,234.50"; unknown codes -> "XXX 1,234.50".
   static String money(double v, [String currency = 'CNY']) {
     final symbol = _currencySymbol(currency);
-    return symbol == null ? '${currency.toUpperCase()} ${_amount.format(v)}' : '$symbol${_amount.format(v)}';
+    return symbol == null
+        ? '${currency.toUpperCase()} ${_amount.format(v)}'
+        : '$symbol${_amount.format(v)}';
   }
 
   /// Holding duration in a human-friendly form, e.g. "2年3个月",
