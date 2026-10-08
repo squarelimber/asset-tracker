@@ -108,4 +108,74 @@ void main() {
       expect(isTradingDay(monday), isTrue);
     });
   });
+
+  // Regression (2026-10-08): 0.10.3 added a statutory-holiday table that
+  // wrongly listed 2026-10-08 as 国庆 (copying 2025's merged 中秋+国庆
+  // 10/1-10/8), and the fetched calendar — cached during the break, newest
+  // bar 09-30 — silently marked every later trading day closed. Result: the
+  // UI showed 休市 and the day's A-share moves were dropped from today's
+  // earnings (quoteChangeIsToday -> false).
+  group('2026 国庆边界：10-08 起开市', () {
+    final lastHoliday = DateTime(2026, 10, 7, 10);
+    final firstDayBack = DateTime(2026, 10, 8, 14);
+
+    setUp(() => setLiveTradingDays(null));
+    tearDown(() => setLiveTradingDays(null));
+
+    test('the static calendar knows 10-08 is a trading day', () {
+      expect(isHoliday(firstDayBack), isFalse);
+      expect(isTradingDay(firstDayBack), isTrue);
+      expect(aShareSession(firstDayBack), MarketSession.open);
+      expect(quoteChangeIsToday(firstDayBack, MarketSource.sina), isTrue);
+      expect(quoteChangeIsToday(firstDayBack, MarketSource.eastmoney), isTrue);
+    });
+
+    test('10-01 .. 10-07 stay holidays', () {
+      expect(isHoliday(DateTime(2026, 10, 1)), isTrue);
+      expect(aShareSession(DateTime(2026, 10, 1, 10)), MarketSession.weekend);
+      expect(aShareSession(lastHoliday), MarketSession.weekend);
+      expect(quoteChangeIsToday(lastHoliday, MarketSource.sina), isFalse);
+      // Gold / FX keep quoting through the holiday and must still count.
+      expect(quoteChangeIsToday(lastHoliday, MarketSource.sge), isTrue);
+    });
+
+    test('a stale live calendar does not turn a later day into 休市', () {
+      // Cache as left by a 10-01 fetch during the break (newest bar 09-30).
+      setLiveTradingDays(
+        {'2026-09-24', '2026-09-28', '2026-09-29', '2026-09-30'},
+        coverageEnd: '2026-10-01',
+      );
+      expect(isTradingDay(firstDayBack), isTrue,
+          reason: 'a date past the fetched window must not be asserted closed');
+      expect(aShareSession(firstDayBack), MarketSession.open);
+      expect(quoteChangeIsToday(firstDayBack, MarketSource.sina), isTrue);
+      expect(quoteChangeIsToday(firstDayBack, MarketSource.eastmoney), isTrue);
+    });
+
+    test('inside the covered window the live calendar is authoritative', () {
+      // 09-25 is inside the window but absent => a genuine closure.
+      setLiveTradingDays(
+        {'2026-09-24', '2026-09-28'},
+        coverageEnd: '2026-09-30',
+      );
+      expect(isTradingDay(DateTime(2026, 9, 25, 14)), isFalse);
+      expect(aShareSession(DateTime(2026, 9, 25, 14)), MarketSession.weekend);
+      expect(isTradingDay(DateTime(2026, 9, 28, 14)), isTrue);
+    });
+
+    test('a live calendar that covers 10-08 keeps it open', () {
+      setLiveTradingDays({'2026-10-08'}, coverageEnd: '2026-10-08');
+      expect(isTradingDay(firstDayBack), isTrue);
+      expect(aShareSession(firstDayBack), MarketSession.open);
+    });
+
+    test('coverage end defaults to the newest day in the set', () {
+      setLiveTradingDays({'2026-09-30'});
+      // 09-29 is inside the window but absent => authoritative "closed".
+      expect(isTradingDay(DateTime(2026, 9, 29, 14)), isFalse);
+      // 10-09 is past the newest day => the calendar cannot see it, so fall
+      // back to weekday + holidays, which says open.
+      expect(isTradingDay(DateTime(2026, 10, 9, 14)), isTrue);
+    });
+  });
 }

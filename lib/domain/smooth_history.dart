@@ -59,14 +59,20 @@ class SmoothHistoryCalculator {
     final horizon = to.isBefore(dayToday) ? dayToday : dayTo;
     final segments = _amountSegments(h, flows, from: from, to: horizon);
 
-    // Distribute the total gain by principal x days.
+    // Distribute the total gain by principal x days. Only positive-principal
+    // spans participate in the denominator: a negative principal (a legacy
+    // flow larger than the replayed balance, see [_segmentsFor]) contributes
+    // zero gain and must NOT shrink the denominator, or every positive span
+    // would be over-credited and the last-day pin would turn that excess
+    // into a phantom loss/gain on the final day.
     var weightSum = 0.0;
     for (final s in segments) {
-      weightSum += s.principal * s.days;
+      if (s.principal > 0) weightSum += s.principal * s.days;
     }
     var cumGain = 0.0;
     for (final s in segments) {
-      final segGain = weightSum <= 0 || s.principal <= 0
+      final positive = s.principal > 0;
+      final segGain = weightSum <= 0 || !positive
           ? 0.0
           : totalGain * (s.principal * s.days) / weightSum;
       final startValue = s.principal + cumGain;
@@ -136,12 +142,18 @@ class SmoothHistoryCalculator {
       to: to,
       soldPrincipalById: soldPrincipalById,
     )) {
+      // A negative principal (legacy flow larger than the replayed balance)
+      // must read as 0 on the cost side too, mirroring [amountHistory]'s
+      // `empty` masking: otherwise the value sits at 0 while cost goes
+      // negative on the way in and positive on the way out, producing a
+      // paired phantom profit/loss across the negative span.
+      final value = s.principal > 0 ? s.principal : 0.0;
       for (
         var d = s.start;
         !d.isAfter(s.end) && !d.isAfter(dayTo);
         d = d.add(const Duration(days: 1))
       ) {
-        result[todayKey(d)] = s.principal;
+        result[todayKey(d)] = value;
       }
     }
     // Symmetric to [amountHistory]'s last-day pin. The reverse segment walk

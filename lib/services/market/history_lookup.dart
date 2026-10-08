@@ -16,6 +16,12 @@ class HistoryPriceLookup {
   /// The latest date in the history (yyyy-MM-dd), or null when empty.
   String? get lastDate => _dates.isEmpty ? null : _dates.last;
 
+  /// Close price of the earliest row, or null when empty. Used as a
+  /// *backward* fill for days that predate the whole series (the holding is
+  /// older than the data available for it): the nearest known historical
+  /// price beats the current quote, which belongs to another day entirely.
+  double? get firstPrice => _prices.isEmpty ? null : _prices.first;
+
   /// Price on [key] (yyyy-MM-dd) or the most recent date <= [key], else null.
   double? priceOnOrBefore(String key) {
     var lo = 0;

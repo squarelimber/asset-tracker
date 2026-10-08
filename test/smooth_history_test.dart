@@ -388,4 +388,71 @@ void main() {
         reason: 'costMovedAmount (the recorded sold principal) wins over '
             'the raw amount');
   });
+
+  group('负 principal 段（旧流水大额支出超过当时本金）', () {
+    // 账户当前余额与成本一致（gain=0），简化验证；历史某笔 expense
+    // 的原始金额（无 costMovedAmount 回退）大于当时本金 → 产生负段。
+    TransactionRow expenseOf(int id, DateTime at, double amount) =>
+        TransactionRow(
+          id: id,
+          accountId: 1,
+          holdingId: null,
+          cashSourceId: null,
+          cashTargetId: 1,
+          type: 'expense',
+          quantity: null,
+          price: null,
+          amount: amount,
+          currency: 'CNY',
+          occurredAt: at,
+          note: null,
+          costMoved: true,
+          internalMove: false,
+          costMovedAmount: null, // 旧流水缺省 → 回退原始 amount
+          updatedAt: at,
+        );
+
+    test('H2: 负段不计入收益权重，正段分配总量恒等于 totalGain', () {
+      final h = _amountHolding(quantity: 1000, cost: 1000); // gain 0
+      // 1/5 -1200（本金 500 被超扣 → 负段 -700），1/8 内部返还 +2200。
+      final flows = [
+        expenseOf(1, DateTime(2026, 1, 5), 1200),
+        _income(id: 2, at: DateTime(2026, 1, 8), amount: 2200, targetId: 1),
+      ];
+      final map = calc.amountHistory(
+        h,
+        flows,
+        from: DateTime(2026, 1, 1),
+        to: DateTime(2026, 1, 11),
+        today: DateTime(2026, 1, 11),
+      );
+      // 负段（1/5~1/7）值侧屏蔽为 0（empty 语义）。
+      expect(map['2026-01-06'], 0, reason: '负本金段值侧为 0');
+      // 末日钉到真实余额。
+      expect(map['2026-01-11'], closeTo(1000, 1e-6));
+      // gain=0：任何一天都不得因为权重污染出现假盈亏。
+      for (final e in map.entries) {
+        expect(e.value, greaterThanOrEqualTo(-1e-6),
+            reason: 'gain=0 时负段权重不得让正段超分配出假负值');
+      }
+    });
+
+    test('H3: 负段成本输出 0，不产生负 cost 幻象', () {
+      final h = _amountHolding(quantity: 1000, cost: 1000);
+      final flows = [
+        expenseOf(1, DateTime(2026, 1, 5), 1200),
+        _income(id: 2, at: DateTime(2026, 1, 8), amount: 2200, targetId: 1),
+      ];
+      final map = calc.amountPrincipal(
+        h,
+        flows,
+        from: DateTime(2026, 1, 1),
+        to: DateTime(2026, 1, 11),
+      );
+      // 负段日子成本为 0（与值侧一致，禁止负 totalCost）。
+      expect(map['2026-01-06'], 0, reason: '负本金段成本侧为 0');
+      expect(map['2026-01-10'], closeTo(1000, 1e-6),
+          reason: '恢复正常段后成本回到正的本金');
+    });
+  });
 }

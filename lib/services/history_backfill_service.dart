@@ -130,6 +130,19 @@ class HistoryBackfillService {
   /// value, destroying the whole trend. v9 replays their flows too.
   static const _smoothShareReplayMarker = 'backfill_v9_smooth_share_replay';
 
+  /// Marker for the v10 one-time full rebuild: the Sina/ETF history endpoint
+  /// (`web.ifzq.gtimg.cn/.../fqkline/get`) started answering a WAF 501, which
+  /// [TencentHistorySource] folded into an empty series. Because an empty
+  /// series was not treated as a failure, every day re-derived for those
+  /// holdings was priced from the *current* quote, so a whole window (e.g.
+  /// 国庆 10-01..10-08, no trading days in between) came out flat at today's
+  /// prices and the period's real move landed on the window's first day —
+  /// the 2026-10-08「今天的收益被算到 10-05」report. The endpoint is fixed
+  /// and an empty series now aborts, but the days written while it was broken
+  /// are still flat and a light run never revisits them, so every device
+  /// rebuilds the whole window once.
+  static const _sinaHistoryEndpointMarker = 'backfill_v10_sina_history_endpoint';
+
   /// Date (yyyy-MM-dd) of the previous successful run. A light run re-derives
   /// every day from this date through today, because any of them may have
   /// been overwritten by the live-quote path in the meantime and needs to be
@@ -145,6 +158,17 @@ class HistoryBackfillService {
   /// holidays, and a longer backfill is cheap (one day-by-day pass over the
   /// same price series).
   static const _firstRunLookbackDays = 7;
+
+  /// How long after its purchase date a holding still counts as *new*.
+  ///
+  /// A brand-new holding may legitimately have no price series yet (a fund
+  /// whose NAV has not been published, a code the source does not know). Its
+  /// days are then carried at the latest price — which for such a holding is
+  /// today's quote and close enough to every day it has existed — so the
+  /// rebuild must not abort over it. Once a holding is older than this, an
+  /// empty series means the whole window would be valued from the current
+  /// quote, which is the corruption the abort exists to prevent.
+  static const _newHoldingGraceDays = 7;
 
   /// Backfills snapshots for dates before today.
   ///
@@ -293,10 +317,31 @@ class HistoryBackfillService {
         to: current,
         capturedSellPrincipal: soldPrincipalById,
       );
+      final buy = h.purchaseDate ?? h.createdAt;
+      final buyDay = DateTime(buy.year, buy.month, buy.day);
       futures.add(() async {
         try {
           final history = await adapter.fetch(symbol, windowStart, current);
-          if (history.isNotEmpty) fillers[h.id] = HistoryPriceLookup(history);
+          if (history.isEmpty) {
+            // An empty series is the second half of the 2026-10-08 bug: the
+            // source answered (so nothing threw) but carried no rows, and the
+            // day loop below then priced EVERY re-derived day of this holding
+            // with the current quote. A window spanning a holiday (nothing
+            // between 09-30 and 10-08) came out flat at today's prices and
+            // the period's real move landed on 10-05.
+            //
+            // Tolerated only for a holding that has barely existed yet (see
+            // [_newHoldingGraceDays]): there is no earlier baseline to
+            // distort and every day it has is priced at its latest price
+            // already. Anything older aborts, exactly like a thrown fetch.
+            if (buyDay.isBefore(
+              todayDate.subtract(const Duration(days: _newHoldingGraceDays)),
+            )) {
+              failedSymbols.add(symbol);
+            }
+            return;
+          }
+          fillers[h.id] = HistoryPriceLookup(history);
         } catch (_) {
           // Record the failure; we abort the whole rebuild below rather than
           // letting the day-by-day loop substitute the current price for the
@@ -349,7 +394,8 @@ class HistoryBackfillService {
     final firstTimeRebuild =
         await _dao.getSetting(_backfillV3Marker) == null ||
         await _dao.getSetting(_shareReplayMarker) == null ||
-        await _dao.getSetting(_smoothShareReplayMarker) == null;
+        await _dao.getSetting(_smoothShareReplayMarker) == null ||
+        await _dao.getSetting(_sinaHistoryEndpointMarker) == null;
     // A type switch that crossed the amount-based boundary changes the
     // *meaning* of the stored numbers (see holding_type_conversion.dart); the
     // days written under the old semantics must not survive a light run (a
@@ -447,10 +493,19 @@ class HistoryBackfillService {
         // than the history series and is exactly the figure the portfolio
         // page / live snapshot shows — so the last day of a rebuild sums to
         // the same numbers. Whether the history series already contains
-        // today's close is irrelevant (it may also lag midday). Historical
-        // days keep the forward-fill semantics.
+        // today's close is irrelevant (it may also lag midday).
+        //
+        // Every other day is priced from the series and NOTHING ELSE: a
+        // historical day whose price is unknown must not be filled with the
+        // current quote, which belongs to another day — that substitution is
+        // what flattened a whole holiday window onto its first day and moved
+        // the period's return there. When the series does not reach back far
+        // enough, the nearest known historical price (its earliest row)
+        // stands in rather than today's.
         final isToday = key == todayKey(todayDate);
-        final price = isToday ? h.latestPrice : (hist ?? h.latestPrice);
+        final price = isToday
+            ? h.latestPrice
+            : (hist ?? filler?.firstPrice ?? h.latestPrice);
         if (price > 0) hasPrice = true;
         // Historical quantity/cost from the flow replay: a sold-out fund
         // still shows its real market value on the days it was held (v8).
@@ -509,6 +564,10 @@ class HistoryBackfillService {
       );
       await _dao.setSetting(
         _smoothShareReplayMarker,
+        '${current.millisecondsSinceEpoch}',
+      );
+      await _dao.setSetting(
+        _sinaHistoryEndpointMarker,
         '${current.millisecondsSinceEpoch}',
       );
     }
@@ -695,10 +754,13 @@ class HistoryBackfillService {
         final hist = filler?.priceOnOrBefore(key);
         // TODAY prices with the LIVE latest price, unconditionally — the
         // same rule [backfill] uses, so the day detail sums to the snapshot
-        // the rebuild wrote. Historical days keep forward-fill semantics.
+        // the rebuild wrote. A historical day is never priced from the
+        // current quote; it forward-fills from the series and, when the
+        // series does not reach that far back, falls back to its earliest
+        // row — the same rule [backfill] applies.
         final price = _isSameDay(target, DateTime.now())
             ? h.latestPrice
-            : (hist ?? h.latestPrice);
+            : (hist ?? filler?.firstPrice ?? h.latestPrice);
         final replayed = replays[h.id]?[key];
         final shares = replayed?.$1 ?? h.quantity;
         value = shares * price * valueRateOf(h, cnyRates);

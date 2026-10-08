@@ -7,6 +7,7 @@
 library;
 
 import 'enums.dart';
+import 'formats.dart';
 
 /// A-share trading session derived from the local clock.
 ///
@@ -23,7 +24,14 @@ enum MarketSession { preOpen, open, lunch, closed, weekend }
 ///
 /// Based on the State Council's official holiday schedule — 2026: 元旦
 /// 1/1-1/3, 春节 2/15-2/21, 清明 4/4-4/6, 劳动节 5/1-5/5, 端午 6/19-6/21,
-/// 中秋 9/25-9/27, 国庆 10/1-10/8. Extend per-year as announced.
+/// 中秋 9/25-9/27, 国庆 10/1-10/7 (10/8 起照常开市). Extend per-year as
+/// announced — and do NOT copy the previous year's arrangement: 2025 merged
+/// 中秋 and 国庆 into 10/1-10/8, which is what wrongly marked 2026-10-08 as a
+/// holiday here.
+///
+/// This set is the SINGLE source of truth for the static table; the trading
+/// calendar service's offline fallback imports [isHoliday] instead of keeping
+/// a second copy (the two copies had drifted apart).
 const Set<String> _aShareHolidayDates = {
   // 2026
   '2026-01-01', '2026-01-02', // 元旦 (1/3 = Saturday)
@@ -34,45 +42,69 @@ const Set<String> _aShareHolidayDates = {
   '2026-06-19', // 端午 (6/19 Fri, 6/20-6/21 weekend)
   '2026-09-25', // 中秋 (9/25 Fri, 9/26-9/27 weekend)
   '2026-10-01', '2026-10-02', '2026-10-05', '2026-10-06',
-  '2026-10-07', '2026-10-08', // 国庆 (10/3-10/4 weekend)
+  '2026-10-07', // 国庆 (10/3-10/4 weekend); 10/8(周四) 起照常开市
 };
 
 /// Whether [day] falls on an A-share holiday (weekday holidays only).
-bool isHoliday(DateTime day) {
-  final key =
-      '${day.year.toString().padLeft(4, '0')}-'
-      '${day.month.toString().padLeft(2, '0')}-'
-      '${day.day.toString().padLeft(2, '0')}';
-  return _aShareHolidayDates.contains(key);
-}
+bool isHoliday(DateTime day) => _aShareHolidayDates.contains(todayKey(day));
 
 /// Live trading-day set loaded from the Eastmoney calendar service, keyed by
 /// 'yyyy-MM-dd'. When non-null it overrides the static weekend + holiday
 /// approximation for exact 调休 handling.
 Set<String>? _liveTradingDays;
 
-/// Installs the fetched A-share trading-day set (yyyy-MM-dd) so
-/// [aShareSession] / [isTradingDay] use the authoritative calendar.
-/// Pass null to clear (revert to the static fallback).
-void setLiveTradingDays(Set<String>? days) => _liveTradingDays = days;
+/// Newest date the live calendar can legitimately speak for ('yyyy-MM-dd').
+///
+/// The fetched calendar is *history*: a fetch made on 10-01 knows nothing
+/// about 10-08. Past this date the set must not be used to assert "closed" —
+/// otherwise every trading day after the last fetch reads as 休市. That is
+/// exactly the 2026-10-08 regression: the calendar had been fetched during
+/// the National Day break, so its newest bar was 09-30.
+String? _liveCalendarCoverageEnd;
 
-bool _liveCalendarEnabled() => _liveTradingDays != null;
+/// Installs the fetched A-share trading-day set (yyyy-MM-dd) so
+/// [aShareSession] / [isTradingDay] use the authoritative calendar *within the
+/// window it actually covers*. Pass null to clear (revert to the static
+/// fallback).
+///
+/// [coverageEnd] is the newest date the fetch can speak for — normally the
+/// fetch date. It defaults to the newest date in [days].
+void setLiveTradingDays(Set<String>? days, {String? coverageEnd}) {
+  _liveTradingDays = days;
+  if (days == null || days.isEmpty) {
+    _liveCalendarCoverageEnd = null;
+    return;
+  }
+  var end = days.reduce((a, b) => a.compareTo(b) >= 0 ? a : b);
+  if (coverageEnd != null && coverageEnd.compareTo(end) > 0) end = coverageEnd;
+  _liveCalendarCoverageEnd = end;
+}
+
+/// Whether [day] is covered by the installed live calendar. Only then may the
+/// set be used to answer "is this a trading day?".
+bool _liveCalendarCovers(DateTime day) {
+  final end = _liveCalendarCoverageEnd;
+  if (end == null) return false;
+  return todayKey(day).compareTo(end) <= 0;
+}
+
+/// Whether [day] is known NOT to be an A-share trading day.
+///
+/// Inside the fetched calendar's window the set is authoritative (it encodes
+/// 调休 exactly). Outside it — or with no calendar at all — fall back to
+/// weekday + statutory holidays. A date the calendar cannot see must never be
+/// asserted as closed.
+bool _isNonTradingDay(DateTime day) {
+  final live = _liveTradingDays;
+  if (live != null && _liveCalendarCovers(day)) {
+    return !live.contains(todayKey(day));
+  }
+  return isWeekend(day) || isHoliday(day);
+}
 
 MarketSession aShareSession([DateTime? now]) {
   final n = now ?? DateTime.now();
-  if (_liveCalendarEnabled()) {
-    final key =
-        '${n.year.toString().padLeft(4, '0')}-'
-        '${n.month.toString().padLeft(2, '0')}-'
-        '${n.day.toString().padLeft(2, '0')}';
-    if (!_liveTradingDays!.contains(key)) {
-      return MarketSession.weekend;
-    }
-  } else if (n.weekday == DateTime.saturday ||
-      n.weekday == DateTime.sunday ||
-      isHoliday(n)) {
-    return MarketSession.weekend;
-  }
+  if (_isNonTradingDay(n)) return MarketSession.weekend;
   final t = n.hour * 60 + n.minute;
   if (t >= 9 * 60 + 30 && t < 11 * 60 + 30) return MarketSession.open;
   if (t >= 13 * 60 && t < 15 * 60) return MarketSession.open;
@@ -85,18 +117,9 @@ MarketSession aShareSession([DateTime? now]) {
 bool isWeekend(DateTime day) =>
     day.weekday == DateTime.saturday || day.weekday == DateTime.sunday;
 
-/// Whether the A-share market trades on [day]. Uses the live fetched
-/// calendar when installed, otherwise weekday + static holidays.
-bool isTradingDay(DateTime day) {
-  if (_liveCalendarEnabled()) {
-    final key =
-        '${day.year.toString().padLeft(4, '0')}-'
-        '${day.month.toString().padLeft(2, '0')}-'
-        '${day.day.toString().padLeft(2, '0')}';
-    return _liveTradingDays!.contains(key);
-  }
-  return !isWeekend(day) && !isHoliday(day);
-}
+/// Whether the A-share market trades on [day]. Uses the live fetched calendar
+/// within its coverage window, otherwise weekday + static holidays.
+bool isTradingDay(DateTime day) => !_isNonTradingDay(day);
 
 /// Whether a cached quote's `change` / `changePct` describes [day] itself
 /// for a holding priced by [source].

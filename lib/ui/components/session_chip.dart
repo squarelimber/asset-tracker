@@ -21,7 +21,7 @@ class SessionChip extends StatelessWidget {
       MarketSession.weekend => ('休市', T.text3, false),
     };
     return Tooltip(
-      message: 'A 股交易时段（按本地时间，不含节假日判断）',
+      message: 'A 股交易时段（含节假日/调休判断，按本地时间）',
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
         decoration: BoxDecoration(

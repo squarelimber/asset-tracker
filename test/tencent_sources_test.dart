@@ -189,5 +189,51 @@ void main() {
       expect(history, hasLength(1));
       expect(history['2026-08-06'], 101.0);
     });
+
+    test('queries the bare host first (the `web.` one is WAF-blocked)',
+        () async {
+      // `/appstock/app/fqkline/get` on `web.ifzq.gtimg.cn` has been answering
+      // a 501 JS challenge since ~2026-10-08 while the bare host still serves
+      // the qfq payload, so the bare host must be the primary one.
+      const body = '{"code":0,"data":{"sh512480":{"qfqday":[]}}}';
+      late Uri seen;
+      final client = MockClient((req) async {
+        seen = req.url;
+        return http.Response.bytes(asciiBytes(body), 200);
+      });
+      final source = TencentHistorySource(client: client);
+      await source.fetch('sh512480', DateTime(2026, 9, 20), DateTime(2026, 10, 8));
+
+      expect(seen.host, 'ifzq.gtimg.cn');
+      expect(seen.path, '/appstock/app/fqkline/get');
+      // 18 calendar days in the window, +20 rows of slack for week-long
+      // holidays, qfq-adjusted.
+      expect(seen.queryParameters['param'],
+          'sh512480,day,2026-09-20,2026-10-08,38,qfq');
+    });
+
+    test('falls back to the other host when the first one answers a WAF 501',
+        () async {
+      // A blocked host must not silently end up as "this symbol has no
+      // history": that empty series is what made the backfill price every
+      // historical day from the current quote.
+      const body = '{"code":0,"data":{"sh512480":{"qfqday":['
+          '["2026-09-30","0.96","0.955","0.97","0.95","1000"]'
+          ']}}}';
+      final hosts = <String>[];
+      final client = MockClient((req) async {
+        hosts.add(req.url.host);
+        if (req.url.host == 'ifzq.gtimg.cn') {
+          return http.Response('<!DOCTYPE html>waf', 501);
+        }
+        return http.Response.bytes(asciiBytes(body), 200);
+      });
+      final source = TencentHistorySource(client: client);
+      final history = await source.fetch(
+          'sh512480', DateTime(2026, 9, 20), DateTime(2026, 10, 8));
+
+      expect(hosts, ['ifzq.gtimg.cn', 'web.ifzq.gtimg.cn']);
+      expect(history['2026-09-30'], 0.955);
+    });
   });
 }

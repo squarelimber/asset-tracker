@@ -4,17 +4,23 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 import '../../core/formats.dart';
+import '../../core/market_session.dart' as session;
 import '../../data/asset_dao.dart';
 
 /// A-share trading-day calendar, fetched from the Eastmoney composite-index
 /// kline feed (each bar = one trading day, so statutory holidays and 调休 are
 /// inherently reflected) and cached locally per year.
 ///
-/// The device can be offline long-term, so [isTradingDay] falls back to a
-/// static weekday + statutory-holiday table (see core/market_session.dart)
-/// when the fetched calendar is unavailable. The fetch is cheap and is
-/// attempted lazily (first open of a year / the December rollover), so the
-/// live calendar replaces the static approximation as soon as it arrives.
+/// Two rules keep the cache honest:
+///  * it is refreshed at most once a day, because a fetch made *before* a
+///    trading day simply cannot contain it;
+///  * it only answers for the window it covers — see [coverageEndDay]. Past
+///    that window [isTradingDay] falls back to the static weekday + holiday
+///    table ([session.isHoliday]) instead of asserting "closed", which would
+///    turn every trading day after the last fetch into 休市.
+///
+/// The device can be offline long-term, so a failed fetch silently keeps
+/// whatever is cached.
 class TradingCalendarService {
   TradingCalendarService(this._dao, {http.Client? client})
     : _client = client ?? http.Client();
@@ -32,31 +38,62 @@ class TradingCalendarService {
   final Map<int, Set<String>> _cacheYears = {};
 
   /// Whether the A-share market trades on [day]. Uses the fetched calendar
-  /// when available; otherwise falls back to weekday + static holidays.
+  /// when it covers [day]; otherwise falls back to weekday + static holidays.
   Future<bool> isTradingDay(DateTime day) async {
     final year = day.year;
     var set = await _calendarFor(year);
-    if (set == null) {
+    // Attempt a refresh when the year is missing *or* the cache is too old to
+    // speak for [day] (a fetch made before a trading day cannot contain it).
+    // _maybeFetchYear itself skips when today's fetch already happened.
+    if (set == null || !await _covers(day)) {
       await _maybeFetchYear(year);
       set = await _calendarFor(year);
     }
-    if (set != null) {
+    if (set != null && await _covers(day)) {
       return set.contains(todayKey(day));
     }
     // Fallback: weekday and not a statutory holiday.
-    if (day.weekday == DateTime.saturday || day.weekday == DateTime.sunday) {
-      return false;
-    }
-    return !_isStaticHoliday(day);
+    return !session.isWeekend(day) && !session.isHoliday(day);
   }
 
-  /// Fetches (and caches) the trading days of [year] when they are not yet
-  /// present. Also rolls over: on/after Dec 1 the *next* year is fetched so
-  /// the new year's holiday calendar is ready before it starts.
+  /// Newest date the cached fetch can speak for ('yyyy-MM-dd'): the later of
+  /// the fetch date and the newest stored trading day. Null when nothing was
+  /// ever fetched.
+  ///
+  /// Callers installing the calendar into [session.setLiveTradingDays] must
+  /// pass this as `coverageEnd` so dates past the fetch are not judged by a
+  /// calendar that cannot know about them.
+  Future<String?> coverageEndDay() async {
+    String? end;
+    final ms = int.tryParse(await _dao.getSetting(_settingsKeyFetched) ?? '');
+    if (ms != null) {
+      end = todayKey(DateTime.fromMillisecondsSinceEpoch(ms));
+    }
+    final all = await _loadAll();
+    for (final list in all.values) {
+      for (final d in list) {
+        if (end == null || d.compareTo(end) > 0) end = d;
+      }
+    }
+    return end;
+  }
+
+  Future<bool> _covers(DateTime day) async {
+    final end = await coverageEndDay();
+    if (end == null) return false;
+    return todayKey(day).compareTo(end) <= 0;
+  }
+
+  /// Fetches (and caches) the trading days of [year] when they are missing or
+  /// the cache predates today. Also rolls over: on/after Dec 1 the *next* year
+  /// is fetched so the new year's holiday calendar is ready before it starts.
   Future<void> _maybeFetchYear(int year) async {
     final now = DateTime.now();
     final needsNext = now.month == 12 && year == now.year + 1;
-    if (await _calendarFor(year) != null) return;
+    final hasData = await _calendarFor(year) != null;
+    // Refresh at most once per day: a same-day cache is as fresh as this feed
+    // gets, but yesterday's fetch cannot know about today's session.
+    if (hasData && await _fetchedToday()) return;
     try {
       await _fetchAndCache(year);
       if (needsNext) {
@@ -65,6 +102,16 @@ class TradingCalendarService {
     } catch (_) {
       // Offline / transient failure: keep the static fallback.
     }
+  }
+
+  Future<bool> _fetchedToday() async {
+    final ms = int.tryParse(await _dao.getSetting(_settingsKeyFetched) ?? '');
+    if (ms == null) return false;
+    final fetched = DateTime.fromMillisecondsSinceEpoch(ms);
+    final now = DateTime.now();
+    return fetched.year == now.year &&
+        fetched.month == now.month &&
+        fetched.day == now.day;
   }
 
   Future<void> _fetchAndCache(int year) async {
@@ -92,16 +139,12 @@ class TradingCalendarService {
         if (k is String) k.split(',')[0],
     };
     if (days.isEmpty) return;
-    _cacheYears[year] = days;
 
-    // Persist only if this year is complete enough to be useful; partial
-    // years (e.g. fetched mid-year) are still fine for judging today.
-    final existing = await _calendarFor(year);
-    final merged = existing ?? <String>{};
-    merged.addAll(days);
-    _cacheYears[year] = merged;
-
+    // Merge with what is already persisted: a re-fetch must never shrink a
+    // year that was fetched more completely before.
     final byYear = await _loadAll();
+    final merged = <String>{...?byYear[year.toString()], ...days};
+    _cacheYears[year] = merged;
     byYear[year.toString()] = merged.toList()..sort();
     await _dao.setSetting(_settingsKeyCalendar, jsonEncode(byYear));
     await _dao.setSetting(
@@ -149,21 +192,4 @@ class TradingCalendarService {
       return {};
     }
   }
-}
-
-/// Static statutory-holiday fallback (weekdays the A-share market is closed).
-/// Keep in sync with core/market_session.dart's _aShareHolidayDates.
-bool _isStaticHoliday(DateTime day) {
-  const dates = <String>{
-    // 2026
-    '2026-01-01', '2026-01-02',
-    '2026-02-16', '2026-02-17', '2026-02-18', '2026-02-19', '2026-02-20',
-    '2026-04-06',
-    '2026-05-01', '2026-05-04', '2026-05-05',
-    '2026-06-19',
-    '2026-09-25',
-    '2026-10-01', '2026-10-02', '2026-10-05', '2026-10-06', '2026-10-07',
-    '2026-10-08',
-  };
-  return dates.contains(todayKey(day));
 }

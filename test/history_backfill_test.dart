@@ -429,6 +429,55 @@ void main() {
     }
   });
 
+  test('an empty history for an older holding aborts the rebuild', () async {
+    // The 2026-10-08 bug: the Sina/ETF qfq endpoint answered a WAF 501, which
+    // the source folded into an *empty* series. The backfill accepted that as
+    // "no data" and then priced every re-derived day with the CURRENT quote,
+    // so a window spanning the 国庆 holiday came out flat at today's prices
+    // and the period's real move landed on its first day — reported as
+    // 「今天的收益被算到 10-05」. Only a holding that has barely existed may
+    // be carried that way; anything older must abort.
+    await seedFundHolding(purchaseDate: DateTime(2026, 6, 29), latest: 2.9);
+    final fake = _FakeHistorySource(); // returns {} for 110022
+    final service =
+        HistoryBackfillService(dao, sources: {MarketSource.eastmoney: fake});
+
+    final result = await service.backfill(now: DateTime(2026, 7, 8));
+
+    expect(result.ok, isFalse);
+    expect(result.days, 0);
+    expect(result.historyUnavailable, isTrue);
+    expect(result.message, contains('110022'));
+    expect(await dao.getSnapshots(), isEmpty);
+  });
+
+  test('days before the series starts take its earliest price, not the '
+      'current quote', () async {
+    // The series begins after the purchase date (a fund whose NAV only starts
+    // at launch, or a truncated payload). Those leading days must not be
+    // valued at TODAY's price — substituting the current quote for an
+    // unknown historical day is exactly what flattened a whole window.
+    await seedFundHolding(purchaseDate: DateTime(2026, 7, 1), latest: 2.9);
+    final fake = _FakeHistorySource();
+    fake.data['110022'] = {
+      for (var d = DateTime(2026, 7, 3); !d.isAfter(DateTime(2026, 7, 8)); d = d.add(const Duration(days: 1)))
+        _FakeHistorySource.key(d): 2.6,
+    };
+    final service =
+        HistoryBackfillService(dao, sources: {MarketSource.eastmoney: fake});
+
+    await service.backfill(now: DateTime(2026, 7, 8));
+
+    final snapshots = await dao.getSnapshots();
+    double valueOn(String date) =>
+        snapshots.firstWhere((s) => s.date == date).totalValue;
+    // 07-01 / 07-02 predate the series: its earliest close (2.6) stands in.
+    expect(valueOn('2026-07-01'), closeTo(260, 1e-6));
+    expect(valueOn('2026-07-02'), closeTo(260, 1e-6));
+    // Today still prices from the live quote, as before.
+    expect(valueOn('2026-07-08'), closeTo(290, 1e-6));
+  });
+
   group('a day frozen by the live path is re-derived', () {
     /// A day is written twice: the backfill prices it from the closing
     /// series, then the live path overwrites it from intraday quotes when the

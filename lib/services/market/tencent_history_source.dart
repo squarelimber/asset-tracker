@@ -6,7 +6,7 @@ import '../../core/enums.dart';
 import 'history_source.dart';
 import 'market_data_source.dart';
 
-/// Tencent K-line history (web.ifzq.gtimg.cn) — CORS-friendly
+/// Tencent K-line history (ifzq.gtimg.cn) — CORS-friendly
 /// (`Access-Control-Allow-Origin: *`) replacement for the Sina K-line
 /// endpoints on the web.
 ///
@@ -21,7 +21,28 @@ class TencentHistorySource extends HistoryDataSource {
 
   final http.Client _client;
 
-  static const _base = 'https://web.ifzq.gtimg.cn/appstock/app/fqkline/get';
+  /// Primary host. `web.ifzq.gtimg.cn` used to be the only one, but its
+  /// `/appstock/app/fqkline/get` path began answering a WAF `501` (a JS
+  /// challenge page, no data) — reproduced 2026-10-08 with and without a
+  /// proxy, with no header, a browser UA and a Referer, and with every
+  /// `param` spelling, while other paths on the same host stayed 200. The
+  /// bare host serves the same qfq-adjusted `qfqday` payload, so it is
+  /// queried first and the old host is kept as a fallback in case the WAF
+  /// rule is moved rather than removed.
+  ///
+  /// This is not cosmetic: a 501 came back as an *empty* series, which the
+  /// backfill used to accept as "no data" and then price every historical
+  /// day of that holding with the current quote — the 2026-10-08
+  /// 「今天的收益被算到 10-05」 bug.
+  static const _base = 'https://ifzq.gtimg.cn/appstock/app/fqkline/get';
+  static const _fallbackBase =
+      'https://web.ifzq.gtimg.cn/appstock/app/fqkline/get';
+
+  static const _headers = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+        'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Referer': 'https://gu.qq.com/',
+  };
 
   /// Max rows per request accepted by the endpoint.
   static const _maxRows = 800;
@@ -47,22 +68,47 @@ class TencentHistorySource extends HistoryDataSource {
     return result;
   }
 
+  /// Rows for [symbol] in [from]..[to]. The hosts are tried in order, but
+  /// only when the request itself failed (transport error or non-200): a
+  /// well-formed response is taken at face value even when it carries no
+  /// rows, because a symbol can legitimately have no bars in the window.
   Future<List<List<dynamic>>> _request(
     String symbol,
     DateTime from,
     DateTime to,
     int count,
   ) async {
-    final uri = Uri.parse(_base).replace(queryParameters: {
-      'param': '$symbol,day,${_key(from)},${_key(to)},$count,qfq',
-    });
-    final resp = await _client.get(uri).timeout(marketHttpTimeout);
-    if (resp.statusCode != 200) return const [];
-    final json = jsonDecode(utf8.decode(resp.bodyBytes)) as Map<String, dynamic>;
-    final data = json['data']?[symbol] as Map<String, dynamic>?;
-    if (data == null) return const [];
-    return ((data['qfqday'] ?? data['day'] ?? const []) as List)
-        .cast<List<dynamic>>();
+    for (final base in const [_base, _fallbackBase]) {
+      final rows = await _requestFrom(base, symbol, from, to, count);
+      if (rows != null) return rows;
+    }
+    return const [];
+  }
+
+  /// Rows from [base], or null when the request did not yield a usable
+  /// payload (so the caller can try the next host).
+  Future<List<List<dynamic>>?> _requestFrom(
+    String base,
+    String symbol,
+    DateTime from,
+    DateTime to,
+    int count,
+  ) async {
+    try {
+      final uri = Uri.parse(base).replace(queryParameters: {
+        'param': '$symbol,day,${_key(from)},${_key(to)},$count,qfq',
+      });
+      final resp =
+          await _client.get(uri, headers: _headers).timeout(marketHttpTimeout);
+      if (resp.statusCode != 200) return null;
+      final json = jsonDecode(utf8.decode(resp.bodyBytes)) as Map<String, dynamic>;
+      final data = json['data']?[symbol] as Map<String, dynamic>?;
+      if (data == null) return null;
+      return ((data['qfqday'] ?? data['day'] ?? const []) as List)
+          .cast<List<dynamic>>();
+    } catch (_) {
+      return null;
+    }
   }
 
   void _collect(
