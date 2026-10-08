@@ -595,11 +595,13 @@ void main() {
         () async {
       await dao.setSetting('backfill_v7_gold_spot_and_today', '1');
       await dao.setSetting('backfill_v8_share_replay', '1');
-      // v9 (smooth share replay) migrated too: this is a fully current
-      // database, so the run below is a plain light run. The one-time full
-      // rebuild for databases missing the v9 marker is covered by
-      // smooth_share_replay_test.dart.
+      // v9 (smooth share replay) and v10 (Sina history endpoint) migrated too:
+      // this is a fully current database, so the run below is a plain light
+      // run. The one-time full rebuild for databases missing the v9 marker is
+      // covered by smooth_share_replay_test.dart; the v10 one has its own case
+      // further down in this file.
       await dao.setSetting('backfill_v9_smooth_share_replay', '1');
+      await dao.setSetting('backfill_v10_sina_history_endpoint', '1');
       await seedFundHolding(purchaseDate: DateTime(2026, 7, 1), latest: 2.9);
       final fake = _FakeHistorySource();
       fake.data['110022'] = {
@@ -637,6 +639,46 @@ void main() {
       expect(byDate['2026-07-08']!.totalValue, 999,
           reason: 'a day past the fallback week is left alone');
     });
+  });
+
+  test('v10 标记：老库（v7/v8/v9 已跑）首次打开全量重建，覆盖锚点前的旧口径快照',
+      () async {
+    // 腾讯端点坏掉的那段时间，回填把每个历史日都写成了当天的报价（整条曲线被
+    // 拉平）。修好端点后只有「缺 v10 标记 → 全量重建」能覆盖这些快照：轻量
+    // 回填的窗口从 backfill_last_run 开始，够不到锚点之前的日期。
+    await dao.setSetting('backfill_v7_gold_spot_and_today', '1');
+    await dao.setSetting('backfill_v8_share_replay', '1');
+    await dao.setSetting('backfill_v9_smooth_share_replay', '1');
+    await dao.setSetting('backfill_last_run', '2026-07-16');
+    await seedFundHolding(purchaseDate: DateTime(2026, 7, 1), latest: 2.9);
+    final fake = _FakeHistorySource();
+    fake.data['110022'] = {
+      for (var d = DateTime(2026, 7, 1);
+          !d.isAfter(DateTime(2026, 7, 16));
+          d = d.add(const Duration(days: 1)))
+        _FakeHistorySource.key(d): 2.6,
+    };
+    // 锚点（07-16）之前的旧口径快照：轻量回填本来不会碰它。
+    await dao.upsertSnapshot(SnapshotsCompanion.insert(
+      date: '2026-07-02',
+      currency: const Value('CNY'),
+      totalValue: 999,
+      totalCost: 250,
+    ));
+
+    final service =
+        HistoryBackfillService(dao, sources: {MarketSource.eastmoney: fake});
+    await service.backfill(now: DateTime(2026, 7, 16));
+
+    final byDate = {for (final s in await dao.getSnapshots()) s.date: s};
+    expect(byDate['2026-07-02']!.totalValue, closeTo(260, 1e-6),
+        reason: '缺 v10 标记必须全量重建，覆盖锚点之前的旧口径快照');
+    // drift 也导出 isNotNull（列表达式），这里用布尔断言避免命名冲突。
+    expect(
+      (await dao.getSetting('backfill_v10_sina_history_endpoint')) != null,
+      isTrue,
+      reason: '重建成功后写回标记，之后恢复轻量回填',
+    );
   });
 
   test('a transfer that empties an account leaves no phantom cost behind',
