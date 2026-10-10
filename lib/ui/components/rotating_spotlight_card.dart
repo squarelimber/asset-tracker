@@ -9,6 +9,7 @@ import '../../app/providers.dart';
 import '../../core/enums.dart';
 import '../../core/formats.dart';
 import '../../core/market_session.dart';
+import '../../core/ui_prefs.dart';
 import '../../domain/product_monthly_earnings.dart';
 import '../../services/history_backfill_service.dart';
 import '../tokens.dart';
@@ -20,9 +21,9 @@ const double _cardRadius = 12;
 
 /// 总览页的「立方体滚轮」：单个 3D 立方体绕水平轴转动，四个面轮流朝向
 /// 观众——今日最佳 / 今日最差 / 本月最佳（口径 A）＋ 无数据占位面。
-/// 盒身与面都是淡蓝渐变（正面近白、侧面压深一档）；每 2.3s 停留后 0.9s
-/// 翻转 90°；透视投影呈现立方体滚动感（quad-flip：当前面向下翻出、
-/// 下一面从上方翻入）。
+/// 盒身与面都是淡蓝渐变（正面近白、侧面压深一档）；每面停留一段可配置的
+/// 时长（设置页「显示 → 滚动卡停留时间」，默认 2.3s）后 0.9s 翻转 90°；
+/// 透视投影呈现立方体滚动感（quad-flip：当前面向下翻出、下一面从上方翻入）。
 ///
 /// 相位 = `_turns + _flip.value`，每 +1 前进 90°，四面按声明顺序
 /// 0→1→2→3 循环（见 [_slots]：槽位顺序必须与面的声明顺序一致）。
@@ -38,7 +39,6 @@ class RotatingSpotlightCard extends ConsumerStatefulWidget {
 class _RotatingSpotlightCardState extends ConsumerState<RotatingSpotlightCard>
     with SingleTickerProviderStateMixin {
   static const _flipDuration = Duration(milliseconds: 900);
-  static const _holdDuration = Duration(milliseconds: 2300);
 
   /// 透视投影系数（见下方 transform 的 setEntry）。值越小纵深越弱。
   /// 取 0.0044 ≈ 卡高从 104 减半前的两倍：纵深强弱看的是 `p·radius`
@@ -46,6 +46,10 @@ class _RotatingSpotlightCardState extends ConsumerState<RotatingSpotlightCard>
   static const _perspective = 0.0044;
 
   late final AnimationController _flip;
+
+  /// 每面停留时长（毫秒）。先取默认值，等 provider 的首个值到达后由
+  /// [_applyHoldMs] 校正成用户设置。
+  int _holdMs = defaultSpotlightHoldMs;
 
   /// 已完成的翻转次数；静止相位 = `_turns`（此时 [_flip] 的值已归零）。
   int _turns = 0;
@@ -67,10 +71,22 @@ class _RotatingSpotlightCardState extends ConsumerState<RotatingSpotlightCard>
     super.dispose();
   }
 
-  /// 停留 [_holdDuration] 后翻转到下一面。
+  /// 设置页改了停留时长：换用新值并重排下一次翻转。
+  ///
+  /// 正在翻转时只记下新值、不碰定时器 —— 本轮结束时的 [_scheduleNext]
+  /// 自然会用新值。此刻若强行重排，就会多出一个与动画完成回调并行的
+  /// 定时器，节奏会开始乱跳。
+  void _applyHoldMs(int ms) {
+    if (ms == _holdMs) return;
+    _holdMs = ms;
+    if (_flip.isAnimating) return;
+    _scheduleNext();
+  }
+
+  /// 停留 [_holdMs] 后翻转到下一面。
   void _scheduleNext() {
     _hold?.cancel();
-    _hold = Timer(_holdDuration, () {
+    _hold = Timer(Duration(milliseconds: _holdMs), () {
       if (_disposed || !mounted) return;
       _flip.forward(from: 0).whenComplete(() {
         if (_disposed || !mounted) return;
@@ -112,6 +128,13 @@ class _RotatingSpotlightCardState extends ConsumerState<RotatingSpotlightCard>
     // 「小眼睛」开关（默认隐藏）：数字面必须一起遮。卡片原先没订阅它，
     // 于是滚到数字面时会把真实金额直接露出来。
     final hidden = ref.watch(hideAmountsProvider);
+    // 停留时长来自设置页。这里用 listen 而非 watch：值一变就重排下一次
+    // 翻转，所以改完设置回到总览页立刻是新节奏 —— 卡片 state 不会因此
+    // 重建，只 watch 的话会一直沿用 initState 时排下的那个定时器。
+    ref.listen(spotlightHoldMsProvider, (_, next) {
+      final ms = next.valueOrNull;
+      if (ms != null) _applyHoldMs(ms);
+    });
 
     final faces = _buildFaces(
       todayAsync,

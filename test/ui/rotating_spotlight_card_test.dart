@@ -1,6 +1,7 @@
 import 'package:asset_tracker/app/providers.dart';
 import 'package:asset_tracker/core/enums.dart';
 import 'package:asset_tracker/core/formats.dart';
+import 'package:asset_tracker/core/ui_prefs.dart';
 import 'package:asset_tracker/domain/product_monthly_earnings.dart';
 import 'package:asset_tracker/services/history_backfill_service.dart';
 import 'package:asset_tracker/ui/components/rotating_spotlight_card.dart';
@@ -67,6 +68,11 @@ void main() {
 
     final container = ProviderContainer(
       overrides: [
+        // 卡片现在会读设置页的停留时长（走 daoProvider → 真库）；
+        // 用例里直接钉成默认值，避免测试去碰数据库。
+        spotlightHoldMsProvider.overrideWith(
+          (ref) => Stream<int>.value(defaultSpotlightHoldMs),
+        ),
         dayHoldingsBreakdownProvider(today)
             .overrideWith((ref) => const <DayHoldingValue>[]),
         dayHoldingsBreakdownProvider(prevDay)
@@ -130,6 +136,11 @@ void main() {
     // 今日 +100（1100 − 1000），昨日 1000 ⇒ 今日最佳/最差都指向同一持仓。
     final container = ProviderContainer(
       overrides: [
+        // 卡片现在会读设置页的停留时长（走 daoProvider → 真库）；
+        // 用例里直接钉成默认值，避免测试去碰数据库。
+        spotlightHoldMsProvider.overrideWith(
+          (ref) => Stream<int>.value(defaultSpotlightHoldMs),
+        ),
         dayHoldingsBreakdownProvider(today).overrideWith(
           (ref) => const [
             DayHoldingValue(
@@ -188,6 +199,56 @@ void main() {
     await tester.pump();
     expect(find.text('+100.00'), findsWidgets, reason: '显示态应给出真实金额');
     expect(find.text(Formats.masked()), findsNothing);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(milliseconds: 1));
+  });
+
+  testWidgets('停留时长可配置：设为 1.5 秒后按新节奏翻转', (tester) async {
+    tester.view.physicalSize = const Size(400, 400);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final prevDay = DateTime(now.year, now.month, now.day - 1);
+
+    final container = ProviderContainer(
+      overrides: [
+        // 设置页把「滚动卡停留时间」调成 1.5 秒。
+        spotlightHoldMsProvider.overrideWith((ref) => Stream<int>.value(1500)),
+        dayHoldingsBreakdownProvider(today)
+            .overrideWith((ref) => const <DayHoldingValue>[]),
+        dayHoldingsBreakdownProvider(prevDay)
+            .overrideWith((ref) => const <DayHoldingValue>[]),
+        productEarningsProvider(today.year)
+            .overrideWith((ref) => const <ProductEarnings>[]),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: const MaterialApp(
+          home: Scaffold(
+            body: Center(
+              child: SizedBox(width: 360, child: RotatingSpotlightCard()),
+            ),
+          ),
+        ),
+      ),
+    );
+    // 两次 pump：让 provider 的首个值到达、listen 回调把新时长装进定时器。
+    await tester.pump();
+    await tester.pump();
+    expect(frontFace(tester), 0, reason: '初始应停在「今日最佳」');
+
+    // 1.5s 停留 + 0.9s 翻转 ⇒ 2.6s 时早已翻面；若还在用旧的 2.3s 默认值，
+    // 此刻仍停在第一面 —— 这条断言正是在区分「设置生效」与「没生效」。
+    await pumpFor(tester, const Duration(milliseconds: 1600));
+    await pumpFor(tester, const Duration(milliseconds: 1000));
+    expect(frontFace(tester), 1, reason: '1.5 秒档位应已翻到第二面');
 
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump(const Duration(milliseconds: 1));

@@ -10,6 +10,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../app/providers.dart';
 import '../../../core/formats.dart';
 import '../../../core/responsive.dart';
+import '../../../core/ui_prefs.dart';
 import '../../../services/alert_notification_service.dart';
 import '../../../services/backup_service.dart';
 import '../../../services/csv_export.dart';
@@ -116,6 +117,11 @@ class SettingsPage extends ConsumerWidget {
                   ),
                 ),
               ),
+              const SizedBox(height: T.s4),
+              const SectionHeader(label: '显示'),
+              Text('总览页滚动卡的展示节奏。', style: T.label()),
+              const SizedBox(height: T.s3),
+              const TerminalCard(child: _SpotlightHoldRow()),
               const SizedBox(height: T.s4),
               if (!kIsWeb) const _NotificationsSection(),
               if (!kIsWeb) const SizedBox(height: T.s4),
@@ -331,6 +337,54 @@ class SettingsPage extends ConsumerWidget {
       mime: 'text/csv',
       typeGroup: const XTypeGroup(label: 'CSV', extensions: ['csv']),
     );
+  }
+}
+
+/// 焦点滚轮卡的停留时长选择器。
+///
+/// 写进 settings 表（跨启动保留）；卡片自己也监听同一个 provider，所以
+/// 改完回到总览页就是新节奏，不用重进页面、也不用重启。
+class _SpotlightHoldRow extends ConsumerWidget {
+  const _SpotlightHoldRow();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final ms =
+        ref.watch(spotlightHoldMsProvider).valueOrNull ?? defaultSpotlightHoldMs;
+    return DataRow(
+      leading: const Icon(Icons.slow_motion_video_outlined),
+      title: '滚动卡停留时间',
+      subtitle: const Text('总览页焦点卡每面停留多久再翻转'),
+      trailing: Text(
+        spotlightHoldLabel(ms),
+        style: T.mono(size: 13, color: T.text2),
+      ),
+      showChevron: true,
+      onTap: () => _pick(context, ref, ms),
+    );
+  }
+
+  Future<void> _pick(BuildContext context, WidgetRef ref, int current) async {
+    final picked = await showDialog<int>(
+      context: context,
+      builder: (context) => SimpleDialog(
+        title: const Text('滚动卡停留时间'),
+        children: [
+          for (final ms in spotlightHoldChoicesMs)
+            SimpleDialogOption(
+              onPressed: () => Navigator.pop(context, ms),
+              child: Row(
+                children: [
+                  Expanded(child: Text(spotlightHoldLabel(ms))),
+                  if (ms == current) const Icon(Icons.check, size: 18),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+    if (picked == null) return;
+    await ref.read(daoProvider).setSetting(spotlightHoldMsKey, '$picked');
   }
 }
 

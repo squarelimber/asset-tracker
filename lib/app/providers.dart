@@ -3,6 +3,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 
 import '../core/history_sync.dart';
 import '../core/symbols.dart';
+import '../core/ui_prefs.dart';
 import '../data/asset_dao.dart';
 import '../data/database.dart';
 import '../domain/daily_earnings.dart';
@@ -24,6 +25,22 @@ final databaseProvider = Provider<AppDatabase>((ref) => AppDatabase());
 /// Privacy toggle: hides monetary amounts on the portfolio page.
 /// Defaults to hidden; resets on every launch (not persisted).
 final hideAmountsProvider = StateProvider<bool>((ref) => true);
+
+/// 总览页焦点滚轮卡的每面停留时长（毫秒），存在 settings 表里。
+///
+/// 与 [hideAmountsProvider] 不同，这一项是**持久化**的：卡片节奏是偏好而
+/// 非临时开关，重启后应当记住。脏值（0 / 负数 / 非数字）一律回退默认 ——
+/// 0 会让卡片每帧都排一次翻转，疯狂打转。
+final spotlightHoldMsProvider = StreamProvider<int>((ref) {
+  return ref
+      .watch(daoProvider)
+      .watchSetting(spotlightHoldMsKey)
+      .map((raw) {
+        final ms = int.tryParse(raw ?? '');
+        return (ms != null && ms > 0) ? ms : defaultSpotlightHoldMs;
+      })
+      .distinct();
+});
 
 /// Identity of the installed build, e.g. `0.9.9+35`; `未知` when the platform
 /// cannot report it. Shown in Settings → 关于 so a bug report can state exactly
