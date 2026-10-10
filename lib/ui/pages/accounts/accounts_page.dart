@@ -9,6 +9,7 @@ import '../../../core/formats.dart';
 import '../../../core/history_sync.dart';
 import '../../../core/responsive.dart';
 import '../../../data/database.dart';
+import '../../../domain/holding_category.dart';
 import '../../components/app_bar_actions.dart';
 import '../../components/empty_state.dart';
 import '../../components/error_state.dart';
@@ -148,9 +149,11 @@ class _AccountCard extends ConsumerWidget {
                     ),
                   ),
                   Text(
+                    // Formats.money already prefixes the currency symbol —
+                    // adding '¥' here printed it twice (¥¥640,109.86).
                     hide
                         ? '****'
-                        : '¥${Formats.money(total)} · ${list.length} 项',
+                        : '${Formats.money(total)} · ${list.length} 项',
                     style: T.mono(size: 12, color: T.text2),
                   ),
                   const SizedBox(width: T.s1),
@@ -228,7 +231,7 @@ class _AccountCard extends ConsumerWidget {
   }
 }
 
-/// 单行占比条：按资产类型聚合市值，展示每类占比与颜色。
+/// 单行占比条：按归类（`effectiveCategoryOf`）聚合市值，展示每类占比与颜色。
 class _AccountTypeBar extends StatelessWidget {
   const _AccountTypeBar({
     required this.holdings,
@@ -242,10 +245,19 @@ class _AccountTypeBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Aggregate by high-level category (股票/黄金/债券/现金/…).
+    // Aggregate by high-level category (权益/黄金/债券/现金/…), following the
+    // same rule as the overview page:
+    //  * the holding's manual category override wins over the one implied by
+    //    its asset type — a 黄金ETF is an 场内基金 with 黄金 exposure, so
+    //    reading AssetType.category directly filed it under 权益;
+    //  * liabilities are deducted from net worth, never allocated (the
+    //    account total above excludes them too, so they must not inflate the
+    //    denominator here either).
     final byCat = <AssetCategory, double>{};
     for (final h in holdings) {
-      final cat = AssetType.fromStorage(h.assetType).category;
+      final type = AssetType.fromStorage(h.assetType);
+      if (type == AssetType.liability) continue;
+      final cat = effectiveCategoryOf(h);
       byCat[cat] = (byCat[cat] ?? 0) + _amountValue(h, rates);
     }
     final entries = byCat.entries.toList()
@@ -294,9 +306,11 @@ class _AccountTypeBar extends StatelessWidget {
                     style: T.mono(size: 11, color: T.text2),
                   ),
                   if (!hide) ...[
-                    const SizedBox(width: 2),
+                    const SizedBox(width: T.s1),
+                    // '·' separator: with only a 2px gap the share and the
+                    // amount read as one run ("0.00%0.0万").
                     Text(
-                      Formats.amountCompact(e.value),
+                      '· ${Formats.amountCompact(e.value)}',
                       style: T.mono(size: 11, color: T.text3),
                     ),
                   ],
