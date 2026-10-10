@@ -803,7 +803,7 @@ class _NetWorthChartState extends ConsumerState<NetWorthChart> {
                         spacing: 14,
                         runSpacing: 4,
                         children: [
-                          _LegendDot(color: T.trendLine, label: '资产'),
+                          _LegendDot(gradient: T.trendGradient, label: '资产'),
                           for (final code in _benchSelected)
                             if (_benchData.containsKey(code))
                               _LegendDot(
@@ -964,9 +964,8 @@ class _TrendChartState extends State<_TrendChart>
     final rates = widget.rates;
     final hideAmounts = widget.hideAmounts;
 
-    // 曲线色固定为「白偏蓝」的 T.trendLine（不随涨跌变色）；涨跌由统计
-    // 数字与末端脉冲点表达。
-    final color = T.trendLine;
+    // 曲线用青→紫横向渐变（跨整幅绘图区：gradientArea 见 lineBarsData），
+    // 不随涨跌变色；涨跌由统计数字与末端脉冲点表达。
     final isRate = view == _TrendView.returnRate;
     // Normalize the asset series to start at 0% at the range start, so it
     // shares the same baseline as the normalized index benchmarks: both
@@ -1269,7 +1268,8 @@ class _TrendChartState extends State<_TrendChart>
                         spots: points,
                         isCurved: !dense,
                         curveSmoothness: 0.25,
-                        color: color.withValues(alpha: 0.12),
+                        gradient: T.trendGlowGradient,
+                        gradientArea: LineChartGradientArea.wholeChart,
                         barWidth: 6,
                         dotData: const FlDotData(show: false),
                       ),
@@ -1280,19 +1280,16 @@ class _TrendChartState extends State<_TrendChart>
                         // loops and false detail. Short ranges keep the smooth curve.
                         isCurved: !dense,
                         curveSmoothness: 0.25,
-                        color: color,
+                        // 渐变横向铺满整幅绘图区，两端色才分别落在左右边缘；
+                        // 留 rectAroundTheLine 会让渐变被曲线包围盒（左右两端
+                        // 的取整）压缩，紫端提前出现。
+                        gradient: T.trendGradient,
+                        gradientArea: LineChartGradientArea.wholeChart,
                         barWidth: dense ? 2 : 2.5,
                         dotData: const FlDotData(show: false),
                         belowBarData: BarAreaData(
                           show: true,
-                          gradient: LinearGradient(
-                            begin: Alignment.topCenter,
-                            end: Alignment.bottomCenter,
-                            colors: [
-                              color.withValues(alpha: 0.22),
-                              color.withValues(alpha: 0.02),
-                            ],
-                          ),
+                          gradient: T.trendAreaGradient,
                         ),
                       ),
                       for (final entry in benchSeries.entries)
@@ -1426,15 +1423,17 @@ class _TrendOverlayPainter extends CustomPainter {
         (1 - (value - axisMin) / ySpan).clamp(0.0, 1.0) * size.height;
 
     final lastPoint = Offset(xOf(lastX), yOf(lastValue));
+    // 末端点取渐变末色（曲线右端在渐变末尾）：曲线是渐变的，这一笔若还用
+    // 起点青，末端就会出现「紫线顶着青点」的断裂感。
     canvas.drawCircle(
       lastPoint,
       3,
-      Paint()..color = T.trendLine.withValues(alpha: 0.9),
+      Paint()..color = T.trendTo.withValues(alpha: 0.9),
     );
     canvas.drawCircle(
       lastPoint,
       5 + 4 * pulse,
-      Paint()..color = T.trendLine.withValues(alpha: 0.35 * (1 - pulse)),
+      Paint()..color = T.trendTo.withValues(alpha: 0.35 * (1 - pulse)),
     );
 
     final idx = hoverIndex;
@@ -1560,9 +1559,12 @@ class _TrendOverlayPainter extends CustomPainter {
 }
 
 class _LegendDot extends StatelessWidget {
-  const _LegendDot({required this.color, required this.label});
+  const _LegendDot({this.color, this.gradient, required this.label})
+    : assert(color != null || gradient != null, '图例需要颜色或渐变');
 
-  final Color color;
+  /// 纯色图例（指数对比线）用这个；[gradient] 给渐变曲线用（资产）。
+  final Color? color;
+  final Gradient? gradient;
   final String label;
 
   @override
@@ -1572,7 +1574,7 @@ class _LegendDot extends StatelessWidget {
       children: [
         CustomPaint(
           size: const Size(14, 3),
-          painter: _LinePainter(color: color),
+          painter: _LinePainter(color: color, gradient: gradient),
         ),
         const SizedBox(width: 5),
         Text(label, style: T.mono(size: 11, color: T.text2)),
@@ -1582,22 +1584,26 @@ class _LegendDot extends StatelessWidget {
 }
 
 class _LinePainter extends CustomPainter {
-  const _LinePainter({required this.color});
+  const _LinePainter({this.color, this.gradient});
 
-  final Color color;
+  final Color? color;
+  final Gradient? gradient;
 
   @override
   void paint(Canvas canvas, Size size) {
     final paint = Paint()
-      ..color = color
+      ..color = color ?? Colors.transparent
       ..strokeWidth = 2
       ..strokeCap = StrokeCap.round;
+    // 图例小横线也要能表现渐变，否则「资产」只是个纯色点，和曲线对不上。
+    final g = gradient;
+    if (g != null) paint.shader = g.createShader(Offset.zero & size);
     canvas.drawLine(Offset.zero, Offset(size.width, 0), paint);
   }
 
   @override
   bool shouldRepaint(covariant _LinePainter oldDelegate) =>
-      oldDelegate.color != color;
+      oldDelegate.color != color || oldDelegate.gradient != gradient;
 }
 
 /// 内凹嵌入式面板（趋势板块用）：面板底色为 surface，四边内侧用渐变

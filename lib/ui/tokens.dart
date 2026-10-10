@@ -18,11 +18,45 @@ class T {
   static const Color down = Color(0xFF3FB950);
   static const Color accent = Color(0xFF58A6FF);
 
-  /// 趋势曲线色：白偏蓝。比 [accent] 亮得多，深色面板上像数据本身在发光，
-  /// 与同为蓝系的 accent 属同一色语言。只用于「资产」曲线本体及其跟随件
-  /// （线、光晕、下方渐变、末端脉冲点、图例点）—— 选中态胶囊、按钮等
-  /// 界面蓝仍走 [accent]，两者不要混用。
-  static const Color trendLine = Color(0xFFDCE9FF);
+  /// 趋势曲线色：青 → 紫横向渐变（铺满整幅绘图区）。
+  ///
+  /// 单色试过两版都不理想：白偏蓝在深色面板上发灰，accent 蓝又被网格的
+  /// 灰调淹没。横向渐变让曲线左青右紫、两端都保持饱和度，既在全局蓝色系
+  /// 里，又不会跟涨跌语义色（红/绿）撞车。注意**纯色紫刻意不用作主线**：
+  /// 指数对比里的「上证50」就是紫线。
+  ///
+  /// [trendFrom] 同时也是曲线下方填充与末端脉冲点的基色（同一条曲线只
+  /// 认一个色族）；[trendTo] 是末端脉冲点的取色（曲线右端落在渐变末尾）。
+  static const Color trendFrom = Color(0xFF5EE0FF);
+  static const Color trendTo = Color(0xFFB48CFF);
+
+  /// 曲线本体（横向青→紫）。
+  static const LinearGradient trendGradient = LinearGradient(
+    begin: Alignment.centerLeft,
+    end: Alignment.centerRight,
+    colors: [trendFrom, trendTo],
+  );
+
+  /// 曲线发光层：同渐变、低透明度，作为更宽的底描边叠在曲线下面。
+  static final LinearGradient trendGlowGradient = LinearGradient(
+    begin: Alignment.centerLeft,
+    end: Alignment.centerRight,
+    colors: [
+      trendFrom.withValues(alpha: 0.12),
+      trendTo.withValues(alpha: 0.12),
+    ],
+  );
+
+  /// 曲线下方填充：同一横向渐变、整体压低透明度（纵向渐隐由 fl_chart 的
+  /// 面积矩形裁剪表现，这里只控制强弱）。
+  static final LinearGradient trendAreaGradient = LinearGradient(
+    begin: Alignment.centerLeft,
+    end: Alignment.centerRight,
+    colors: [
+      trendFrom.withValues(alpha: 0.18),
+      trendTo.withValues(alpha: 0.08),
+    ],
+  );
 
   static const Color warning = Color(0xFFD29922);
 
