@@ -803,7 +803,7 @@ class _NetWorthChartState extends ConsumerState<NetWorthChart> {
                         spacing: 14,
                         runSpacing: 4,
                         children: [
-                          _LegendDot(color: T.accent, label: '资产'),
+                          _LegendDot(color: T.trendLine, label: '资产'),
                           for (final code in _benchSelected)
                             if (_benchData.containsKey(code))
                               _LegendDot(
@@ -964,9 +964,9 @@ class _TrendChartState extends State<_TrendChart>
     final rates = widget.rates;
     final hideAmounts = widget.hideAmounts;
 
-    // Fixed accent color for the main line; gains/losses are conveyed by
-    // the stats figures instead.
-    final color = T.accent;
+    // 曲线色固定为「白偏蓝」的 T.trendLine（不随涨跌变色）；涨跌由统计
+    // 数字与末端脉冲点表达。
+    final color = T.trendLine;
     final isRate = view == _TrendView.returnRate;
     // Normalize the asset series to start at 0% at the range start, so it
     // shares the same baseline as the normalized index benchmarks: both
@@ -1429,12 +1429,12 @@ class _TrendOverlayPainter extends CustomPainter {
     canvas.drawCircle(
       lastPoint,
       3,
-      Paint()..color = T.accent.withValues(alpha: 0.9),
+      Paint()..color = T.trendLine.withValues(alpha: 0.9),
     );
     canvas.drawCircle(
       lastPoint,
       5 + 4 * pulse,
-      Paint()..color = T.accent.withValues(alpha: 0.35 * (1 - pulse)),
+      Paint()..color = T.trendLine.withValues(alpha: 0.35 * (1 - pulse)),
     );
 
     final idx = hoverIndex;

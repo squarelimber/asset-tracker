@@ -17,6 +17,13 @@ class T {
   static const Color up = Color(0xFFF85149);
   static const Color down = Color(0xFF3FB950);
   static const Color accent = Color(0xFF58A6FF);
+
+  /// 趋势曲线色：白偏蓝。比 [accent] 亮得多，深色面板上像数据本身在发光，
+  /// 与同为蓝系的 accent 属同一色语言。只用于「资产」曲线本体及其跟随件
+  /// （线、光晕、下方渐变、末端脉冲点、图例点）—— 选中态胶囊、按钮等
+  /// 界面蓝仍走 [accent]，两者不要混用。
+  static const Color trendLine = Color(0xFFDCE9FF);
+
   static const Color warning = Color(0xFFD29922);
 
   static const double rCard = 8;
