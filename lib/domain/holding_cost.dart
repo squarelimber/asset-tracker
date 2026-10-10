@@ -18,7 +18,18 @@ import '../data/database.dart';
 ///
 /// Not meaningful for share-based holdings, where `costPrice` is a
 /// per-unit cost (use `quantity * costPrice`).
-double effectiveCostOf(HoldingRow h) => h.costPrice > 0 ? h.costPrice : h.quantity;
+double effectiveCostOf(HoldingRow h) => effectivePrincipal(h.costPrice, h.quantity);
+
+/// Scalar form of [effectiveCostOf] for callers that hold the raw numbers
+/// instead of a [HoldingRow] (e.g. the type-conversion math, which works on
+/// standalone `costPrice` / `quantity` parameters).
+///
+/// Keep this the ONLY definition of the "0 means never recorded, fall back to
+/// the balance" rule; every caller must route through here or [effectiveCostOf]
+/// rather than re-typing the ternary, or the same number gets two readings and
+/// the difference shows up as a phantom profit.
+double effectivePrincipal(double costPrice, double balance) =>
+    costPrice > 0 ? costPrice : balance;
 
 /// Invested amount that travels with [amount] when money moves out of an
 /// amount-based holding: **proportional to the balance**, so the holding

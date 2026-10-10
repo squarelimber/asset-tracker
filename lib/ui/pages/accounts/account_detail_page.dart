@@ -7,6 +7,7 @@ import '../../../core/formats.dart';
 import '../../../core/history_sync.dart';
 import '../../../data/database.dart';
 import '../../../domain/closed_holding.dart';
+import '../../../domain/holding_cost.dart';
 import '../../components/app_bar_actions.dart';
 import '../../components/data_row.dart';
 import '../../components/delta_text.dart';
@@ -109,7 +110,7 @@ class _HoldingRow extends ConsumerWidget {
     final marketValue =
         type.isAmountBased ? h.quantity : h.quantity * h.latestPrice;
     final cost = type.isAmountBased
-        ? (h.costPrice > 0 ? h.costPrice : h.quantity)
+        ? effectiveCostOf(h)
         : h.quantity * h.costPrice;
     final profit = marketValue - cost;
     final profitPct = cost == 0 ? 0.0 : profit / cost;

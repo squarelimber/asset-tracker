@@ -6,6 +6,7 @@ import '../../../core/enums.dart';
 import '../../../core/formats.dart';
 import '../../../data/database.dart';
 import '../../../domain/closed_holding.dart';
+import '../../../domain/holding_cost.dart';
 import '../../../domain/trade_stats.dart';
 import '../../components/delta_text.dart';
 import '../../components/empty_state.dart';
@@ -194,7 +195,7 @@ class _TableRow extends ConsumerWidget {
     final closed = isHoldingClosed(h);
     final marketValue = isAmount ? h.quantity : h.quantity * h.latestPrice;
     final cost = isAmount
-        ? (h.costPrice > 0 ? h.costPrice : h.quantity)
+        ? effectiveCostOf(h)
         : h.quantity * h.costPrice;
     final profit = marketValue - cost;
     final profitPct = cost == 0 ? 0.0 : profit / cost;

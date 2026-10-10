@@ -3,6 +3,7 @@ import '../core/formats.dart';
 import '../core/symbols.dart';
 import '../data/asset_dao.dart';
 import '../data/database.dart';
+import '../domain/holding_cost.dart';
 import '../domain/product_monthly_earnings.dart';
 import '../domain/smooth_history.dart';
 import '../services/market/history_lookup.dart';
@@ -223,7 +224,7 @@ class HoldingDetailService {
       // Cost converts at the recorded purchase rate when available.
       final replayedCost = replays[h.id]?[key]?.$2;
       final cost = (type.isAmountBased
-              ? (h.costPrice > 0 ? h.costPrice : h.quantity)
+              ? effectiveCostOf(h)
               : replayedCost ?? h.quantity * h.costPrice) *
           costRateOf(h, cnyRates);
 

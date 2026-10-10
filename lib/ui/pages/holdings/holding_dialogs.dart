@@ -1054,6 +1054,8 @@ Future<void> showEditHoldingDialog(
                     key: ValueKey('invested-$conversionCount'),
                     amount: amount,
                     initialInvested: investedResult ??
+                        // UI placeholder: null (not the balance) so the field
+                        // shows its hint instead of a fabricated principal.
                         (holding.costPrice > 0 ? holding.costPrice : null),
                     onChanged: (v) => investedResult = v,
                   ),

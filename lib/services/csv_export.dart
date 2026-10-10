@@ -2,6 +2,7 @@ import '../core/enums.dart';
 import '../core/formats.dart';
 import '../core/symbols.dart';
 import '../data/database.dart';
+import '../domain/holding_cost.dart';
 
 /// Generates CSV strings for holdings and transactions (Excel-friendly,
 /// UTF-8 with BOM so Chinese opens correctly in Excel).
@@ -42,7 +43,7 @@ class CsvExport {
           ? h.quantity
           : h.quantity * h.latestPrice) * marketRate;
       final costCny = (type.isAmountBased
-          ? (h.costPrice > 0 ? h.costPrice : h.quantity)
+          ? effectiveCostOf(h)
           : h.quantity * h.costPrice) * costRate;
       buf.writeln([
         _esc(accountName[h.accountId] ?? ''),

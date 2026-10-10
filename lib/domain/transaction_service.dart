@@ -520,6 +520,9 @@ class TransactionService {
       }
       return (1.0, amount);
     }
+    // Per-unit price fallback (1.0) — a DIFFERENT rule from effectiveCostOf(),
+    // which is about an amount-based principal. This branch only values
+    // share-based funding sources. Do not unify the two.
     final unit = source.latestPrice > 0
         ? source.latestPrice
         : (source.costPrice > 0 ? source.costPrice : 1.0);

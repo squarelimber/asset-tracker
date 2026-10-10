@@ -18,6 +18,7 @@
 library;
 
 import '../core/enums.dart';
+import 'holding_cost.dart';
 
 /// The holding's numbers expressed in the NEW type's semantics.
 class HoldingTypeConversion {
@@ -67,7 +68,7 @@ HoldingTypeConversion? convertHoldingTypeSemantics({
 }) {
   if (from.isAmountBased && !to.isAmountBased) {
     if (!(quantity > 0)) return null; // no balance to turn into shares
-    final invested = costPrice > 0 ? costPrice : quantity;
+    final invested = effectivePrincipal(costPrice, quantity);
     return HoldingTypeConversion(
       quantity: quantity, // balance → shares (same digits at NAV 1)
       costPrice: invested / quantity, // 累计投入 → 单位成本

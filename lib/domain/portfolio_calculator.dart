@@ -2,6 +2,7 @@ import '../core/enums.dart';
 import '../core/symbols.dart';
 import '../data/database.dart';
 import 'holding_category.dart';
+import 'holding_cost.dart';
 
 /// Per-asset-type breakdown entry (CNY-converted values).
 class TypeBreakdown {
@@ -134,7 +135,7 @@ class PortfolioCalculator {
       final marketValue =
           (type.isAmountBased ? h.quantity : h.quantity * h.latestPrice) * rate;
       final holdingCost = (type.isAmountBased
-              ? (h.costPrice > 0 ? h.costPrice : h.quantity)
+              ? effectiveCostOf(h)
               : h.quantity * h.costPrice) *
           costRateOf(h, cnyRates);
       if (type == AssetType.liability) {

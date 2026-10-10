@@ -155,6 +155,8 @@ Future<void> showHoldingTransactionDialog(
           if (h.currency != holding.currency) {
             return '资金来源与目标产品币种不一致';
           }
+          // Per-unit price fallback (1.0) — a DIFFERENT rule from
+          // effectiveCostOf(); mirrors transaction_service.dart.
           final unit = h.latestPrice > 0
               ? h.latestPrice
               : (h.costPrice > 0 ? h.costPrice : 1.0);
@@ -611,6 +613,8 @@ String _buySourceHint(
   if (source == null) return '不选则不联动扣款';
   final t = AssetType.fromStorage(source.assetType);
   if (t.isAmountBased) return '保存时从 ${source.name} 扣减该金额';
+  // Per-unit price fallback (1.0) — a DIFFERENT rule from effectiveCostOf();
+  // mirrors transaction_service.dart.
   final unit = source.latestPrice > 0
       ? source.latestPrice
       : (source.costPrice > 0 ? source.costPrice : 1.0);

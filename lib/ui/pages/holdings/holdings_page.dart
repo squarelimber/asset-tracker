@@ -13,6 +13,7 @@ import '../../../core/symbols.dart';
 import '../../../data/database.dart';
 import '../../../domain/closed_holding.dart';
 import '../../../domain/holding_category.dart';
+import '../../../domain/holding_cost.dart';
 import '../../components/app_bar_actions.dart';
 import '../../components/data_row.dart';
 import '../../components/delta_text.dart';
@@ -78,7 +79,7 @@ double _holdingMarketValue(HoldingRow h) {
 double _holdingCost(HoldingRow h) {
   final type = AssetType.fromStorage(h.assetType);
   return type.isAmountBased
-      ? (h.costPrice > 0 ? h.costPrice : h.quantity)
+      ? effectiveCostOf(h)
       : h.quantity * h.costPrice;
 }
 

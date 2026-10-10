@@ -7,6 +7,7 @@ import '../../../core/formats.dart';
 import '../../../core/symbols.dart';
 import '../../../data/database.dart';
 import '../../../domain/closed_holding.dart';
+import '../../../domain/holding_cost.dart';
 import '../../../domain/trade_stats.dart';
 import '../../components/error_state.dart';
 import '../../components/status_chip.dart';
@@ -61,7 +62,7 @@ class HoldingDetailSheet extends ConsumerWidget {
     final cost = isClosed && type.isAmountBased
         ? 0.0 // Fully redeemed: the principal came back, no residual cost.
         : type.isAmountBased
-            ? (holding.costPrice > 0 ? holding.costPrice : holding.quantity)
+            ? effectiveCostOf(holding)
             : holding.quantity * holding.costPrice;
     final profit = marketValue - cost;
     final profitPct = cost == 0 ? 0.0 : profit / cost;

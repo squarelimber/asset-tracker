@@ -6,6 +6,7 @@ import '../core/history_sync.dart';
 import '../core/symbols.dart';
 import '../data/asset_dao.dart';
 import '../data/database.dart';
+import '../domain/holding_cost.dart';
 import '../domain/product_monthly_earnings.dart';
 import '../domain/smooth_history.dart';
 import 'market/history_lookup.dart';
@@ -492,7 +493,7 @@ class HistoryBackfillService {
           // together and transfers never leak into the daily return.
           final principal = type.isAmountBased
               ? (smoothPrincipals[h.id]?[key] ??
-                    (h.costPrice > 0 ? h.costPrice : h.quantity))
+                    effectiveCostOf(h))
               // Replayed total cost for share-based smoothed holdings too.
               : (replays[h.id]?[key]?.$2 ?? h.quantity * h.costPrice);
           cost += principal * costRateOf(h, cnyRates);
@@ -535,7 +536,7 @@ class HistoryBackfillService {
           // cost moves through buys/sells/dividends/splits).
           cost +=
               (type.isAmountBased
-                  ? (h.costPrice > 0 ? h.costPrice : h.quantity)
+                  ? effectiveCostOf(h)
                   : replayed?.$2 ?? shares * h.costPrice) *
               costRateOf(h, cnyRates);
         }
@@ -773,7 +774,7 @@ class HistoryBackfillService {
         value = v * valueRateOf(h, cnyRates);
         final principal = type.isAmountBased
             ? (smoothPrincipals[h.id]?[key] ??
-                  (h.costPrice > 0 ? h.costPrice : h.quantity))
+                  effectiveCostOf(h))
             : (replays[h.id]?[key]?.$2 ?? h.quantity * h.costPrice);
         cost = principal * costRateOf(h, cnyRates);
       } else {
@@ -793,7 +794,7 @@ class HistoryBackfillService {
         value = shares * price * valueRateOf(h, cnyRates);
         cost =
             (type.isAmountBased
-                ? (h.costPrice > 0 ? h.costPrice : h.quantity)
+                ? effectiveCostOf(h)
                 : replayed?.$2 ?? shares * h.costPrice) *
             costRateOf(h, cnyRates);
       }

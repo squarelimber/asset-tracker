@@ -3,6 +3,7 @@ import 'dart:math';
 import '../core/enums.dart';
 import '../core/formats.dart';
 import '../data/database.dart';
+import 'holding_cost.dart';
 
 /// Geometric interpolation: value on [dayIndex] of a [start]..[end] range
 /// spanning [totalDays], growing at a constant daily factor. Day 0 returns
@@ -48,7 +49,7 @@ class SmoothHistoryCalculator {
   }) {
     final result = <String, double>{};
     final current = h.quantity; // current amount (as of [today])
-    final currentCost = h.costPrice > 0 ? h.costPrice : h.quantity;
+    final currentCost = effectiveCostOf(h);
     final totalGain = current - currentCost;
 
     final dayTo = _dayOf(to);
@@ -109,6 +110,8 @@ class SmoothHistoryCalculator {
     if (h.latestPrice <= 0) return 0;
     final totalDays = to.difference(from).inDays;
     final index = day.difference(from).inDays;
+    // Share-based price: the fallback is the latest price (a flat line), NOT
+    // the balance — deliberately different from effectiveCostOf(). Leave it.
     final start = h.costPrice > 0 ? h.costPrice : h.latestPrice;
     return geometricInterpolate(start, h.latestPrice, index, totalDays);
   }
@@ -165,7 +168,7 @@ class SmoothHistoryCalculator {
     // product's Δ(value−cost) reported a phantom loss equal to the whole
     // clamped amount (2026-10-02 现金账户 −2,342.69 in the day-detail panel).
     if (!to.isBefore(_dayOf(DateTime.now()))) {
-      result[todayKey(dayTo)] = h.costPrice > 0 ? h.costPrice : h.quantity;
+      result[todayKey(dayTo)] = effectiveCostOf(h);
     }
     return result;
   }
@@ -196,7 +199,7 @@ class SmoothHistoryCalculator {
     // credit it by the move recorded on the row (costMovedAmount for
     // post-fix rows, the raw amount for legacy ones).
     deltaOf: (h, t) => _flowDelta(h, t),
-    current: h.costPrice > 0 ? h.costPrice : h.quantity,
+    current: effectiveCostOf(h),
   );
 
   /// Cost-side segments: like [_amountSegments], but a sell's proceeds
@@ -218,7 +221,7 @@ class SmoothHistoryCalculator {
     from: from,
     to: to,
     deltaOf: (h, t) => _flowDelta(h, t, soldPrincipalById: soldPrincipalById),
-    current: h.costPrice > 0 ? h.costPrice : h.quantity,
+    current: effectiveCostOf(h),
   );
 
   static List<({DateTime start, double principal, int days, DateTime end})>
