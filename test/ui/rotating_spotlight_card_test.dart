@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:asset_tracker/app/providers.dart';
 import 'package:asset_tracker/core/enums.dart';
 import 'package:asset_tracker/core/formats.dart';
@@ -249,6 +251,123 @@ void main() {
     await pumpFor(tester, const Duration(milliseconds: 1600));
     await pumpFor(tester, const Duration(milliseconds: 1000));
     expect(frontFace(tester), 1, reason: '1.5 秒档位应已翻到第二面');
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(milliseconds: 1));
+  });
+
+  /// 真实路径：设置页改完值 → 返回总览页。外壳是普通 ShellRoute + go()，
+  /// 所以返回时卡片是**全新挂载**的，而那个常驻 provider 早已是
+  /// AsyncData(新值)。ref.listen 不会补发当前值（fireImmediately 默认
+  /// false），只 listen 的卡片会一直沿用字段上的默认 2.3s —— 即「改了
+  /// 停留时间没反应」。这里先把 provider 烧热再挂载卡片来复现。
+  testWidgets('挂载前 provider 已有值时，卡片也按设置节奏翻转', (tester) async {
+    tester.view.physicalSize = const Size(400, 400);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final prevDay = DateTime(now.year, now.month, now.day - 1);
+
+    final container = ProviderContainer(
+      overrides: [
+        spotlightHoldMsProvider.overrideWith((ref) => Stream<int>.value(8000)),
+        dayHoldingsBreakdownProvider(today)
+            .overrideWith((ref) => const <DayHoldingValue>[]),
+        dayHoldingsBreakdownProvider(prevDay)
+            .overrideWith((ref) => const <DayHoldingValue>[]),
+        productEarningsProvider(today.year)
+            .overrideWith((ref) => const <ProductEarnings>[]),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    // 先把 provider 烧热：设置页已经读过它，值是 8 秒。
+    expect(await container.read(spotlightHoldMsProvider.future), 8000);
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: const MaterialApp(
+          home: Scaffold(
+            body: Center(
+              child: SizedBox(width: 360, child: RotatingSpotlightCard()),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    expect(frontFace(tester), 0, reason: '初始应停在「今日最佳」');
+
+    // 3.3s > 默认 2.3s + 0.9s 翻转：若沿用了默认值，此刻早已翻面。
+    await pumpFor(tester, const Duration(milliseconds: 3300));
+    expect(frontFace(tester), 0, reason: '8 秒档位在 3.3 秒时不应翻面');
+
+    // 但也不能是「卡死不动」：翻面必须真的发生，只是晚一些。
+    await pumpFor(tester, const Duration(milliseconds: 6000));
+    expect(frontFace(tester), 1, reason: '8 秒后应翻到第二面');
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(milliseconds: 1));
+  });
+
+  /// 卡片就在屏幕上时改设置（多端 / 桌面 rail 切回），下一次翻转也必须
+  /// 立刻改用新节奏，而不是等当前定时器走完。
+  testWidgets('停留期间改设置：下一次翻转立刻改用新节奏', (tester) async {
+    tester.view.physicalSize = const Size(400, 400);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final prevDay = DateTime(now.year, now.month, now.day - 1);
+
+    final hold = StreamController<int>.broadcast();
+    addTearDown(hold.close);
+
+    final container = ProviderContainer(
+      overrides: [
+        spotlightHoldMsProvider.overrideWith((ref) => hold.stream),
+        dayHoldingsBreakdownProvider(today)
+            .overrideWith((ref) => const <DayHoldingValue>[]),
+        dayHoldingsBreakdownProvider(prevDay)
+            .overrideWith((ref) => const <DayHoldingValue>[]),
+        productEarningsProvider(today.year)
+            .overrideWith((ref) => const <ProductEarnings>[]),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: const MaterialApp(
+          home: Scaffold(
+            body: Center(
+              child: SizedBox(width: 360, child: RotatingSpotlightCard()),
+            ),
+          ),
+        ),
+      ),
+    );
+    hold.add(defaultSpotlightHoldMs);
+    await tester.pump();
+
+    // 默认 2.3s：3.4s 时应已停在第二面。
+    await pumpFor(tester, const Duration(milliseconds: 2400));
+    await pumpFor(tester, const Duration(milliseconds: 1000));
+    expect(frontFace(tester), 1);
+
+    // 改到 8 秒：此后 3.3s 内不得再翻面（否则说明还在按旧的 2.3s 走）。
+    hold.add(8000);
+    await tester.pump();
+    await pumpFor(tester, const Duration(milliseconds: 3300));
+    expect(frontFace(tester), 1, reason: '改成 8 秒后不应按旧节奏继续翻');
+
+    await pumpFor(tester, const Duration(milliseconds: 6600));
+    expect(frontFace(tester), 2, reason: '8 秒后应翻到第三面');
 
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump(const Duration(milliseconds: 1));

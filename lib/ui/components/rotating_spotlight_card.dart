@@ -128,13 +128,19 @@ class _RotatingSpotlightCardState extends ConsumerState<RotatingSpotlightCard>
     // 「小眼睛」开关（默认隐藏）：数字面必须一起遮。卡片原先没订阅它，
     // 于是滚到数字面时会把真实金额直接露出来。
     final hidden = ref.watch(hideAmountsProvider);
-    // 停留时长来自设置页。这里用 listen 而非 watch：值一变就重排下一次
-    // 翻转，所以改完设置回到总览页立刻是新节奏 —— 卡片 state 不会因此
-    // 重建，只 watch 的话会一直沿用 initState 时排下的那个定时器。
-    ref.listen(spotlightHoldMsProvider, (_, next) {
-      final ms = next.valueOrNull;
-      if (ms != null) _applyHoldMs(ms);
-    });
+    // 停留时长来自设置页，必须在 build 里 **watch 出来同步**，不能只 listen。
+    //
+    // provider 是常驻的（非 autoDispose），设置页读过之后它的值就一直是
+    // AsyncData —— 而外壳是普通 ShellRoute + go()，从设置页返回时本卡片是
+    // 全新挂载的：此时 ref.listen 不会补发「当前值」(fireImmediately 默认
+    // false)，卡片便一直沿用字段上的默认 2.3s，即「改了停留时间没反应」
+    // （只有 app 冷启动、且卡片比设置页先读到值时才会偶然生效）。
+    //
+    // watch 让两条路径收敛到同一个 _applyHoldMs：挂载时已有值、以及运行中
+    // 值变化。重复调用是幂等的 —— 值没变就直接返回，不会重排定时器，因此
+    // 卡片因行情/provider 重建时节奏不会被重置。
+    final holdMs = ref.watch(spotlightHoldMsProvider).valueOrNull;
+    if (holdMs != null) _applyHoldMs(holdMs);
 
     final faces = _buildFaces(
       todayAsync,
