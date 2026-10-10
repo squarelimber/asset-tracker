@@ -117,6 +117,13 @@ void main() {
     expectNoOverflow(tester);
     await pumpPage(tester, const PortfolioPage(), const Size(1280, 800), overrides: overrides);
     expectNoOverflow(tester);
+    // Same reason as the product-earnings case below: the page mounts
+    // RotatingSpotlightCard, whose autoDispose watches make Riverpod schedule
+    // a zero-duration dispose timer when the tree unmounts. Unmount here and
+    // flush it with a timed pump instead of letting the binding's duration-less
+    // post-test pump leave it pending.
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(milliseconds: 1));
   });
 
   testWidgets('holdings no overflow at phone and desktop', (tester) async {

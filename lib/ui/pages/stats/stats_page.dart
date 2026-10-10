@@ -1,6 +1,7 @@
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../../app/providers.dart';
 import '../../../core/formats.dart';
@@ -45,56 +46,116 @@ class StatsPage extends ConsumerWidget {
             child: ListView(
               physics: const AlwaysScrollableScrollPhysics(),
               children: [
-                KpiGrid(
-                  tiles: [
-                    StatTile(
-                      label: '净现金流',
-                      value:
-                          '${s.cashflow >= 0 ? '+' : ''}${Formats.amount(s.cashflow)}',
-                      color: T.changeColor(s.cashflow),
+                // 收益分析定位：两个收益入口置顶。
+                Row(
+                  children: [
+                    Expanded(
+                      child: _CalEntryTile(
+                        icon: Icons.calendar_month_outlined,
+                        label: '收益日历',
+                        sublabel: '每日收益 · 产品明细',
+                        onTap: () => context.push('/earnings-calendar'),
+                      ),
                     ),
-                    StatTile(
-                      label: '已落袋收益',
-                      value: '${s.realizedProfit >= 0 ? '+' : ''}${Formats.amount(s.realizedProfit)}',
-                      color: T.changeColor(s.realizedProfit),
+                    const SizedBox(width: T.s3),
+                    Expanded(
+                      child: _CalEntryTile(
+                        icon: Icons.table_chart_outlined,
+                        label: '产品收益日历',
+                        sublabel: '各产品月度收益',
+                        onTap: () => context.push('/product-earnings'),
+                      ),
                     ),
-                    StatTile(label: '累计分红', value: Formats.amount(s.dividendTotal)),
-                    StatTile(label: '累计买入', value: Formats.amount(s.boughtTotal)),
-                    StatTile(label: '累计卖出', value: Formats.amount(s.soldTotal)),
-                    StatTile(label: '累计收入', value: Formats.amount(s.incomeTotal)),
-                    StatTile(label: '累计支出', value: Formats.amount(s.expenseTotal)),
-                    if (monthlyProfit.isNotEmpty) ..._monthTiles(monthlyProfit),
                   ],
                 ),
-              const SizedBox(height: T.s4),
-              const SectionHeader(label: '月度收益'),
-              if (monthlyProfit.isEmpty)
-                const TerminalCard(
-                  child: Center(
-                    child: Padding(
-                      padding: EdgeInsets.all(T.s4),
-                      child: Text('暂无收益数据，每日打开 App 自动记录净值'),
+                const SizedBox(height: T.s4),
+                const SectionHeader(label: '月度收益'),
+                if (monthlyProfit.isEmpty)
+                  const TerminalCard(
+                    child: Center(
+                      child: Padding(
+                        padding: EdgeInsets.all(T.s4),
+                        child: Text('暂无收益数据，每日打开 App 自动记录净值'),
+                      ),
+                    ),
+                  )
+                else
+                  TerminalCard(
+                    child: SizedBox(
+                      height: 220,
+                      // 只展示最近 12 个月：全历史月份一图塞下会把柱子
+                      // 挤成团、极端月把普通月压扁贴基线（就是那个
+                      // 「没法看」的团状图）。
+                      child: _MonthlyBarChart(
+                        months: _recentMonths(monthlyProfit, 12),
+                      ),
                     ),
                   ),
-                )
-              else
-                TerminalCard(
-                  child: SizedBox(
-                    height: 220,
-                    child: _MonthlyBarChart(months: monthlyProfit),
-                  ),
-                ),
                 const SizedBox(height: T.s3),
-                Text(
-                  '已落袋收益为卖出（卖出价 − 当前成本价）× 数量 的估算；'
-                  '买入后成本变动时会略有偏差。',
-                  style: T.label(),
-                ),
-                const SizedBox(height: T.s2),
                 Text(
                   '月度收益来自每日净值快照（当日收益 = 当日净增值 − 前日净增值，'
                   '转入转出本金不计入）；盈利月份 = 当月收益为正。',
                   style: T.label(),
+                ),
+                const SizedBox(height: T.s4),
+                // 其余指标弱化为折叠区：流水账汇总 + 交易量 + 月份最佳最差。
+                TerminalCard(
+                  child: ExpansionTile(
+                    tilePadding: EdgeInsets.zero,
+                    childrenPadding: EdgeInsets.zero,
+                    shape: const Border(),
+                    title: const Text(
+                      '交易与流水统计',
+                      style: TextStyle(fontSize: 14, color: T.text2),
+                    ),
+                    children: [
+                      const SizedBox(height: T.s2),
+                      KpiGrid(
+                        tiles: [
+                          StatTile(
+                            label: '净现金流',
+                            value:
+                                '${s.cashflow >= 0 ? '+' : ''}${Formats.amount(s.cashflow)}',
+                            color: T.changeColor(s.cashflow),
+                          ),
+                          StatTile(
+                            label: '已落袋收益',
+                            value:
+                                '${s.realizedProfit >= 0 ? '+' : ''}${Formats.amount(s.realizedProfit)}',
+                            color: T.changeColor(s.realizedProfit),
+                          ),
+                          StatTile(
+                            label: '累计分红',
+                            value: Formats.amount(s.dividendTotal),
+                          ),
+                          StatTile(
+                            label: '累计买入',
+                            value: Formats.amount(s.boughtTotal),
+                          ),
+                          StatTile(
+                            label: '累计卖出',
+                            value: Formats.amount(s.soldTotal),
+                          ),
+                          StatTile(
+                            label: '累计收入',
+                            value: Formats.amount(s.incomeTotal),
+                          ),
+                          StatTile(
+                            label: '累计支出',
+                            value: Formats.amount(s.expenseTotal),
+                          ),
+                          if (monthlyProfit.isNotEmpty)
+                            ..._monthTiles(monthlyProfit),
+                        ],
+                      ),
+                      const SizedBox(height: T.s2),
+                      Text(
+                        '已落袋收益为卖出（卖出价 − 当前成本价）× 数量 的估算；'
+                        '买入后成本变动时会略有偏差。',
+                        style: T.label(),
+                      ),
+                    ],
+                  ),
                 ),
               ],
             ),
@@ -123,7 +184,8 @@ class StatsPage extends ConsumerWidget {
     return [
       StatTile(
         label: '最佳月份 $bestKey',
-        value: '${months[bestKey]! >= 0 ? '+' : ''}${Formats.amount(months[bestKey]!)}',
+        value:
+            '${months[bestKey]! >= 0 ? '+' : ''}${Formats.amount(months[bestKey]!)}',
         color: T.changeColor(months[bestKey]!),
       ),
       StatTile(
@@ -149,6 +211,14 @@ class StatsPage extends ConsumerWidget {
       byMonth[key] = (byMonth[key] ?? 0) + d.profit;
     }
     return byMonth;
+  }
+
+  /// The most recent [n] months (sorted ascending) of the monthly map.
+  Map<String, double> _recentMonths(Map<String, double> months, int n) {
+    final keys = months.keys.toList()..sort();
+    if (keys.length <= n) return months;
+    final last = keys.sublist(keys.length - n);
+    return {for (final k in last) k: months[k]!};
   }
 }
 
@@ -196,9 +266,15 @@ class _MonthlyBarChart extends StatelessWidget {
           ),
         ),
         titlesData: FlTitlesData(
-          leftTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-          rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-          topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+          leftTitles: const AxisTitles(
+            sideTitles: SideTitles(showTitles: false),
+          ),
+          rightTitles: const AxisTitles(
+            sideTitles: SideTitles(showTitles: false),
+          ),
+          topTitles: const AxisTitles(
+            sideTitles: SideTitles(showTitles: false),
+          ),
           bottomTitles: AxisTitles(
             sideTitles: SideTitles(
               showTitles: true,
@@ -234,6 +310,54 @@ class _MonthlyBarChart extends StatelessWidget {
                 ),
               ],
             ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Entry card into a calendar page, top of the stats screen.
+class _CalEntryTile extends StatelessWidget {
+  const _CalEntryTile({
+    required this.icon,
+    required this.label,
+    required this.sublabel,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final String sublabel;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return TerminalCard(
+      onTap: onTap,
+      padding: const EdgeInsets.symmetric(horizontal: T.s3, vertical: T.s3),
+      child: Row(
+        children: [
+          Icon(icon, color: T.accent, size: 22),
+          const SizedBox(width: T.s2),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  style: const TextStyle(fontSize: 13, color: T.text1),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  sublabel,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: 11, color: T.text3),
+                ),
+              ],
+            ),
+          ),
+          const Icon(Icons.chevron_right, size: 18, color: T.text3),
         ],
       ),
     );

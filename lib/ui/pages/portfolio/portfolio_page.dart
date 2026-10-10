@@ -3,7 +3,6 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 
 import '../../../app/providers.dart';
 import '../../../core/enums.dart';
@@ -19,8 +18,8 @@ import '../../components/asset_overview_card.dart';
 import '../../components/empty_state.dart';
 import '../../components/error_state.dart';
 import '../../components/key_shortcuts.dart';
+import '../../components/rotating_spotlight_card.dart';
 import '../../components/session_chip.dart';
-import '../../components/terminal_card.dart';
 import '../../tokens.dart';
 import 'portfolio_widgets.dart';
 
@@ -257,6 +256,9 @@ class _PortfolioPageState extends ConsumerState<PortfolioPage> {
           const SizedBox(height: T.s2),
           _KpiRow(summary: s),
           const SizedBox(height: T.s3),
+          // 轮动焦点卡：今日最佳 / 今日最差 / 本月最佳（自动切换）。
+          const RotatingSpotlightCard(),
+          const SizedBox(height: T.s3),
           if (Responsive.isPhone(context)) ...[
             // 趋势面板与上方净资产卡左右对齐（等宽），横向完整拉伸。
             NetWorthChart(),
@@ -273,7 +275,6 @@ class _PortfolioPageState extends ConsumerState<PortfolioPage> {
             ),
             const SizedBox(height: T.s3),
           ],
-          _CalendarEntries(),
         ],
       ),
     );
@@ -308,65 +309,6 @@ class _KpiRow extends ConsumerWidget {
         final now = ref.read(hideAmountsProvider);
         ref.read(hideAmountsProvider.notifier).state = !now;
       },
-    );
-  }
-}
-
-class _CalendarEntries extends StatelessWidget {
-  const _CalendarEntries();
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Expanded(
-          child: _EntryTile(
-            icon: Icons.calendar_month_outlined,
-            label: '收益日历',
-            onTap: () => context.push('/earnings-calendar'),
-          ),
-        ),
-        const SizedBox(width: T.s3),
-        Expanded(
-          child: _EntryTile(
-            icon: Icons.table_chart_outlined,
-            label: '产品收益日历',
-            onTap: () => context.push('/product-earnings'),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _EntryTile extends StatelessWidget {
-  const _EntryTile({
-    required this.icon,
-    required this.label,
-    required this.onTap,
-  });
-
-  final IconData icon;
-  final String label;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return TerminalCard(
-      onTap: onTap,
-      child: Row(
-        children: [
-          Icon(icon, color: T.accent),
-          const SizedBox(width: T.s2),
-          Expanded(
-            child: Text(
-              label,
-              style: const TextStyle(fontSize: 14, color: T.text1),
-            ),
-          ),
-          const Icon(Icons.chevron_right, size: 18, color: T.text3),
-        ],
-      ),
     );
   }
 }

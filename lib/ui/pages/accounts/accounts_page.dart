@@ -10,17 +10,12 @@ import '../../../core/history_sync.dart';
 import '../../../core/responsive.dart';
 import '../../../data/database.dart';
 import '../../components/app_bar_actions.dart';
-import '../../components/data_row.dart';
-import '../../components/delta_text.dart';
 import '../../components/empty_state.dart';
 import '../../components/error_state.dart';
 import '../../components/form_fields.dart';
-import '../../components/kpi_grid.dart';
-import '../../components/section_header.dart';
 import '../../components/terminal_card.dart';
 import '../../components/terminal_fab.dart';
 import '../../tokens.dart';
-import '../transaction_dialogs.dart';
 
 class AccountsPage extends ConsumerWidget {
   const AccountsPage({super.key});
@@ -47,8 +42,6 @@ class AccountsPage extends ConsumerWidget {
                   child: ListView(
                     physics: const AlwaysScrollableScrollPhysics(),
                     children: [
-                      _AccountsKpis(accounts: list),
-                      const SizedBox(height: T.s3),
                       for (final account in list) ...[
                         _AccountCard(account: account),
                         const SizedBox(height: T.s3),
@@ -84,10 +77,7 @@ class AccountsPage extends ConsumerWidget {
                 autofocus: true,
               ),
               const SizedBox(height: T.s3),
-              TerminalTextField(
-                controller: noteCtrl,
-                label: '备注（可选）',
-              ),
+              TerminalTextField(controller: noteCtrl, label: '备注（可选）'),
             ],
           ),
         ),
@@ -101,14 +91,16 @@ class AccountsPage extends ConsumerWidget {
               final name = nameCtrl.text.trim();
               if (name.isEmpty) return;
               final dao = ref.read(daoProvider);
-              await dao.createAccount(AccountsCompanion.insert(
-                name: name,
-                type: 'general',
-                currency: const Value('CNY'),
-                note: noteCtrl.text.trim().isEmpty
-                    ? const Value.absent()
-                    : Value(noteCtrl.text.trim()),
-              ));
+              await dao.createAccount(
+                AccountsCompanion.insert(
+                  name: name,
+                  type: 'general',
+                  currency: const Value('CNY'),
+                  note: noteCtrl.text.trim().isEmpty
+                      ? const Value.absent()
+                      : Value(noteCtrl.text.trim()),
+                ),
+              );
               if (context.mounted) Navigator.pop(context);
             },
             child: const Text('保存'),
@@ -118,40 +110,6 @@ class AccountsPage extends ConsumerWidget {
     );
     nameCtrl.dispose();
     noteCtrl.dispose();
-  }
-}
-
-class _AccountsKpis extends ConsumerWidget {
-  const _AccountsKpis({required this.accounts});
-
-  final List<AccountRow> accounts;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final hide = ref.watch(hideAmountsProvider);
-    final holdingsLists = <List<HoldingRow>>[
-      for (final a in accounts)
-        ref.watch(holdingsByAccountProvider(a.id)).value ?? const <HoldingRow>[],
-    ];
-    return FutureBuilder<Map<String, double>>(
-      future: ref.watch(cnyRatesProvider.future),
-      builder: (context, snapshot) {
-        final rates = snapshot.data ?? const <String, double>{};
-        var total = 0.0;
-        for (final list in holdingsLists) {
-          total += _accountTotal(list, rates);
-        }
-        return KpiGrid(
-          tiles: [
-            StatTile(label: '账户数', value: '${accounts.length}'),
-            StatTile(
-              label: '总余额',
-              value: hide ? '****' : '¥${Formats.amount(total)}',
-            ),
-          ],
-        );
-      },
-    );
   }
 }
 
@@ -166,59 +124,74 @@ class _AccountCard extends ConsumerWidget {
     final hide = ref.watch(hideAmountsProvider);
     final list = holdings.value ?? const <HoldingRow>[];
     return TerminalCard(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          FutureBuilder<Map<String, double>>(
-            future: ref.watch(cnyRatesProvider.future),
-            builder: (context, snapshot) {
-              final rates = snapshot.data ?? const <String, double>{};
-              final total = _accountTotal(list, rates);
-              return SectionHeader(
-                label: account.name,
-                trailing: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      hide
-                          ? '****'
-                          : '¥${Formats.amount(total)} · ${list.length} 项',
-                      style: T.mono(size: 12, color: T.text1),
+      child: FutureBuilder<Map<String, double>>(
+        future: ref.watch(cnyRatesProvider.future),
+        builder: (context, snapshot) {
+          final rates = snapshot.data ?? const <String, double>{};
+          final total = _accountTotal(list, rates);
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // 账户名 + 总市值 + 删除菜单（KPI 大卡已删，紧凑一行为主）。
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      account.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: T.text1,
+                      ),
                     ),
-                    const SizedBox(width: T.s1),
-                    PopupMenuButton<String>(
-                      onSelected: (v) {
-                        if (v == 'delete') _confirmDelete(context, ref);
-                      },
-                      itemBuilder: (_) => const [
-                        PopupMenuItem(value: 'delete', child: Text('删除账户')),
-                      ],
-                    ),
-                  ],
-                ),
-              );
-            },
-          ),
-          if (list.isNotEmpty)
-            for (final h in list)
-              DataRow(
-                title: h.name,
-                leading: Icon(
-                  AssetType.fromStorage(h.assetType).icon,
-                  size: 16,
-                  color: AssetType.fromStorage(h.assetType).color,
-                ),
-                trailing: _HoldingMiniTrailing(h: h),
-                onTap: () => showHoldingTransactionDialog(context, ref, h),
+                  ),
+                  Text(
+                    hide
+                        ? '****'
+                        : '¥${Formats.money(total)} · ${list.length} 项',
+                    style: T.mono(size: 12, color: T.text2),
+                  ),
+                  const SizedBox(width: T.s1),
+                  PopupMenuButton<String>(
+                    onSelected: (v) {
+                      if (v == 'delete') _confirmDelete(context, ref);
+                    },
+                    itemBuilder: (_) => const [
+                      PopupMenuItem(value: 'delete', child: Text('删除账户')),
+                    ],
+                  ),
+                ],
               ),
-          const SizedBox(height: T.s1),
-          DataRow(
-            title: '账户详情',
-            trailing: const SizedBox.shrink(),
-            showChevron: true,
-            onTap: () => context.push('/accounts/${account.id}'),
-          ),
-        ],
+              if (list.isNotEmpty) ...[
+                const SizedBox(height: T.s2),
+                // 资产类型占比条（紧凑一行，替代逐持仓列表）。
+                _AccountTypeBar(holdings: list, rates: rates, hide: hide),
+              ],
+              const SizedBox(height: T.s1),
+              // 「账户详情」入口（持仓明细与交易流水都收敛到这里）。
+              InkWell(
+                onTap: () => context.push('/accounts/${account.id}'),
+                borderRadius: BorderRadius.circular(4),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: T.s1),
+                  child: Row(
+                    children: [
+                      const Expanded(
+                        child: Text(
+                          '账户详情（持仓 · 流水）',
+                          style: TextStyle(fontSize: 12, color: T.text3),
+                        ),
+                      ),
+                      Icon(Icons.chevron_right, size: 16, color: T.text3),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -255,40 +228,92 @@ class _AccountCard extends ConsumerWidget {
   }
 }
 
-/// Right-hand amounts of a holding mini row inside an account card.
-class _HoldingMiniTrailing extends ConsumerWidget {
-  const _HoldingMiniTrailing({required this.h});
+/// 单行占比条：按资产类型聚合市值，展示每类占比与颜色。
+class _AccountTypeBar extends StatelessWidget {
+  const _AccountTypeBar({
+    required this.holdings,
+    required this.rates,
+    required this.hide,
+  });
 
-  final HoldingRow h;
+  final List<HoldingRow> holdings;
+  final Map<String, double> rates;
+  final bool hide;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final type = AssetType.fromStorage(h.assetType);
-    final marketValue =
-        type.isAmountBased ? h.quantity : h.quantity * h.latestPrice;
-    final cost = type.isAmountBased
-        ? (h.costPrice > 0 ? h.costPrice : h.quantity)
-        : h.quantity * h.costPrice;
-    final profit = marketValue - cost;
-    final hide = ref.watch(hideAmountsProvider);
-    return Row(
-      mainAxisSize: MainAxisSize.min,
+  Widget build(BuildContext context) {
+    // Aggregate by high-level category (股票/黄金/债券/现金/…).
+    final byCat = <AssetCategory, double>{};
+    for (final h in holdings) {
+      final cat = AssetType.fromStorage(h.assetType).category;
+      byCat[cat] = (byCat[cat] ?? 0) + _amountValue(h, rates);
+    }
+    final entries = byCat.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+    final total = entries.fold(0.0, (s, e) => s + e.value);
+    if (total <= 0) return const SizedBox.shrink();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          hide ? '****' : Formats.money(marketValue, h.currency),
-          style: T.mono(size: 13, weight: FontWeight.w600, color: T.text1),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(3),
+          child: SizedBox(
+            height: 8,
+            child: Row(
+              children: [
+                for (final e in entries)
+                  Expanded(
+                    flex: (e.value / total * 1000).round().clamp(0, 1000),
+                    child: Container(color: e.key.color),
+                  ),
+              ],
+            ),
+          ),
         ),
-        const SizedBox(width: T.s2),
-        DeltaText(
-          value: profit,
-          text: hide
-              ? '****'
-              : '${profit >= 0 ? '+' : ''}${Formats.money(profit, h.currency)}',
-          size: 12,
+        const SizedBox(height: 6),
+        Wrap(
+          spacing: T.s3,
+          runSpacing: 2,
+          children: [
+            for (final e in entries)
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 7,
+                    height: 7,
+                    decoration: BoxDecoration(
+                      color: e.key.color,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    '${e.key.label} '
+                    '${Formats.pct(total == 0 ? 0 : e.value / total)}',
+                    style: T.mono(size: 11, color: T.text2),
+                  ),
+                  if (!hide) ...[
+                    const SizedBox(width: 2),
+                    Text(
+                      Formats.amountCompact(e.value),
+                      style: T.mono(size: 11, color: T.text3),
+                    ),
+                  ],
+                ],
+              ),
+          ],
         ),
       ],
     );
   }
+}
+
+/// Market value of a single holding in CNY (liabilities excluded by caller).
+double _amountValue(HoldingRow h, Map<String, double> rates) {
+  final type = AssetType.fromStorage(h.assetType);
+  final rate = rates[h.currency.toUpperCase()] ?? 1;
+  return (type.isAmountBased ? h.quantity : h.quantity * h.latestPrice) * rate;
 }
 
 /// Total market value of the account's assets (liabilities excluded),
@@ -297,9 +322,6 @@ double _accountTotal(List<HoldingRow> list, Map<String, double> rates) {
   return list.fold(0.0, (sum, h) {
     final type = AssetType.fromStorage(h.assetType);
     if (type == AssetType.liability) return sum;
-    final rate = rates[h.currency.toUpperCase()] ?? 1;
-    return sum +
-        (type.isAmountBased ? h.quantity : h.quantity * h.latestPrice) *
-            rate;
+    return sum + _amountValue(h, rates);
   });
 }
