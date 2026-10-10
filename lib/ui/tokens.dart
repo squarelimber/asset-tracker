@@ -18,17 +18,18 @@ class T {
   static const Color down = Color(0xFF3FB950);
   static const Color accent = Color(0xFF58A6FF);
 
-  /// 趋势曲线色：青 → 紫横向渐变（铺满整幅绘图区）。
+  /// 趋势曲线色：柔蓝 → 淡紫 横向渐变（铺满整幅绘图区）。
   ///
   /// 单色试过两版都不理想：白偏蓝在深色面板上发灰，accent 蓝又被网格的
-  /// 灰调淹没。横向渐变让曲线左青右紫、两端都保持饱和度，既在全局蓝色系
-  /// 里，又不会跟涨跌语义色（红/绿）撞车。注意**纯色紫刻意不用作主线**：
-  /// 指数对比里的「上证50」就是紫线。
+  /// 灰调淹没；随后整条高饱和「青 → 紫」又太跳，青端像霓虹灯。现在取原
+  /// 渐变的**中段色域**（避开青端的荧光感）并把明度抬高一档、饱和度收
+  /// 一档，柔和不刺眼。注意**纯色紫刻意不用作主线**：指数对比里的
+  /// 「上证50」就是紫线。
   ///
   /// [trendFrom] 同时也是曲线下方填充与末端脉冲点的基色（同一条曲线只
   /// 认一个色族）；[trendTo] 是末端脉冲点的取色（曲线右端落在渐变末尾）。
-  static const Color trendFrom = Color(0xFF5EE0FF);
-  static const Color trendTo = Color(0xFFB48CFF);
+  static const Color trendFrom = Color(0xFF97BFF7);
+  static const Color trendTo = Color(0xFFC5ACF2);
 
   /// 曲线本体（横向青→紫）。
   static const LinearGradient trendGradient = LinearGradient(
