@@ -319,6 +319,74 @@ void main() {
     );
   });
 
+  test('去重后 loser 持仓的流水改写为 winner 引用（不产生孤儿交易）', () {
+    // 手机端黄金ETF id=58 带完整交易历史（买入、资金从现金23出账）；
+    // 服务器端有同一持仓的另一份 id=99（updatedAt 更新）被判胜。
+    final localSnap = {
+      SyncTables.holdings: [
+        {
+          ..._holding(58),
+          'name': '黄金ETF',
+          'symbol': '518880',
+          'assetType': 'etf',
+          'quantity': 4900.0,
+          'costPrice': 8.986,
+          'updatedAt': '2026-09-30T00:00:00.000Z',
+        },
+      ],
+      SyncTables.transactions: [
+        {
+          'id': 48,
+          'accountId': 5,
+          'holdingId': 58,
+          'cashSourceId': 23,
+          'cashTargetId': null,
+          'type': 'buy',
+          'amount': 44031.4,
+          'quantity': 4900.0,
+          'price': 8.986,
+          'occurredAt': '2026-09-21T00:00:00.000Z',
+          'updatedAt': '2026-09-21T00:00:00.000Z',
+        },
+      ],
+    };
+    final remoteSnap = {
+      SyncTables.holdings: [
+        {
+          ..._holding(99),
+          'name': '黄金ETF',
+          'symbol': '518880',
+          'assetType': 'etf',
+          'quantity': 4900.0,
+          'costPrice': 8.986,
+          'updatedAt': '2026-10-01T00:00:00.000Z',
+        },
+      ],
+    };
+    final out = merger.merge(
+      local: localSnap,
+      remote: remoteSnap,
+      remoteTombstones: const [],
+      localTombstones: const [],
+    );
+    final holdings = out.tables[SyncTables.holdings]!;
+    expect(holdings, hasLength(1));
+    expect(holdings.single['id'], 99,
+        reason: 'updatedAt 更新的 99 应胜出');
+
+    // loser 58 的买入流水必须改写为 winner 99（含 holdingId 与
+    // 资金来源 cashSourceId 不变），而不是残留引用已删 id 的孤儿。
+    final txns = out.tables[SyncTables.transactions]!;
+    expect(txns, hasLength(1));
+    expect(txns.single['holdingId'], 99,
+        reason: '去重后流水应跟随胜者持仓，不产生孤儿交易');
+    expect(txns.single['cashSourceId'], 23);
+    // loser 58 应被标记删除、且从 dedupeHoldingKeys 里单独标识（删除时
+    // 不级联清流水）。
+    expect(out.deletedKeys[SyncTables.holdings], contains('58'));
+    expect(out.dedupeHoldingKeys, contains('58'));
+  });
+
   test('同 id 流水不同 updatedAt 的冲突按 LWW 合并为一条', () {
     final local = {
       SyncTables.transactions: [

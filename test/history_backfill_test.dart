@@ -595,13 +595,15 @@ void main() {
         () async {
       await dao.setSetting('backfill_v7_gold_spot_and_today', '1');
       await dao.setSetting('backfill_v8_share_replay', '1');
-      // v9 (smooth share replay) and v10 (Sina history endpoint) migrated too:
-      // this is a fully current database, so the run below is a plain light
-      // run. The one-time full rebuild for databases missing the v9 marker is
-      // covered by smooth_share_replay_test.dart; the v10 one has its own case
+      // v9 (smooth share replay), v10 (Sina history endpoint) and v11 (Tencent
+      // history gateway) migrated too: this is a fully current database, so
+      // the run below is a plain light run. The one-time full rebuild for
+      // databases missing the v9 marker is covered by
+      // smooth_share_replay_test.dart; v10 and v11 have their own cases
       // further down in this file.
       await dao.setSetting('backfill_v9_smooth_share_replay', '1');
       await dao.setSetting('backfill_v10_sina_history_endpoint', '1');
+      await dao.setSetting('backfill_v11_tencent_history_gateway', '1');
       await seedFundHolding(purchaseDate: DateTime(2026, 7, 1), latest: 2.9);
       final fake = _FakeHistorySource();
       fake.data['110022'] = {
@@ -641,14 +643,15 @@ void main() {
     });
   });
 
-  test('v10 标记：老库（v7/v8/v9 已跑）首次打开全量重建，覆盖锚点前的旧口径快照',
-      () async {
+  test('v10 标记：老库缺 v10 时首次打开全量重建，覆盖锚点前的旧口径快照', () async {
     // 腾讯端点坏掉的那段时间，回填把每个历史日都写成了当天的报价（整条曲线被
     // 拉平）。修好端点后只有「缺 v10 标记 → 全量重建」能覆盖这些快照：轻量
     // 回填的窗口从 backfill_last_run 开始，够不到锚点之前的日期。
     await dao.setSetting('backfill_v7_gold_spot_and_today', '1');
     await dao.setSetting('backfill_v8_share_replay', '1');
     await dao.setSetting('backfill_v9_smooth_share_replay', '1');
+    // v11 已跑，所以下面这次全量重建是由「缺 v10」单独触发的。
+    await dao.setSetting('backfill_v11_tencent_history_gateway', '1');
     await dao.setSetting('backfill_last_run', '2026-07-16');
     await seedFundHolding(purchaseDate: DateTime(2026, 7, 1), latest: 2.9);
     final fake = _FakeHistorySource();
@@ -679,6 +682,89 @@ void main() {
       isTrue,
       reason: '重建成功后写回标记，之后恢复轻量回填',
     );
+  });
+
+  test('v11 标记：老库（v7~v10 已跑）缺 v11 → 首次打开全量重建', () async {
+    // 2026-10-09：腾讯 WAF 把 ifzq.gtimg.cn 也封了，ETF/股票/黄金历史全部抓空，
+    // 回填直接中止、净值曲线整段消失。改用 proxy.finance.qq.com 网关后，老库里
+    // 那片缺失/被拉平的历史只能靠「缺 v11 标记 → 全量重建」修复。
+    await dao.setSetting('backfill_v7_gold_spot_and_today', '1');
+    await dao.setSetting('backfill_v8_share_replay', '1');
+    await dao.setSetting('backfill_v9_smooth_share_replay', '1');
+    await dao.setSetting('backfill_v10_sina_history_endpoint', '1');
+    await dao.setSetting('backfill_last_run', '2026-07-16');
+    await seedFundHolding(purchaseDate: DateTime(2026, 7, 1), latest: 2.9);
+    final fake = _FakeHistorySource();
+    fake.data['110022'] = {
+      for (var d = DateTime(2026, 7, 1);
+          !d.isAfter(DateTime(2026, 7, 16));
+          d = d.add(const Duration(days: 1)))
+        _FakeHistorySource.key(d): 2.6,
+    };
+    // 锚点（07-16）之前的旧口径快照：轻量回填本来不会碰它。
+    await dao.upsertSnapshot(SnapshotsCompanion.insert(
+      date: '2026-07-02',
+      currency: const Value('CNY'),
+      totalValue: 999,
+      totalCost: 250,
+    ));
+
+    final service =
+        HistoryBackfillService(dao, sources: {MarketSource.eastmoney: fake});
+    await service.backfill(now: DateTime(2026, 7, 16));
+
+    final byDate = {for (final s in await dao.getSnapshots()) s.date: s};
+    expect(byDate['2026-07-02']!.totalValue, closeTo(260, 1e-6),
+        reason: '缺 v11 标记必须全量重建，覆盖锚点之前的旧口径快照');
+    expect(
+      (await dao.getSetting('backfill_v11_tencent_history_gateway')) != null,
+      isTrue,
+      reason: '重建成功后写回标记，之后恢复轻量回填',
+    );
+  });
+
+  test('全量重建不给它重写的日期留墓碑（否则下一次同步会把刚重建的历史删掉）',
+      () async {
+    // 2026-10-09 实况：15:23 的全量重建删掉历史并逐行写墓碑（deletedAt 取当时
+    // 的墙钟，晚于重建起点），而重建出来的行带的是重建起点时刻 ⇒ 15:40 的自动
+    // 同步判定「墓碑更新」，把刚重建出来的整段历史又删了一遍，只剩当天。
+    await dao.setSetting('backfill_v7_gold_spot_and_today', '1');
+    await dao.setSetting('backfill_v8_share_replay', '1');
+    await dao.setSetting('backfill_v9_smooth_share_replay', '1');
+    await dao.setSetting('backfill_v10_sina_history_endpoint', '1');
+    await dao.setSetting('backfill_last_run', '2026-07-16');
+    await seedFundHolding(purchaseDate: DateTime(2026, 7, 1), latest: 2.9);
+    final fake = _FakeHistorySource();
+    fake.data['110022'] = {
+      for (var d = DateTime(2026, 7, 1);
+          !d.isAfter(DateTime(2026, 7, 16));
+          d = d.add(const Duration(days: 1)))
+        _FakeHistorySource.key(d): 2.6,
+    };
+    // 重建窗口（07-01 起）之前的快照：没有重建行顶替，仍必须被删并留墓碑。
+    await dao.upsertSnapshot(SnapshotsCompanion.insert(
+      date: '2026-06-30',
+      currency: const Value('CNY'),
+      totalValue: 9999,
+      totalCost: 250,
+    ));
+
+    final service =
+        HistoryBackfillService(dao, sources: {MarketSource.eastmoney: fake});
+    await service.backfill(now: DateTime(2026, 7, 16));
+
+    final snapshots = await dao.getSnapshots();
+    expect(snapshots, hasLength(16), reason: '07-01..07-16 应被完整重建');
+    final tombstoned = {
+      for (final t in await dao.getTombstones())
+        if (t.table == 'snapshots') t.rowKey,
+    };
+    for (final s in snapshots) {
+      expect(tombstoned.contains('${s.date}|${s.currency}'), isFalse,
+          reason: '重建出来的日期不能同时带墓碑，否则下次同步会把它删掉');
+    }
+    expect(tombstoned.contains('2026-06-30|CNY'), isTrue,
+        reason: '窗口外被删掉、又没有重建行顶替的日期仍要留墓碑');
   });
 
   test('a transfer that empties an account leaves no phantom cost behind',

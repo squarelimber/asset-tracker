@@ -50,8 +50,10 @@ abstract final class SyncSettingsKeys {
 /// last-write-wins, and pushes the merged result back. The server URL and
 /// token are read from the local settings on every sync.
 class SyncService {
-  SyncService(this._dao, {SyncApi Function(String url, String? token)? apiFactory})
-      : _apiFactory = apiFactory ?? ((url, token) => SyncApi(url, token: token));
+  SyncService(
+    this._dao, {
+    SyncApi Function(String url, String? token)? apiFactory,
+  }) : _apiFactory = apiFactory ?? ((url, token) => SyncApi(url, token: token));
 
   final AssetDao _dao;
   final SyncApi Function(String url, String? token) _apiFactory;
@@ -144,6 +146,26 @@ class SyncService {
   }
 
   Future<void> _apply(MergeOutcome outcome) async {
+    // Delete first so a merged re-creation can re-insert freely. Tombstones
+    // written by the deletes must be visible to the upsert guard below, so
+    // the tombstone snapshot is taken AFTER the delete phase — a stale
+    // pre-delete snapshot let re-inserted rows (e.g. flows of a deduplicated
+    // holding) resurrect through a guard that did not know they had just
+    // been deleted. Holdings dropped by dedup are deleted WITHOUT cascading
+    // their flows: the merge already re-pointed those flows to the surviving
+    // holding (their re-insertion must not hit a fresh flow tombstone).
+    for (final table in SyncTables.all) {
+      for (final key in outcome.deletedKeys[table] ?? const <String>[]) {
+        if (table == SyncTables.holdings &&
+            outcome.dedupeHoldingKeys.contains(key)) {
+          final id = int.tryParse(key);
+          if (id == null) continue;
+          await _dao.deleteHoldingRowOnly(id);
+        } else {
+          await _deleteLocalRow(table, key);
+        }
+      }
+    }
     // Mid-sync guard: the merge decided on a snapshot taken before this
     // transaction ran. A deletion recorded locally while the sync was in
     // flight must still win over the stale merged re-insertion (otherwise
@@ -151,16 +173,10 @@ class SyncService {
     final localTombstones = {
       for (final t in await _dao.getTombstones()) '${t.table}|${t.rowKey}': t,
     };
-    // Delete first so a merged re-creation can re-insert freely.
     for (final table in SyncTables.all) {
-      for (final key in outcome.deletedKeys[table] ?? const <String>[]) {
-        await _deleteLocalRow(table, key);
-      }
-    }
-    for (final table in SyncTables.all) {
-      for (final row in outcome.tables[table] ?? const <Map<String, dynamic>>[]) {
-        final tomb =
-            localTombstones['$table|${syncRowKey(table, row)}'];
+      for (final row
+          in outcome.tables[table] ?? const <Map<String, dynamic>>[]) {
+        final tomb = localTombstones['$table|${syncRowKey(table, row)}'];
         final updatedAt = parseIso(row['updatedAt']) ?? DateTime.now();
         if (tomb != null && !updatedAt.isAfter(tomb.deletedAt)) {
           continue; // deleted locally after the merge snapshot: keep it deleted
@@ -172,32 +188,37 @@ class SyncService {
 
   Future<void> _deleteLocalRow(String table, String key) async {
     switch (table) {
-      case SyncTables.accounts: {
-        final id = int.tryParse(key);
-        if (id == null) return;
-        await _dao.deleteAccount(id);
-      }
-      case SyncTables.holdings: {
-        final id = int.tryParse(key);
-        if (id == null) return;
-        await _dao.deleteHolding(id);
-      }
-      case SyncTables.transactions: {
-        final id = int.tryParse(key);
-        if (id == null) return;
-        await _dao.deleteTransaction(id);
-      }
-      case SyncTables.snapshots: {
-        final parts = key.split('|');
-        final date = parts[0];
-        final currency = parts.length > 1 ? parts[1] : 'CNY';
-        await _dao.deleteSnapshot(date, currency);
-      }
-      case SyncTables.alertRules: {
-        final id = int.tryParse(key);
-        if (id == null) return;
-        await _dao.deleteAlertRule(id);
-      }
+      case SyncTables.accounts:
+        {
+          final id = int.tryParse(key);
+          if (id == null) return;
+          await _dao.deleteAccount(id);
+        }
+      case SyncTables.holdings:
+        {
+          final id = int.tryParse(key);
+          if (id == null) return;
+          await _dao.deleteHolding(id);
+        }
+      case SyncTables.transactions:
+        {
+          final id = int.tryParse(key);
+          if (id == null) return;
+          await _dao.deleteTransaction(id);
+        }
+      case SyncTables.snapshots:
+        {
+          final parts = key.split('|');
+          final date = parts[0];
+          final currency = parts.length > 1 ? parts[1] : 'CNY';
+          await _dao.deleteSnapshot(date, currency);
+        }
+      case SyncTables.alertRules:
+        {
+          final id = int.tryParse(key);
+          if (id == null) return;
+          await _dao.deleteAlertRule(id);
+        }
     }
   }
 
@@ -214,15 +235,19 @@ class SyncService {
           if (account.updatedAt.isAfter(updatedAt)) return;
           await _dao.updateAccount(_rowToAccount(row), now: updatedAt);
         } else {
-          await _dao.createAccount(AccountsCompanion.insert(
-            id: Value(id),
-            name: row['name']?.toString() ?? '',
-            type: row['type']?.toString() ?? 'cash',
-            currency: Value(row['currency']?.toString() ?? 'CNY'),
-            note: row['note'] == null ? const Value.absent() : Value(row['note'].toString()),
-            createdAt: Value(parseIso(row['createdAt']) ?? DateTime.now()),
-            updatedAt: Value(updatedAt),
-          ));
+          await _dao.createAccount(
+            AccountsCompanion.insert(
+              id: Value(id),
+              name: row['name']?.toString() ?? '',
+              type: row['type']?.toString() ?? 'cash',
+              currency: Value(row['currency']?.toString() ?? 'CNY'),
+              note: row['note'] == null
+                  ? const Value.absent()
+                  : Value(row['note'].toString()),
+              createdAt: Value(parseIso(row['createdAt']) ?? DateTime.now()),
+              updatedAt: Value(updatedAt),
+            ),
+          );
         }
       case SyncTables.holdings:
         final id = (row['id'] as num?)?.toInt();
@@ -232,34 +257,40 @@ class SyncService {
           if (holding.updatedAt.isAfter(updatedAt)) return;
           await _dao.updateHolding(_rowToHolding(row), now: updatedAt);
         } else {
-          await _dao.createHolding(HoldingsCompanion.insert(
-            id: Value(id),
-            accountId: (row['accountId'] as num?)?.toInt() ?? 0,
-            name: row['name']?.toString() ?? '',
-            assetType: row['assetType']?.toString() ?? 'cash',
-            marketSource: Value(row['marketSource']?.toString() ?? 'manual'),
-            symbol: row['symbol'] == null ? const Value.absent() : Value(row['symbol'].toString()),
-            quantity: Value((row['quantity'] as num?)?.toDouble() ?? 0),
-            costPrice: Value((row['costPrice'] as num?)?.toDouble() ?? 0),
-            latestPrice: Value((row['latestPrice'] as num?)?.toDouble() ?? 0),
-            costFxRate: row['costFxRate'] == null
-                ? const Value.absent()
-                : Value((row['costFxRate'] as num).toDouble()),
-            purchaseDate: parseIso(row['purchaseDate']) == null
-                ? const Value.absent()
-                : Value(parseIso(row['purchaseDate'])!),
-            riskLevel: row['riskLevel'] == null
-                ? const Value.absent()
-                : Value(row['riskLevel'].toString()),
-            categoryOverride: row['categoryOverride'] == null
-                ? const Value.absent()
-                : Value(row['categoryOverride'].toString()),
-            currency: Value(row['currency']?.toString() ?? 'CNY'),
-            note: row['note'] == null ? const Value.absent() : Value(row['note'].toString()),
-            archived: Value(row['archived'] == true),
-            createdAt: Value(parseIso(row['createdAt']) ?? DateTime.now()),
-            updatedAt: Value(updatedAt),
-          ));
+          await _dao.createHolding(
+            HoldingsCompanion.insert(
+              id: Value(id),
+              accountId: (row['accountId'] as num?)?.toInt() ?? 0,
+              name: row['name']?.toString() ?? '',
+              assetType: row['assetType']?.toString() ?? 'cash',
+              marketSource: Value(row['marketSource']?.toString() ?? 'manual'),
+              symbol: row['symbol'] == null
+                  ? const Value.absent()
+                  : Value(row['symbol'].toString()),
+              quantity: Value((row['quantity'] as num?)?.toDouble() ?? 0),
+              costPrice: Value((row['costPrice'] as num?)?.toDouble() ?? 0),
+              latestPrice: Value((row['latestPrice'] as num?)?.toDouble() ?? 0),
+              costFxRate: row['costFxRate'] == null
+                  ? const Value.absent()
+                  : Value((row['costFxRate'] as num).toDouble()),
+              purchaseDate: parseIso(row['purchaseDate']) == null
+                  ? const Value.absent()
+                  : Value(parseIso(row['purchaseDate'])!),
+              riskLevel: row['riskLevel'] == null
+                  ? const Value.absent()
+                  : Value(row['riskLevel'].toString()),
+              categoryOverride: row['categoryOverride'] == null
+                  ? const Value.absent()
+                  : Value(row['categoryOverride'].toString()),
+              currency: Value(row['currency']?.toString() ?? 'CNY'),
+              note: row['note'] == null
+                  ? const Value.absent()
+                  : Value(row['note'].toString()),
+              archived: Value(row['archived'] == true),
+              createdAt: Value(parseIso(row['createdAt']) ?? DateTime.now()),
+              updatedAt: Value(updatedAt),
+            ),
+          );
         }
       case SyncTables.transactions:
         final id = (row['id'] as num?)?.toInt();
@@ -274,44 +305,48 @@ class SyncService {
           // while having a different id. The two rows are equivalent by
           // definition — skip instead of failing the whole sync round.
           try {
-            await _dao.createTransaction(TransactionsCompanion.insert(
-              id: Value(id),
-              accountId: (row['accountId'] as num?)?.toInt() ?? 0,
-              holdingId: row['holdingId'] == null
-                  ? const Value.absent()
-                  : Value((row['holdingId'] as num).toInt()),
-              cashSourceId: row['cashSourceId'] == null
-                  ? const Value.absent()
-                  : Value((row['cashSourceId'] as num).toInt()),
-              cashTargetId: row['cashTargetId'] == null
-                  ? const Value.absent()
-                  : Value((row['cashTargetId'] as num).toInt()),
-              type: row['type']?.toString() ?? 'transfer_in',
-              quantity: row['quantity'] == null
-                  ? const Value.absent()
-                  : Value((row['quantity'] as num).toDouble()),
-              price: row['price'] == null
-                  ? const Value.absent()
-                  : Value((row['price'] as num).toDouble()),
-              amount: (row['amount'] as num?)?.toDouble() ?? 0,
-              currency: Value(row['currency']?.toString() ?? 'CNY'),
-              occurredAt: parseIso(row['occurredAt']) ?? DateTime.now(),
-              note: row['note'] == null ? const Value.absent() : Value(row['note'].toString()),
-              costMoved: row['costMoved'] == null
-                  ? const Value.absent()
-                  : Value(row['costMoved'] == true),
-              // Absent from peers that predate the column; keep NULL so the
-              // replay falls back to the raw amount on our side too.
-              costMovedAmount: row['costMovedAmount'] == null
-                  ? const Value.absent()
-                  : Value((row['costMovedAmount'] as num).toDouble()),
-              // Absent from peers that predate the column: internal-leg
-              // rows from an older build keep the legacy realized reading.
-              internalMove: row['internalMove'] == null
-                  ? const Value.absent()
-                  : Value(row['internalMove'] == true),
-              updatedAt: Value(updatedAt),
-            ));
+            await _dao.createTransaction(
+              TransactionsCompanion.insert(
+                id: Value(id),
+                accountId: (row['accountId'] as num?)?.toInt() ?? 0,
+                holdingId: row['holdingId'] == null
+                    ? const Value.absent()
+                    : Value((row['holdingId'] as num).toInt()),
+                cashSourceId: row['cashSourceId'] == null
+                    ? const Value.absent()
+                    : Value((row['cashSourceId'] as num).toInt()),
+                cashTargetId: row['cashTargetId'] == null
+                    ? const Value.absent()
+                    : Value((row['cashTargetId'] as num).toInt()),
+                type: row['type']?.toString() ?? 'transfer_in',
+                quantity: row['quantity'] == null
+                    ? const Value.absent()
+                    : Value((row['quantity'] as num).toDouble()),
+                price: row['price'] == null
+                    ? const Value.absent()
+                    : Value((row['price'] as num).toDouble()),
+                amount: (row['amount'] as num?)?.toDouble() ?? 0,
+                currency: Value(row['currency']?.toString() ?? 'CNY'),
+                occurredAt: parseIso(row['occurredAt']) ?? DateTime.now(),
+                note: row['note'] == null
+                    ? const Value.absent()
+                    : Value(row['note'].toString()),
+                costMoved: row['costMoved'] == null
+                    ? const Value.absent()
+                    : Value(row['costMoved'] == true),
+                // Absent from peers that predate the column; keep NULL so the
+                // replay falls back to the raw amount on our side too.
+                costMovedAmount: row['costMovedAmount'] == null
+                    ? const Value.absent()
+                    : Value((row['costMovedAmount'] as num).toDouble()),
+                // Absent from peers that predate the column: internal-leg
+                // rows from an older build keep the legacy realized reading.
+                internalMove: row['internalMove'] == null
+                    ? const Value.absent()
+                    : Value(row['internalMove'] == true),
+                updatedAt: Value(updatedAt),
+              ),
+            );
           } on Exception catch (e) {
             if (!e.toString().contains('UNIQUE constraint failed')) rethrow;
           }
@@ -320,14 +355,16 @@ class SyncService {
         final date = row['date']?.toString() ?? '';
         if (date.isEmpty) return;
         final currency = row['currency']?.toString() ?? 'CNY';
-        await _dao.upsertSnapshot(SnapshotsCompanion.insert(
-          date: date,
-          currency: Value(currency),
-          totalValue: (row['totalValue'] as num?)?.toDouble() ?? 0,
-          totalCost: (row['totalCost'] as num?)?.toDouble() ?? 0,
-          liabilities: Value((row['liabilities'] as num?)?.toDouble() ?? 0),
-          createdAt: Value(parseIso(row['createdAt']) ?? DateTime.now()),
-        ));
+        await _dao.upsertSnapshot(
+          SnapshotsCompanion.insert(
+            date: date,
+            currency: Value(currency),
+            totalValue: (row['totalValue'] as num?)?.toDouble() ?? 0,
+            totalCost: (row['totalCost'] as num?)?.toDouble() ?? 0,
+            liabilities: Value((row['liabilities'] as num?)?.toDouble() ?? 0),
+            createdAt: Value(parseIso(row['createdAt']) ?? DateTime.now()),
+          ),
+        );
       case SyncTables.alertRules:
         final id = (row['id'] as num?)?.toInt();
         if (id == null) return;
@@ -336,15 +373,17 @@ class SyncService {
           if (rule.updatedAt.isAfter(updatedAt)) return;
           await _dao.updateAlertRule(_rowToRule(row), now: updatedAt);
         } else {
-          await _dao.createAlertRule(AlertRulesCompanion.insert(
-            id: Value(id),
-            type: row['type']?.toString() ?? 'concentration',
-            name: row['name']?.toString() ?? '',
-            params: Value(row['params']?.toString() ?? '{}'),
-            enabled: Value(row['enabled'] == true),
-            createdAt: Value(parseIso(row['createdAt']) ?? DateTime.now()),
-            updatedAt: Value(updatedAt),
-          ));
+          await _dao.createAlertRule(
+            AlertRulesCompanion.insert(
+              id: Value(id),
+              type: row['type']?.toString() ?? 'concentration',
+              name: row['name']?.toString() ?? '',
+              params: Value(row['params']?.toString() ?? '{}'),
+              enabled: Value(row['enabled'] == true),
+              createdAt: Value(parseIso(row['createdAt']) ?? DateTime.now()),
+              updatedAt: Value(updatedAt),
+            ),
+          );
         }
     }
   }
@@ -383,37 +422,38 @@ class SyncService {
 
   // Row -> data class conversions (kept here to avoid touching the DAO).
   static AccountRow _rowToAccount(Map<String, dynamic> row) => AccountRow(
-        id: (row['id'] as num).toInt(),
-        name: row['name']?.toString() ?? '',
-        type: row['type']?.toString() ?? 'cash',
-        currency: row['currency']?.toString() ?? 'CNY',
-        note: row['note'] as String?,
-        createdAt: parseIso(row['createdAt']) ?? DateTime.now(),
-        updatedAt: parseIso(row['updatedAt']) ?? DateTime.now(),
-      );
+    id: (row['id'] as num).toInt(),
+    name: row['name']?.toString() ?? '',
+    type: row['type']?.toString() ?? 'cash',
+    currency: row['currency']?.toString() ?? 'CNY',
+    note: row['note'] as String?,
+    createdAt: parseIso(row['createdAt']) ?? DateTime.now(),
+    updatedAt: parseIso(row['updatedAt']) ?? DateTime.now(),
+  );
 
   static HoldingRow _rowToHolding(Map<String, dynamic> row) => HoldingRow(
-        id: (row['id'] as num).toInt(),
-        accountId: (row['accountId'] as num?)?.toInt() ?? 0,
-        name: row['name']?.toString() ?? '',
-        assetType: row['assetType']?.toString() ?? 'cash',
-        marketSource: row['marketSource']?.toString() ?? 'manual',
-        symbol: row['symbol'] as String?,
-        quantity: (row['quantity'] as num?)?.toDouble() ?? 0,
-        costPrice: (row['costPrice'] as num?)?.toDouble() ?? 0,
-        latestPrice: (row['latestPrice'] as num?)?.toDouble() ?? 0,
-        costFxRate: (row['costFxRate'] as num?)?.toDouble(),
-        purchaseDate: parseIso(row['purchaseDate']),
-        riskLevel: row['riskLevel'] as String?,
-        categoryOverride: row['categoryOverride'] as String?,
-        currency: row['currency']?.toString() ?? 'CNY',
-        note: row['note'] as String?,
-        archived: row['archived'] == true,
-        createdAt: parseIso(row['createdAt']) ?? DateTime.now(),
-        updatedAt: parseIso(row['updatedAt']) ?? DateTime.now(),
-      );
+    id: (row['id'] as num).toInt(),
+    accountId: (row['accountId'] as num?)?.toInt() ?? 0,
+    name: row['name']?.toString() ?? '',
+    assetType: row['assetType']?.toString() ?? 'cash',
+    marketSource: row['marketSource']?.toString() ?? 'manual',
+    symbol: row['symbol'] as String?,
+    quantity: (row['quantity'] as num?)?.toDouble() ?? 0,
+    costPrice: (row['costPrice'] as num?)?.toDouble() ?? 0,
+    latestPrice: (row['latestPrice'] as num?)?.toDouble() ?? 0,
+    costFxRate: (row['costFxRate'] as num?)?.toDouble(),
+    purchaseDate: parseIso(row['purchaseDate']),
+    riskLevel: row['riskLevel'] as String?,
+    categoryOverride: row['categoryOverride'] as String?,
+    currency: row['currency']?.toString() ?? 'CNY',
+    note: row['note'] as String?,
+    archived: row['archived'] == true,
+    createdAt: parseIso(row['createdAt']) ?? DateTime.now(),
+    updatedAt: parseIso(row['updatedAt']) ?? DateTime.now(),
+  );
 
-  static TransactionRow _rowToTransaction(Map<String, dynamic> row) => TransactionRow(
+  static TransactionRow _rowToTransaction(Map<String, dynamic> row) =>
+      TransactionRow(
         id: (row['id'] as num).toInt(),
         accountId: (row['accountId'] as num?)?.toInt() ?? 0,
         holdingId: (row['holdingId'] as num?)?.toInt(),
@@ -433,12 +473,12 @@ class SyncService {
       );
 
   static AlertRuleRow _rowToRule(Map<String, dynamic> row) => AlertRuleRow(
-        id: (row['id'] as num).toInt(),
-        type: row['type']?.toString() ?? 'concentration',
-        name: row['name']?.toString() ?? '',
-        params: row['params']?.toString() ?? '{}',
-        enabled: row['enabled'] == true,
-        createdAt: parseIso(row['createdAt']) ?? DateTime.now(),
-        updatedAt: parseIso(row['updatedAt']) ?? DateTime.now(),
-      );
+    id: (row['id'] as num).toInt(),
+    type: row['type']?.toString() ?? 'concentration',
+    name: row['name']?.toString() ?? '',
+    params: row['params']?.toString() ?? '{}',
+    enabled: row['enabled'] == true,
+    createdAt: parseIso(row['createdAt']) ?? DateTime.now(),
+    updatedAt: parseIso(row['updatedAt']) ?? DateTime.now(),
+  );
 }

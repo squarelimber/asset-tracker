@@ -74,6 +74,7 @@ class MergeOutcome {
     required this.conflicts,
     required this.changed,
     required this.dataChanged,
+    this.dedupeHoldingKeys = const {},
   });
 
   /// Merged rows per synced table.
@@ -93,6 +94,13 @@ class MergeOutcome {
   /// `createdAt` differences make it "change" on every merge even when the
   /// values are identical. Used to trigger a local history rebuild.
   final bool dataChanged;
+
+  /// Holding ids dropped by entity-level dedup (see [_dedupeHoldings]).
+  /// Their transactions were re-pointed to the surviving holding in
+  /// [tables], so applying these deletions must NOT cascade into the flows
+  /// (a cascade would tombstone them and the guard would drop the rewritten
+  /// re-insertion, losing the history).
+  final Set<String> dedupeHoldingKeys;
 }
 
 /// Last-write-wins merge of a local snapshot against a remote one.
@@ -159,14 +167,28 @@ class SyncMerger {
     // 当成两条保留——正是「同步后多出重复黄金ETF」的根源（row key 是
     // 自增 id，无法跨设备识别同一实体）。这里合并为一条（保留
     // updatedAt 最新），避免重复持仓污染净值曲线。
+    //
+    // 被淘汰的行只是「去掉多余副本」，其交易历史必须跟随胜者继续存在：
+    // 直接删除 loser 会级联删除它名下的全部交易并写墓碑，而 merge 输出
+    // 又把这些交易原样重插（localTombstones 快照在删除前读取不到新墓碑）
+    // —— 结果是引用已删持仓 id 的孤儿交易被 push 到所有设备。因此在
+    // merge 输出层面把引用 loser id 的交易行改写为 winner id，loser 仅
+    // 作为普通持仓删除，交易本体完整保留。
     final deduped = _dedupeHoldings(tables[SyncTables.holdings] ?? const []);
-    if (deduped.rows.length !=
-        (tables[SyncTables.holdings] ?? const []).length) {
+    if (deduped.removedKeys.isNotEmpty) {
       tables[SyncTables.holdings] = deduped.rows;
       deletedKeys[SyncTables.holdings] = [
         ...?deletedKeys[SyncTables.holdings],
         ...deduped.removedKeys,
       ];
+      // 改写交易引用：loser 持仓下的全部流水转移到 winner 名下。
+      if (deduped.idRewrite.isNotEmpty) {
+        final txns =
+            tables[SyncTables.transactions] ?? const <Map<String, dynamic>>[];
+        tables[SyncTables.transactions] = [
+          for (final t in txns) _rewriteHoldingRefs(t, deduped.idRewrite),
+        ];
+      }
       dataChanged = true;
     }
 
@@ -191,6 +213,7 @@ class SyncMerger {
       conflicts: conflicts,
       changed: changed,
       dataChanged: dataChanged,
+      dedupeHoldingKeys: deduped.removedKeys.toSet(),
     );
   }
 
@@ -349,11 +372,20 @@ class SyncMerger {
   /// untouched — name-based matching would wrongly merge two manual funds
   /// with the same display name in the same account). Among the duplicates,
   /// the row with the newest `updatedAt` wins; the others' keys are returned
-  /// for deletion (and are not pushed back).
-  static ({List<Map<String, dynamic>> rows, List<String> removedKeys})
+  /// for deletion (and are not pushed back). [idRewrite] maps each dropped
+  /// holding id to the surviving one, so callers can re-point transactions
+  /// and keep the dropped holding's history intact (see [merge]).
+  static ({
+    List<Map<String, dynamic>> rows,
+    List<String> removedKeys,
+    Map<int, int> idRewrite,
+  })
   _dedupeHoldings(List<Map<String, dynamic>> rows) {
-    if (rows.length < 2) return (rows: rows, removedKeys: const []);
+    if (rows.length < 2) {
+      return (rows: rows, removedKeys: const [], idRewrite: const {});
+    }
     final removed = <String>[];
+    final rewrite = <int, int>{};
     final index = <String, Map<String, dynamic>>{};
     final out = <Map<String, dynamic>>[];
     for (final row in rows) {
@@ -379,8 +411,35 @@ class SyncMerger {
         out.remove(existing);
         out.add(keep);
       }
+      final dropId = (drop['id'] as num?)?.toInt();
+      final keepId = (keep['id'] as num?)?.toInt();
       removed.add('${drop['id']}');
+      if (dropId != null && keepId != null && dropId != keepId) {
+        rewrite[dropId] = keepId;
+      }
     }
-    return (rows: out, removedKeys: removed);
+    return (rows: out, removedKeys: removed, idRewrite: rewrite);
+  }
+
+  /// Returns a copy of transaction row [t] with any reference to a dropped
+  /// holding id (see [SyncMerger._dedupeHoldings.idRewrite]) replaced by the
+  /// surviving id, so a deduplicated holding keeps its full flow history.
+  static Map<String, dynamic> _rewriteHoldingRefs(
+    Map<String, dynamic> t,
+    Map<int, int> idRewrite,
+  ) {
+    if (idRewrite.isEmpty) return t;
+    var changed = false;
+    final copy = Map<String, dynamic>.of(t);
+    for (final field in const ['holdingId', 'cashSourceId', 'cashTargetId']) {
+      final raw = copy[field];
+      if (raw == null) continue;
+      final v = (raw as num).toInt();
+      final to = idRewrite[v];
+      if (to == null) continue;
+      copy[field] = to;
+      changed = true;
+    }
+    return changed ? copy : t;
   }
 }

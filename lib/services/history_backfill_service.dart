@@ -143,6 +143,17 @@ class HistoryBackfillService {
   /// rebuilds the whole window once.
   static const _sinaHistoryEndpointMarker = 'backfill_v10_sina_history_endpoint';
 
+  /// Marker for the v11 one-time full rebuild: the Tencent history gateway
+  /// moved again. The v10 fix pointed [TencentHistorySource] at the bare
+  /// `ifzq.gtimg.cn` host once `web.ifzq.gtimg.cn` began answering a WAF 501,
+  /// but on 2026-10-09 the WAF had caught up with the bare host too and *both*
+  /// returned 501 — so every ETF/stock/gold holding fetched an empty series,
+  /// the rebuild aborted, and the net-worth curve was left with no history at
+  /// all. The source now queries the `proxy.finance.qq.com` gateway. Any day
+  /// written while both hosts were blocked is missing or flat and a light run
+  /// never revisits it, so every device rebuilds the whole window once.
+  static const _tencentGatewayMarker = 'backfill_v11_tencent_history_gateway';
+
   /// Date (yyyy-MM-dd) of the previous successful run. A light run re-derives
   /// every day from this date through today, because any of them may have
   /// been overwritten by the live-quote path in the meantime and needs to be
@@ -395,7 +406,8 @@ class HistoryBackfillService {
         await _dao.getSetting(_backfillV3Marker) == null ||
         await _dao.getSetting(_shareReplayMarker) == null ||
         await _dao.getSetting(_smoothShareReplayMarker) == null ||
-        await _dao.getSetting(_sinaHistoryEndpointMarker) == null;
+        await _dao.getSetting(_sinaHistoryEndpointMarker) == null ||
+        await _dao.getSetting(_tencentGatewayMarker) == null;
     // A type switch that crossed the amount-based boundary changes the
     // *meaning* of the stored numbers (see holding_type_conversion.dart); the
     // days written under the old semantics must not survive a light run (a
@@ -547,7 +559,18 @@ class HistoryBackfillService {
     if (rows.isNotEmpty) {
       await _dao.transaction(() async {
         if (needFullRebuild) {
-          await _dao.deleteSnapshotsBefore(todayKey(current));
+          // Days this pass re-derives must not be tombstoned: the rebuilt row
+          // is itself the newer version that wins the merge, whereas a
+          // tombstone stamped now (later than the rebuild's start time, which
+          // the rows carry) would outrank it and delete it again on the next
+          // sync. See [AssetDao.deleteSnapshotsBefore].
+          final replaced = <String>{
+            for (final r in rows) '${r.date}|${r.currency}',
+          };
+          await _dao.deleteSnapshotsBefore(
+            todayKey(current),
+            replacedKeys: replaced,
+          );
         }
         await _dao.batchInsertSnapshots(rows);
       });
@@ -568,6 +591,10 @@ class HistoryBackfillService {
       );
       await _dao.setSetting(
         _sinaHistoryEndpointMarker,
+        '${current.millisecondsSinceEpoch}',
+      );
+      await _dao.setSetting(
+        _tencentGatewayMarker,
         '${current.millisecondsSinceEpoch}',
       );
     }

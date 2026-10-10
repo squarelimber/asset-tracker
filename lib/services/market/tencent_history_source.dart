@@ -6,9 +6,9 @@ import '../../core/enums.dart';
 import 'history_source.dart';
 import 'market_data_source.dart';
 
-/// Tencent K-line history (ifzq.gtimg.cn) — CORS-friendly
-/// (`Access-Control-Allow-Origin: *`) replacement for the Sina K-line
-/// endpoints on the web.
+/// Tencent K-line history (the `proxy.finance.qq.com` / `ifzq.gtimg.cn`
+/// gateways) — CORS-friendly replacement for the Sina K-line endpoints on
+/// the web.
 ///
 /// Symbols: sh/sz A-shares and indices, hk* (Hang Seng etc.), us* (US
 /// indices), wh*CNY FX. Response rows are
@@ -21,22 +21,30 @@ class TencentHistorySource extends HistoryDataSource {
 
   final http.Client _client;
 
-  /// Primary host. `web.ifzq.gtimg.cn` used to be the only one, but its
-  /// `/appstock/app/fqkline/get` path began answering a WAF `501` (a JS
-  /// challenge page, no data) — reproduced 2026-10-08 with and without a
-  /// proxy, with no header, a browser UA and a Referer, and with every
-  /// `param` spelling, while other paths on the same host stayed 200. The
-  /// bare host serves the same qfq-adjusted `qfqday` payload, so it is
-  /// queried first and the old host is kept as a fallback in case the WAF
-  /// rule is moved rather than removed.
+  /// Full endpoint URLs, tried in order. The path differs between the
+  /// `proxy.finance.qq.com` gateway (`/ifzqgtimg/appstock/app/newfqkline/get`)
+  /// and the legacy `*.ifzq.gtimg.cn` hosts (`/appstock/app/fqkline/get`), so
+  /// the whole URL is carried here rather than just a host to swap out.
   ///
-  /// This is not cosmetic: a 501 came back as an *empty* series, which the
+  /// `web.ifzq.gtimg.cn` began answering a WAF `501` (a JS challenge page,
+  /// no data) around 2026-10-08, which is why the bare `ifzq.gtimg.cn` host
+  /// became the primary one. By 2026-10-09 the WAF had caught up with that
+  /// host too and *both* returned 501 — reproduced direct and through a
+  /// proxy, with a browser UA and a Referer, on every `param` spelling, while
+  /// `qt.gtimg.cn` quotes and the Eastmoney fund NAV endpoint stayed 200. The
+  /// `proxy.finance.qq.com` gateway still serves the same qfq-adjusted
+  /// `qfqday` payload, so it is queried first; the two dead hosts sit at the
+  /// end to keep the feature alive if the WAF rule moves again.
+  ///
+  /// This is not cosmetic: a 501 comes back as an *empty* series, which the
   /// backfill used to accept as "no data" and then price every historical
   /// day of that holding with the current quote — the 2026-10-08
   /// 「今天的收益被算到 10-05」 bug.
-  static const _base = 'https://ifzq.gtimg.cn/appstock/app/fqkline/get';
-  static const _fallbackBase =
-      'https://web.ifzq.gtimg.cn/appstock/app/fqkline/get';
+  static const _endpoints = [
+    'https://proxy.finance.qq.com/ifzqgtimg/appstock/app/newfqkline/get',
+    'https://ifzq.gtimg.cn/appstock/app/fqkline/get',
+    'https://web.ifzq.gtimg.cn/appstock/app/fqkline/get',
+  ];
 
   static const _headers = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
@@ -68,7 +76,7 @@ class TencentHistorySource extends HistoryDataSource {
     return result;
   }
 
-  /// Rows for [symbol] in [from]..[to]. The hosts are tried in order, but
+  /// Rows for [symbol] in [from]..[to]. The endpoints are tried in order, but
   /// only when the request itself failed (transport error or non-200): a
   /// well-formed response is taken at face value even when it carries no
   /// rows, because a symbol can legitimately have no bars in the window.
@@ -78,7 +86,7 @@ class TencentHistorySource extends HistoryDataSource {
     DateTime to,
     int count,
   ) async {
-    for (final base in const [_base, _fallbackBase]) {
+    for (final base in _endpoints) {
       final rows = await _requestFrom(base, symbol, from, to, count);
       if (rows != null) return rows;
     }
