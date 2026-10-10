@@ -11,7 +11,7 @@ HoldingRow _holding({
   double costPrice = 0,
   double latestPrice = 0,
 }) {
-  return HoldingRow(
+  return HoldingRow(costRecorded: false, 
     id: id,
     accountId: 1,
     name: name,

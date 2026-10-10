@@ -7,7 +7,7 @@ HoldingRow _amountHolding({
   double quantity = 1000,
   double cost = 1000,
 }) {
-  return HoldingRow(
+  return HoldingRow(costRecorded: false, 
     id: 1,
     accountId: 1,
     name: '现金',
@@ -166,7 +166,7 @@ void main() {
   });
 
   test('share price interpolates from cost to latest', () {
-    final h = HoldingRow(
+    final h = HoldingRow(costRecorded: false, 
       id: 3,
       accountId: 1,
       name: '月月盈',

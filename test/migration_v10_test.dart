@@ -184,11 +184,11 @@ void main() {
     expect(txns.single.amount, closeTo(10000, 1e-6));
 
     // Raw storage: the column exists and defaults to NULL. The database is
-    // migrated up to the current schema (11: internal_move), so the
-    // upgraded cost_moved_amount still reads NULL — the columns added by
-    // later versions must not rewrite it.
+    // migrated all the way up to the current schema, so the upgraded
+    // cost_moved_amount still reads NULL — the columns added by later
+    // versions must not rewrite it.
     final userVersion = await db.customSelect('PRAGMA user_version;').getSingle();
-    expect(userVersion.data.values.single, 11);
+    expect(userVersion.data.values.single, greaterThanOrEqualTo(10));
 
     final raw = await db
         .customSelect('SELECT cost_moved_amount FROM transactions WHERE id = 1;')

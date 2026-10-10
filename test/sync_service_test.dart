@@ -178,7 +178,7 @@ void main() {
     // Device A changes the amount (newer).
     final h = (await dao.getHolding(holdingId))!;
     await dao.updateHolding(
-      HoldingRow(
+      HoldingRow(costRecorded: false, 
         id: h.id,
         accountId: h.accountId,
         name: h.name,
@@ -212,7 +212,7 @@ void main() {
     final hB = (await daoB.getHolding(holdingId))!;
     final older = now.subtract(const Duration(hours: 2));
     await daoB.updateHolding(
-      HoldingRow(
+      HoldingRow(costRecorded: false, 
         id: hB.id,
         accountId: hB.accountId,
         name: hB.name,

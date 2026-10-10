@@ -18,18 +18,34 @@ import '../data/database.dart';
 ///
 /// Not meaningful for share-based holdings, where `costPrice` is a
 /// per-unit cost (use `quantity * costPrice`).
-double effectiveCostOf(HoldingRow h) => effectivePrincipal(h.costPrice, h.quantity);
+double effectiveCostOf(HoldingRow h) =>
+    effectivePrincipal(h.costPrice, h.quantity, recorded: h.costRecorded);
 
 /// Scalar form of [effectiveCostOf] for callers that hold the raw numbers
 /// instead of a [HoldingRow] (e.g. the type-conversion math, which works on
 /// standalone `costPrice` / `quantity` parameters).
 ///
-/// Keep this the ONLY definition of the "0 means never recorded, fall back to
-/// the balance" rule; every caller must route through here or [effectiveCostOf]
-/// rather than re-typing the ternary, or the same number gets two readings and
-/// the difference shows up as a phantom profit.
-double effectivePrincipal(double costPrice, double balance) =>
-    costPrice > 0 ? costPrice : balance;
+/// [recorded] is the holding's `costRecorded` flag. The rule is:
+/// - a positive `costPrice` is authoritative on its own (`recorded` is
+///   redundant — every bank of stored data has always agreed on this);
+/// - a zero `costPrice` is "never recorded" *unless* [recorded] says the user
+///   entered it explicitly, in which case 0 is a real principal and the gain
+///   is the whole balance.
+///
+/// Keeping the `costPrice > 0` clause is what makes the flag backward
+/// compatible: rows, backups and callers written before it existed carry no
+/// flag, and they all mean the positive-cost reading. Only the explicit-zero
+/// case changes behaviour.
+///
+/// Keep this the ONLY definition of the rule; every caller must route through
+/// here or [effectiveCostOf] rather than re-typing the ternary, or the same
+/// number gets two readings and the difference shows up as a phantom profit.
+double effectivePrincipal(
+  double costPrice,
+  double balance, {
+  bool recorded = false,
+}) =>
+    (recorded || costPrice > 0) ? costPrice : balance;
 
 /// Invested amount that travels with [amount] when money moves out of an
 /// amount-based holding: **proportional to the balance**, so the holding

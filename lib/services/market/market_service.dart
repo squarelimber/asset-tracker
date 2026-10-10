@@ -1,3 +1,4 @@
+import 'package:drift/drift.dart' show Value;
 import 'package:flutter/foundation.dart' show kIsWeb;
 
 import '../../core/enums.dart';
@@ -27,6 +28,23 @@ class MarketRefreshResult {
   final DateTime fetchedAt;
 
   bool get allOk => failed == 0;
+}
+
+/// Cache row for [quote], built as a [PriceCacheCompanion] so its explicit
+/// nulls land on conflict and fully replace the previous row (see
+/// [AssetDao.upsertPriceCache]).
+PriceCacheCompanion _priceCacheCompanion(String symbol, MarketQuote quote) {
+  return PriceCacheCompanion(
+    symbol: Value(symbol),
+    source: Value(quote.source.storageName),
+    name: Value(quote.name),
+    price: Value(quote.price),
+    currency: Value(quote.currency),
+    prevClose: Value(quote.prevClose),
+    change: Value(quote.change),
+    changePct: Value(quote.changePct),
+    fetchedAt: Value(quote.fetchedAt),
+  );
 }
 
 /// Orchestrates market data fetching for all holdings:
@@ -144,17 +162,7 @@ class MarketService {
           continue;
         }
         await _dao.updateHoldingPrice(h.id, quote.price);
-        await _dao.upsertPriceCache(PriceCacheRow(
-          symbol: symbol,
-          source: quote.source.storageName,
-          name: quote.name,
-          price: quote.price,
-          currency: quote.currency,
-          prevClose: quote.prevClose,
-          change: quote.change,
-          changePct: quote.changePct,
-          fetchedAt: quote.fetchedAt,
-        ));
+        await _dao.upsertPriceCache(_priceCacheCompanion(symbol, quote));
         updated++;
       }
     });
@@ -218,17 +226,7 @@ class MarketService {
         for (final q in quotes) {
           if (q.isSuccess && q.price > 0) {
             rates[q.symbol] = q.price;
-            await _dao.upsertPriceCache(PriceCacheRow(
-              symbol: q.symbol,
-              source: q.source.storageName,
-              name: q.name,
-              price: q.price,
-              currency: q.currency,
-              prevClose: q.prevClose,
-              change: q.change,
-              changePct: q.changePct,
-              fetchedAt: q.fetchedAt,
-            ));
+            await _dao.upsertPriceCache(_priceCacheCompanion(q.symbol, q));
           }
         }
       } catch (_) {
@@ -269,17 +267,7 @@ class MarketService {
     }
     await _dao.transaction(() async {
       await _dao.updateHoldingPrice(holding.id, quote.price);
-      await _dao.upsertPriceCache(PriceCacheRow(
-        symbol: symbol,
-        source: quote.source.storageName,
-        name: quote.name,
-        price: quote.price,
-        currency: quote.currency,
-        prevClose: quote.prevClose,
-        change: quote.change,
-        changePct: quote.changePct,
-        fetchedAt: quote.fetchedAt,
-      ));
+      await _dao.upsertPriceCache(_priceCacheCompanion(symbol, quote));
     });
     return quote;
   }

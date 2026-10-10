@@ -61,6 +61,7 @@ class SyncFormatter {
         'symbol': h.symbol,
         'quantity': h.quantity,
         'costPrice': h.costPrice,
+        'costRecorded': h.costRecorded,
         'latestPrice': h.latestPrice,
         'costFxRate': h.costFxRate,
         'purchaseDate': h.purchaseDate?.toIso8601String(),

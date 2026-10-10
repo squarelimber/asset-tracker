@@ -269,6 +269,11 @@ class SyncService {
                   : Value(row['symbol'].toString()),
               quantity: Value((row['quantity'] as num?)?.toDouble() ?? 0),
               costPrice: Value((row['costPrice'] as num?)?.toDouble() ?? 0),
+              costRecorded: Value(row['costRecorded'] == null
+                  // Rows from a peer still on the old schema carried the "0
+                  // means unset" rule; backfill the flag from exactly that.
+                  ? ((row['costPrice'] as num?)?.toDouble() ?? 0) > 0
+                  : row['costRecorded'] == true),
               latestPrice: Value((row['latestPrice'] as num?)?.toDouble() ?? 0),
               costFxRate: row['costFxRate'] == null
                   ? const Value.absent()
@@ -440,6 +445,9 @@ class SyncService {
     symbol: row['symbol'] as String?,
     quantity: (row['quantity'] as num?)?.toDouble() ?? 0,
     costPrice: (row['costPrice'] as num?)?.toDouble() ?? 0,
+    costRecorded: row['costRecorded'] == null
+        ? ((row['costPrice'] as num?)?.toDouble() ?? 0) > 0
+        : row['costRecorded'] == true,
     latestPrice: (row['latestPrice'] as num?)?.toDouble() ?? 0,
     costFxRate: (row['costFxRate'] as num?)?.toDouble(),
     purchaseDate: parseIso(row['purchaseDate']),

@@ -15,7 +15,7 @@ HoldingRow _holding({
   String currency = 'CNY',
   double? costFxRate,
 }) {
-  return HoldingRow(
+  return HoldingRow(costRecorded: false, 
     id: id,
     accountId: 1,
     name: 'h$id',

@@ -12,7 +12,7 @@ HoldingRow _holding({
   double quantity = 100,
   String currency = 'CNY',
 }) {
-  return HoldingRow(
+  return HoldingRow(costRecorded: false, 
     id: 1,
     accountId: 1,
     name: '测试',

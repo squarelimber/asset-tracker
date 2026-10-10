@@ -22,7 +22,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase([QueryExecutor? executor]) : super(executor ?? _openConnection());
 
   @override
-  int get schemaVersion => 11;
+  int get schemaVersion => 12;
 
   static QueryExecutor _openConnection() {
     // Web requires explicit web options: sqlite3.wasm and drift_worker.js
@@ -131,6 +131,19 @@ class AppDatabase extends _$AppDatabase {
           if (from < 11) {
             final db = m.database as AppDatabase;
             await m.addColumn(db.transactions, db.transactions.internalMove);
+          }
+          // v11 -> v12: remember whether a holding's principal was ever
+          // explicitly recorded, so a genuine 0 stops doubling as "unset"
+          // (and stops hiding the holding's full gain). Constant default, so
+          // drift's addColumn is safe. Existing rows were all written under
+          // the "0 means unset" rule, so backfill the flag from exactly that:
+          // a positive cost was recorded, a 0 was not.
+          if (from < 12) {
+            final db = m.database as AppDatabase;
+            await m.addColumn(db.holdings, db.holdings.costRecorded);
+            await customStatement(
+              'UPDATE holdings SET cost_recorded = 1 WHERE cost_price > 0;',
+            );
           }
         },
       );

@@ -160,13 +160,13 @@ void main() {
       // and the live re-fetch that follows is exactly the network
       // dependency this test must not have.
       final now = DateTime.now();
-      await dao.upsertPriceCache(PriceCacheRow(
-        symbol: 'USD',
-        source: 'forex',
-        name: '美元',
-        price: 7.15,
-        currency: 'USD',
-        fetchedAt: now,
+      await dao.upsertPriceCache(PriceCacheCompanion(
+        symbol: const Value('USD'),
+        source: const Value('forex'),
+        name: const Value('美元'),
+        price: const Value(7.15),
+        currency: const Value('USD'),
+        fetchedAt: Value(now),
       ));
 
       final service = SnapshotService(

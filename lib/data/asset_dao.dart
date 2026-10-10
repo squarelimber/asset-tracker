@@ -112,6 +112,7 @@ class AssetDao {
         symbol: Value(holding.symbol),
         quantity: Value(holding.quantity),
         costPrice: Value(holding.costPrice),
+        costRecorded: Value(holding.costRecorded),
         latestPrice: Value(holding.latestPrice),
         costFxRate: Value(holding.costFxRate),
         currency: Value(holding.currency),
@@ -336,7 +337,18 @@ class AssetDao {
     return {for (final r in rows) r.symbol: r};
   }
 
-  Future<void> upsertPriceCache(PriceCacheRow row) {
+  /// Overwrite the cached quote for the row's symbol.
+  ///
+  /// Takes a [PriceCacheCompanion] rather than a [PriceCacheRow] so a refresh
+  /// can write *explicit* nulls. `insertOnConflictUpdate` merges — a row built
+  /// from a data class omits its null columns, so a source that returns a price
+  /// but no move (gold with no previous close, a fund with no NAVCHGRT) would
+  /// leave the *previous* `change` / `prev_close` in place while still bumping
+  /// `fetched_at`. The "written today" guard then passes and the stale move is
+  /// read back as today's — worst after the app has been closed for a while,
+  /// when the leftover value is days or weeks old. A companion's `Value(null)`
+  /// lands as a real NULL, so every refresh fully replaces the row.
+  Future<void> upsertPriceCache(PriceCacheCompanion row) {
     return _db.into(_db.priceCache).insertOnConflictUpdate(row);
   }
 

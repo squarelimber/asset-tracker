@@ -89,4 +89,42 @@ void main() {
     final holding = (await dao.getHoldings()).single;
     expect(holding.latestPrice, closeTo(1.4620, 1e-9));
   });
+
+  test('a refresh that carries no move clears the previous change', () async {
+    // The cache is a merge on conflict, so a quote that has a price but no
+    // move (a fund endpoint with no NAVCHGRT, gold with no previous close)
+    // used to leave the last session's change in place while still bumping
+    // fetched_at — and the "written today" guard then handed that stale move
+    // back as today's. Worst after the app has been shut for a while, when
+    // the leftover value is weeks old.
+    await seedFund(latestPrice: 1.4553);
+    await dao.upsertPriceCache(PriceCacheCompanion(
+      symbol: const Value('400030'),
+      source: Value(MarketSource.eastmoney.storageName),
+      name: const Value('东方添益债券'),
+      price: const Value(1.4553),
+      currency: const Value('CNY'),
+      prevClose: const Value(1.4400),
+      change: const Value(0.0153),
+      changePct: const Value(1.06),
+      fetchedAt: Value(DateTime(2026, 9, 1)),
+    ));
+
+    final service = MarketService(dao, sources: {
+      MarketSource.eastmoney:
+          _FixedSource(MarketSource.eastmoney, 1.4620, name: '东方添益债券'),
+    });
+    await service.refreshAll();
+
+    final row = (await dao.getCachedPrices(const ['400030']))['400030'];
+    // drift and flutter_test both export `isNull` / `isNotNull`, so assert
+    // through plain booleans to avoid the ambiguous import.
+    expect(row != null, isTrue);
+    expect(row!.price, closeTo(1.4620, 1e-9));
+    expect(row.change == null, isTrue,
+        reason: '没有涨跌的新报价必须清掉上一次会话残留的 change');
+    expect(row.prevClose == null, isTrue);
+    expect(row.changePct == null, isTrue);
+    expect(row.fetchedAt.day, DateTime.now().day);
+  });
 }

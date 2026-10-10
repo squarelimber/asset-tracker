@@ -41,7 +41,7 @@ HoldingRow _holding({
   double cost = 0,
   double price = 1,
 }) {
-  return HoldingRow(
+  return HoldingRow(costRecorded: false, 
     id: id,
     accountId: 1,
     name: 'h$id',
@@ -172,7 +172,7 @@ void main() {
     final stats = calc.compute([
       _txn(id: 1, type: 'sell', holdingId: 1, amount: 750, quantity: 50, price: 15),
     ], [
-      HoldingRow(
+      HoldingRow(costRecorded: false, 
         id: 1,
         accountId: 1,
         name: '基金',

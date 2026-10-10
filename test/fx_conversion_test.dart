@@ -23,7 +23,7 @@ import 'package:asset_tracker/ui/pages/holdings/holdings_page.dart';
 const _usdRate = 6.7121;
 const _rates = {'USD': _usdRate};
 
-HoldingRow huiLi() => HoldingRow(
+HoldingRow huiLi() => HoldingRow(costRecorded: false, 
       id: 14,
       accountId: 4,
       name: '汇利日盈6号A',
@@ -43,7 +43,7 @@ HoldingRow huiLi() => HoldingRow(
 
 /// A genuinely rate-linked holding: the code IS the currency and the unit
 /// price IS the live rate (市值 = 数量 × 汇率).
-HoldingRow fxLinked() => HoldingRow(
+HoldingRow fxLinked() => HoldingRow(costRecorded: false, 
       id: 1,
       accountId: 1,
       name: '美元理财',
@@ -65,7 +65,7 @@ HoldingRow fxLinked() => HoldingRow(
     );
 
 /// A plain USD holding (e.g. a US stock) — always converts by FX.
-HoldingRow usdStock() => HoldingRow(
+HoldingRow usdStock() => HoldingRow(costRecorded: false, 
       id: 2,
       accountId: 1,
       name: '美股',

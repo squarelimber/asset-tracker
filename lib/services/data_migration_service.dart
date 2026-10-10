@@ -56,6 +56,7 @@ class DataMigrationService {
   Future<void> run() async {
     await _migrateArchivedColumn();
     await _migrateCategoryOverrideColumn();
+    await _migrateCostRecordedColumn();
     await _migrateAmountBased();
     await _migrateGoldSymbol();
     await _rebuildHoldingsTable();
@@ -75,9 +76,10 @@ class DataMigrationService {
   /// UNIQUE(symbol) so the same market code can exist across multiple
   /// holdings/accounts.
   ///
-  /// cost_fx_rate, risk_level, archived and category_override may be absent
-  /// from the old table when this runs on an upgrade (they arrive with later
-  /// migrations), so the copy falls back to NULL / 0 for missing columns.
+  /// cost_fx_rate, risk_level, archived, category_override and cost_recorded
+  /// may be absent from the old table when this runs on an upgrade (they
+  /// arrive with later migrations), so the copy falls back to NULL / 0 for
+  /// missing columns.
   Future<void> _rebuildHoldingsTable() async {
     final marker = await _getSetting(_holdingsRebuilt);
     if (marker != null) return;
@@ -104,6 +106,7 @@ class DataMigrationService {
         category_override TEXT NULL,
         note TEXT NULL,
         archived INTEGER NOT NULL DEFAULT 0,
+        cost_recorded INTEGER NOT NULL DEFAULT 0,
         created_at INTEGER NOT NULL DEFAULT (CAST(strftime('%s', CURRENT_TIMESTAMP) AS INTEGER)),
         updated_at INTEGER NOT NULL DEFAULT (CAST(strftime('%s', CURRENT_TIMESTAMP) AS INTEGER))
       );
@@ -118,15 +121,20 @@ class DataMigrationService {
         : 'NULL AS category_override';
     final archivedSelect =
         oldColumns.contains('archived') ? 'archived' : '0 AS archived';
+    final costRecordedSelect = oldColumns.contains('cost_recorded')
+        ? 'cost_recorded'
+        // Rows predating the flag were written under "0 means unset": a
+        // positive cost had been recorded, a 0 had not.
+        : 'CASE WHEN cost_price > 0 THEN 1 ELSE 0 END AS cost_recorded';
     await _db.customStatement('''
       INSERT INTO holdings (id, account_id, name, asset_type, market_source, symbol,
                             quantity, cost_price, latest_price, currency, cost_fx_rate,
                             purchase_date, risk_level, category_override, note, archived,
-                            created_at, updated_at)
+                            cost_recorded, created_at, updated_at)
       SELECT id, account_id, name, asset_type, market_source, symbol,
              quantity, cost_price, latest_price, currency, $costFxSelect,
              purchase_date, $riskSelect, $categorySelect, note, $archivedSelect,
-             created_at, updated_at
+             $costRecordedSelect, created_at, updated_at
       FROM holdings_tmp;
     ''');
       await _db.customStatement('DROP TABLE holdings_tmp;');
@@ -350,6 +358,24 @@ class DataMigrationService {
     try {
       await _db.customStatement(
         'ALTER TABLE holdings ADD COLUMN category_override TEXT NULL;',
+      );
+    } catch (_) {
+      // Column already present.
+    }
+  }
+
+  /// Re-adds cost_recorded to databases whose holdings table was rebuilt by
+  /// the rebuild SQL before the column existed. Same defensive pattern as
+  /// [_migrateArchivedColumn]: no marker, no-op when present. A positive cost
+  /// is backfilled as recorded, mirroring the v11 -> v12 schema migration, so
+  /// a repair never invents an "unset" principal where one was recorded.
+  Future<void> _migrateCostRecordedColumn() async {
+    try {
+      await _db.customStatement(
+        'ALTER TABLE holdings ADD COLUMN cost_recorded INTEGER NOT NULL DEFAULT 0;',
+      );
+      await _db.customStatement(
+        'UPDATE holdings SET cost_recorded = 1 WHERE cost_price > 0;',
       );
     } catch (_) {
       // Column already present.

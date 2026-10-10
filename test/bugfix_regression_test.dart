@@ -19,7 +19,7 @@ import 'package:asset_tracker/services/backup_service.dart';
 /// allocation), H4 (replay window), C2 (backup effective ids).
 void main() {
   test('rate-linked holdings never double-convert their currency label', () {
-    HoldingRow fxLinked() => HoldingRow(
+    HoldingRow fxLinked() => HoldingRow(costRecorded: false, 
           id: 1,
           accountId: 1,
           name: '美元理财',
@@ -43,7 +43,7 @@ void main() {
     // A bank-wealth product quoted by its product code is NOT rate-linked
     // (its unit price is a USD NAV), so it converts by FX like any other
     // foreign holding — see test/fx_conversion_test.dart.
-    final productCode = HoldingRow(
+    final productCode = HoldingRow(costRecorded: false, 
       id: 4,
       accountId: 4,
       name: '汇利日盈6号A',
@@ -63,7 +63,7 @@ void main() {
     expect(costRateOf(productCode, rates), 6.95);
 
     // A market-linked USD holding still converts by currency.
-    final usdStock = HoldingRow(
+    final usdStock = HoldingRow(costRecorded: false, 
       id: 2,
       accountId: 1,
       name: '美股',
@@ -80,7 +80,7 @@ void main() {
     expect(valueRateOf(usdStock, rates), 7.1);
 
     // Existing CNY FX-linked holdings are untouched (rate 1).
-    final cnyLinked = HoldingRow(
+    final cnyLinked = HoldingRow(costRecorded: false, 
       id: 3,
       accountId: 1,
       name: '理财',
@@ -282,7 +282,7 @@ void main() {
   });
 
   test('replay of a past window ignores later events (H4)', () {
-    HoldingRow holding(DateTime t) => HoldingRow(
+    HoldingRow holding(DateTime t) => HoldingRow(costRecorded: false, 
           id: 1,
           accountId: 1,
           name: 'H',

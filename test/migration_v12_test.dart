@@ -4,13 +4,14 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:asset_tracker/data/asset_dao.dart';
 import 'package:asset_tracker/data/database.dart';
+import 'package:asset_tracker/domain/holding_cost.dart';
 
-/// SQL schema as produced by schema version 10 (`cost_moved_amount` on
-/// transactions, no `internal_move` yet). Dates are stored as unix seconds,
+/// SQL schema as produced by schema version 11 (`internal_move` on
+/// transactions, no `cost_recorded` yet). Dates are stored as unix seconds,
 /// matching drift's INTEGER storage. Columns added by an upgrade sit at the
 /// *end* of the table, because `ALTER TABLE ... ADD COLUMN` appends — mirror
 /// that here or the migration test exercises a shape production never has.
-const _v10Ddl = [
+const _v11Ddl = [
   '''
   CREATE TABLE accounts (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -60,7 +61,8 @@ const _v10Ddl = [
     note TEXT,
     cost_moved INTEGER NOT NULL DEFAULT 1,
     updated_at INTEGER NOT NULL DEFAULT (CAST(strftime('%s', CURRENT_TIMESTAMP) AS INTEGER)),
-    cost_moved_amount REAL
+    cost_moved_amount REAL,
+    internal_move INTEGER NOT NULL DEFAULT 0
   );
   ''',
   '''
@@ -123,36 +125,37 @@ const _v10Ddl = [
   ''',
 ];
 
-/// Opens the app database on top of a hand-built v10 schema and seed data,
-/// exercising the real v10 -> v11 upgrade path that production databases hit.
-Future<AppDatabase> _openOnV10() async {
+/// Opens the app database on top of a hand-built v11 schema and seed data,
+/// exercising the real v11 -> v12 upgrade path that production databases hit.
+///
+/// Two amount-based holdings: one with a positive recorded cost, one with a
+/// bare 0 — the two shapes the old "0 means unset" rule left behind.
+Future<AppDatabase> _openOnV11() async {
   final db = AppDatabase(
     NativeDatabase.memory(
       setup: (sqlite) {
-        for (final ddl in _v10Ddl) {
+        for (final ddl in _v11Ddl) {
           sqlite.execute(ddl);
         }
         sqlite.execute(
           "INSERT INTO accounts (id, name, type, currency, note, created_at, updated_at) "
           "VALUES (1, '旧账户', 'general', 'CNY', NULL, 1787000000, 1787000000);",
         );
-        // A sell row recorded before the internal-redemption marker existed
-        // (e.g. a「赎回购买」from the old build): it stays an ordinary sell
-        // and keeps its legacy realized reading.
         sqlite.execute(
           "INSERT INTO holdings (id, account_id, name, asset_type, market_source, symbol, "
           "quantity, cost_price, latest_price, currency, cost_fx_rate, purchase_date, "
           "risk_level, note, archived, created_at, updated_at, category_override) "
-          "VALUES (1, 1, '月月宝', 'bank_wealth', 'forex', NULL, "
-          "1000, 1, 2, 'CNY', NULL, NULL, NULL, NULL, 0, 1787000000, 1788000000, NULL);",
+          "VALUES (1, 1, '有本金的现金', 'cash', 'manual', NULL, "
+          "10000, 9000, 1, 'CNY', NULL, NULL, NULL, NULL, 0, 1787000000, 1788000000, NULL);",
         );
         sqlite.execute(
-          "INSERT INTO transactions (id, account_id, holding_id, cash_source_id, cash_target_id, "
-          "type, quantity, price, amount, currency, occurred_at, note, cost_moved, updated_at, cost_moved_amount) "
-          "VALUES (1, 1, 1, NULL, NULL, 'sell', 500, 2, 1000, 'CNY', "
-          "1787000000, '赎回购买 五年国债ETF', 1, 1788000000, 500);",
+          "INSERT INTO holdings (id, account_id, name, asset_type, market_source, symbol, "
+          "quantity, cost_price, latest_price, currency, cost_fx_rate, purchase_date, "
+          "risk_level, note, archived, created_at, updated_at, category_override) "
+          "VALUES (2, 1, '未记录本金', 'bank_deposit', 'manual', NULL, "
+          "5000, 0, 1, 'CNY', NULL, NULL, NULL, NULL, 0, 1787000000, 1788000000, NULL);",
         );
-        sqlite.execute('PRAGMA user_version = 10;');
+        sqlite.execute('PRAGMA user_version = 11;');
       },
     ),
   );
@@ -160,56 +163,68 @@ Future<AppDatabase> _openOnV10() async {
 }
 
 void main() {
-  test('v10 -> v11 adds transactions.internal_move defaulting to false', () async {
-    final db = await _openOnV10();
+  test('v11 -> v12 backfills cost_recorded from the old "0 means unset" rule',
+      () async {
+    final db = await _openOnV11();
     final dao = AssetDao(db);
 
-    // The seeded sell row survives and reads as a non-internal sell.
-    final txns = await dao.getTransactions();
-    expect(txns, hasLength(1));
-    expect(txns.single.internalMove, isFalse);
-    expect(txns.single.costMovedAmount, closeTo(500, 1e-6));
+    final holdings = await dao.getHoldings();
+    expect(holdings, hasLength(2));
+    final withCost = holdings.firstWhere((h) => h.id == 1);
+    final unset = holdings.firstWhere((h) => h.id == 2);
 
-    // Raw storage: the column exists and defaults to 0.
-    final userVersion = await db.customSelect('PRAGMA user_version;').getSingle();
-    // A v10 database now runs every later migration too, so assert "at least
-    // v11" rather than pinning the version that was current when this landed.
-    expect(userVersion.data.values.single, greaterThanOrEqualTo(11));
+    // A positive cost had been recorded; a bare 0 had not.
+    expect(withCost.costRecorded, isTrue);
+    expect(unset.costRecorded, isFalse);
+
+    // And both keep reading exactly as before the migration.
+    expect(effectiveCostOf(withCost), closeTo(9000, 1e-6));
+    expect(effectiveCostOf(unset), closeTo(5000, 1e-6));
+
+    // Raw storage: the column exists, is at the end, and version bumped.
+    final userVersion =
+        await db.customSelect('PRAGMA user_version;').getSingle();
+    expect(userVersion.data.values.single, 12);
 
     final raw = await db
-        .customSelect('SELECT internal_move FROM transactions WHERE id = 1;')
+        .customSelect('SELECT cost_recorded FROM holdings WHERE id = 1;')
         .getSingle();
-    expect(raw.data.values.single, 0);
-
-    // The upgrade must not rewrite any existing value.
-    final keep = await db
-        .customSelect(
-            'SELECT amount, cost_moved, cost_moved_amount FROM transactions WHERE id = 1;')
+    expect(raw.data.values.single, 1);
+    final rawUnset = await db
+        .customSelect('SELECT cost_recorded FROM holdings WHERE id = 2;')
         .getSingle();
-    expect(keep.data.values, [1000.0, 1, 500.0]);
+    expect(rawUnset.data.values.single, 0);
 
     await db.close();
   });
 
-  test('internal_move round-trips through an update', () async {
-    final db = await _openOnV10();
+  test('an explicitly recorded zero reads as a real zero principal', () async {
+    final db = AppDatabase(NativeDatabase.memory());
     final dao = AssetDao(db);
+    await dao.createAccount(
+        AccountsCompanion.insert(name: 'A', type: 'general'));
+    await dao.createHolding(HoldingsCompanion.insert(
+      accountId: 1,
+      name: '朋友赠予',
+      assetType: 'bank_deposit',
+      quantity: const Value(10000),
+      costPrice: const Value(0),
+      costRecorded: const Value(true),
+    ));
 
-    final t = (await dao.getTransactions()).single;
-    await dao.updateTransaction(t.copyWith(internalMove: true));
-    expect((await dao.getTransactions()).single.internalMove, isTrue);
+    final h = (await dao.getHoldings()).single;
+    // Real zero principal: the whole balance is gain, not a fabricated 0.
+    expect(effectiveCostOf(h), 0);
 
     await db.close();
   });
 
-  test('a v11 database created from scratch still works (no regression)',
+  test('a v12 database created from scratch still works (no regression)',
       () async {
     final db = AppDatabase(NativeDatabase.memory());
     final dao = AssetDao(db);
-    await dao.createAccount(AccountsCompanion.insert(
-      name: '全新库',
-      type: 'general',
-    ));
+    await dao.createAccount(
+        AccountsCompanion.insert(name: '全新库', type: 'general'));
     await dao.createHolding(HoldingsCompanion.insert(
       accountId: 1,
       name: '现金',
@@ -217,15 +232,9 @@ void main() {
       quantity: const Value(100),
       costPrice: const Value(100),
     ));
-    await dao.createTransaction(TransactionsCompanion.insert(
-      accountId: 1,
-      type: 'income',
-      amount: 50,
-      occurredAt: DateTime(2026, 9, 20),
-      costMovedAmount: const Value(50),
-      internalMove: const Value(true),
-    ));
-    expect((await dao.getTransactions()).single.internalMove, isTrue);
+    final h = (await dao.getHoldings()).single;
+    expect(h.costRecorded, isFalse);
+    expect(effectiveCostOf(h), 100);
     await db.close();
   });
 }

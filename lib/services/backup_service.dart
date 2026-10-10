@@ -139,6 +139,12 @@ class BackupService {
                 : Value(h['symbol'].toString()),
             quantity: Value((h['quantity'] as num?)?.toDouble() ?? 0),
             costPrice: Value((h['costPrice'] as num?)?.toDouble() ?? 0),
+            costRecorded: Value(h['costRecorded'] == null
+                // Backups written before the flag: every positive cost had
+                // been recorded explicitly and a 0 meant "unset". Mirrors the
+                // v11 -> v12 migration so a restore reads the same numbers.
+                ? ((h['costPrice'] as num?)?.toDouble() ?? 0) > 0
+                : h['costRecorded'] == true),
             latestPrice: Value((h['latestPrice'] as num?)?.toDouble() ?? 0),
             costFxRate: h['costFxRate'] == null
                 ? const Value.absent()
@@ -332,6 +338,7 @@ class BackupService {
         'symbol': h.symbol,
         'quantity': h.quantity,
         'costPrice': h.costPrice,
+        'costRecorded': h.costRecorded,
         'latestPrice': h.latestPrice,
         'costFxRate': h.costFxRate,
         'purchaseDate': h.purchaseDate?.toIso8601String(),

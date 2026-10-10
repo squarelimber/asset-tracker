@@ -65,10 +65,11 @@ HoldingTypeConversion? convertHoldingTypeSemantics({
   required double quantity,
   required double costPrice,
   required double latestPrice,
+  bool costRecorded = false,
 }) {
   if (from.isAmountBased && !to.isAmountBased) {
     if (!(quantity > 0)) return null; // no balance to turn into shares
-    final invested = effectivePrincipal(costPrice, quantity);
+    final invested = effectivePrincipal(costPrice, quantity, recorded: costRecorded);
     return HoldingTypeConversion(
       quantity: quantity, // balance → shares (same digits at NAV 1)
       costPrice: invested / quantity, // 累计投入 → 单位成本

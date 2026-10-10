@@ -616,6 +616,13 @@ Future<void> showAddHoldingDialog(BuildContext context, WidgetRef ref) async {
                         ? (investedResult ?? qty)
                         : 1) // liability: unit price 1, cost = balance
                     : (invested ?? 0)),
+                // Record whether the user actually typed a principal: an
+                // explicit 0 is a real (zero) cost — the whole balance is
+                // gain — while a blank field stays "unrecorded" and falls
+                // back to the balance (no fabricated profit).
+                costRecorded: Value(isAmount
+                    ? (type.isAmountBased ? investedResult != null : true)
+                    : invested != null),
                 latestPrice: Value(isAmount ? 1 : (userPrice ?? 0)),
                 costFxRate:
                     finalCurrency != 'CNY' && !rateLinked && fx != null && fx > 0
@@ -851,7 +858,8 @@ Future<void> showEditHoldingDialog(
     holding.purchaseDate ?? holding.createdAt,
   );
   final amount = ValueNotifier<double>(holding.quantity);
-  double? investedResult = initialType.isAmountBased ? holding.costPrice : null;
+  double? investedResult =
+      initialType.isAmountBased ? (holding.costRecorded ? holding.costPrice : null) : null;
 
   // --- Type-switch semantic conversion (see holding_type_conversion.dart) ---
   // 金额型（现金/银行存款/活期理财）与份额型在 quantity/costPrice/latestPrice
@@ -884,6 +892,7 @@ Future<void> showEditHoldingDialog(
       quantity: qty,
       costPrice: cost,
       latestPrice: price,
+      costRecorded: holding.costRecorded,
     );
     if (conv == null) {
       conversionNotice =
@@ -1053,10 +1062,7 @@ Future<void> showEditHoldingDialog(
                     // converted principal (its controllers are internal).
                     key: ValueKey('invested-$conversionCount'),
                     amount: amount,
-                    initialInvested: investedResult ??
-                        // UI placeholder: null (not the balance) so the field
-                        // shows its hint instead of a fabricated principal.
-                        (holding.costPrice > 0 ? holding.costPrice : null),
+                    initialInvested: investedResult,
                     onChanged: (v) => investedResult = v,
                   ),
                 ] else if (!isLiability) ...[
@@ -1255,6 +1261,11 @@ Future<void> showEditHoldingDialog(
       costPrice: isAmount
           ? (isAmountBased ? (investedResult ?? qty) : 1) // liability: cost = balance
           : (cost ?? holding.costPrice),
+      // A typed principal is "recorded" even when it is 0; a blank field
+      // (or a share-based holding left alone) keeps the previous flag.
+      costRecorded: isAmount
+          ? (isAmountBased ? investedResult != null : true)
+          : (cost != null || holding.costRecorded),
       latestPrice: isAmount ? 1 : (price ?? holding.latestPrice),
       purchaseDate: Value(purchaseDate.value),
       riskLevel: riskLevelNotifier.value == null

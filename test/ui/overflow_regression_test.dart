@@ -84,7 +84,7 @@ void main() {
         createdAt: now,
       ),
     );
-    final holding = HoldingRow(
+    final holding = HoldingRow(costRecorded: false, 
       id: 1,
       accountId: 1,
       name: '现金',
@@ -127,7 +127,7 @@ void main() {
   });
 
   testWidgets('holdings no overflow at phone and desktop', (tester) async {
-    final a = HoldingRow(
+    final a = HoldingRow(costRecorded: false, 
       id: 1,
       accountId: 1,
       name: '现金',
@@ -141,7 +141,7 @@ void main() {
       createdAt: DateTime(2026, 1, 1),
       updatedAt: DateTime(2026, 1, 1),
     );
-    final b = HoldingRow(
+    final b = HoldingRow(costRecorded: false, 
       id: 2,
       accountId: 1,
       name: '某股票',
@@ -156,7 +156,7 @@ void main() {
       createdAt: DateTime(2026, 1, 1),
       updatedAt: DateTime(2026, 1, 1),
     );
-    final c = HoldingRow(
+    final c = HoldingRow(costRecorded: false, 
       id: 3,
       accountId: 1,
       name: '信用卡',
@@ -180,7 +180,7 @@ void main() {
   });
 
   testWidgets('holdings phone: search box lives in the body, not the toolbar', (tester) async {
-    final a = HoldingRow(
+    final a = HoldingRow(costRecorded: false, 
       id: 1,
       accountId: 1,
       name: '某股票',
@@ -315,7 +315,7 @@ void main() {
       createdAt: DateTime(2026, 1, 1),
       updatedAt: DateTime(2026, 1, 1),
     );
-    final cash = HoldingRow(
+    final cash = HoldingRow(costRecorded: false, 
       id: 1,
       accountId: 1,
       name: '现金',
@@ -329,7 +329,7 @@ void main() {
       createdAt: DateTime(2026, 1, 1),
       updatedAt: DateTime(2026, 1, 1),
     );
-    final fund = HoldingRow(
+    final fund = HoldingRow(costRecorded: false, 
       id: 2,
       accountId: 1,
       name: '某基金',

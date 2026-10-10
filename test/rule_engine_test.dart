@@ -31,7 +31,7 @@ HoldingRow _holding({
   double price = 100,
   double cost = 90,
 }) {
-  return HoldingRow(
+  return HoldingRow(costRecorded: false, 
     id: id,
     accountId: 1,
     name: 'h$id',

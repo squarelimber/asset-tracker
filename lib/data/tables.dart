@@ -49,6 +49,18 @@ class Holdings extends Table {
   /// Archived holdings stay in the database (and in the earnings calendar)
   /// but are hidden from the default holdings views.
   BoolColumn get archived => boolean().withDefault(const Constant(false))();
+
+  /// Whether [costPrice] was ever explicitly recorded.
+  ///
+  /// For amount-based holdings the column defaults to 0, so a bare 0 doubles
+  /// as "never recorded" — which makes a genuinely zero principal (a gift, a
+  /// windfall, an account funded from nothing) indistinguishable from an
+  /// unfilled field, and hides its full gain: the read falls back to the
+  /// balance and reports 0 profit. This flag separates the two. It only
+  /// matters when [costPrice] is 0 — any positive cost is authoritative on
+  /// its own (see `effectivePrincipal`). Share-based holdings use it to mark
+  /// whether the per-unit cost is real rather than an unset 0.
+  BoolColumn get costRecorded => boolean().withDefault(const Constant(false))();
   DateTimeColumn get createdAt => dateTime().withDefault(currentDateAndTime)();
   DateTimeColumn get updatedAt => dateTime().withDefault(currentDateAndTime)();
 }

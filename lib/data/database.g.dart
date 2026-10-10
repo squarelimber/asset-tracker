@@ -635,6 +635,21 @@ class $HoldingsTable extends Holdings
     ),
     defaultValue: const Constant(false),
   );
+  static const VerificationMeta _costRecordedMeta = const VerificationMeta(
+    'costRecorded',
+  );
+  @override
+  late final GeneratedColumn<bool> costRecorded = GeneratedColumn<bool>(
+    'cost_recorded',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("cost_recorded" IN (0, 1))',
+    ),
+    defaultValue: const Constant(false),
+  );
   static const VerificationMeta _createdAtMeta = const VerificationMeta(
     'createdAt',
   );
@@ -677,6 +692,7 @@ class $HoldingsTable extends Holdings
     categoryOverride,
     note,
     archived,
+    costRecorded,
     createdAt,
     updatedAt,
   ];
@@ -806,6 +822,15 @@ class $HoldingsTable extends Holdings
         archived.isAcceptableOrUnknown(data['archived']!, _archivedMeta),
       );
     }
+    if (data.containsKey('cost_recorded')) {
+      context.handle(
+        _costRecordedMeta,
+        costRecorded.isAcceptableOrUnknown(
+          data['cost_recorded']!,
+          _costRecordedMeta,
+        ),
+      );
+    }
     if (data.containsKey('created_at')) {
       context.handle(
         _createdAtMeta,
@@ -891,6 +916,10 @@ class $HoldingsTable extends Holdings
         DriftSqlType.bool,
         data['${effectivePrefix}archived'],
       )!,
+      costRecorded: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}cost_recorded'],
+      )!,
       createdAt: attachedDatabase.typeMapping.read(
         DriftSqlType.dateTime,
         data['${effectivePrefix}created_at'],
@@ -941,6 +970,18 @@ class HoldingRow extends DataClass implements Insertable<HoldingRow> {
   /// Archived holdings stay in the database (and in the earnings calendar)
   /// but are hidden from the default holdings views.
   final bool archived;
+
+  /// Whether [costPrice] was ever explicitly recorded.
+  ///
+  /// For amount-based holdings the column defaults to 0, so a bare 0 doubles
+  /// as "never recorded" — which makes a genuinely zero principal (a gift, a
+  /// windfall, an account funded from nothing) indistinguishable from an
+  /// unfilled field, and hides its full gain: the read falls back to the
+  /// balance and reports 0 profit. This flag separates the two. It only
+  /// matters when [costPrice] is 0 — any positive cost is authoritative on
+  /// its own (see `effectivePrincipal`). Share-based holdings use it to mark
+  /// whether the per-unit cost is real rather than an unset 0.
+  final bool costRecorded;
   final DateTime createdAt;
   final DateTime updatedAt;
   const HoldingRow({
@@ -960,6 +1001,7 @@ class HoldingRow extends DataClass implements Insertable<HoldingRow> {
     this.categoryOverride,
     this.note,
     required this.archived,
+    required this.costRecorded,
     required this.createdAt,
     required this.updatedAt,
   });
@@ -994,6 +1036,7 @@ class HoldingRow extends DataClass implements Insertable<HoldingRow> {
       map['note'] = Variable<String>(note);
     }
     map['archived'] = Variable<bool>(archived);
+    map['cost_recorded'] = Variable<bool>(costRecorded);
     map['created_at'] = Variable<DateTime>(createdAt);
     map['updated_at'] = Variable<DateTime>(updatedAt);
     return map;
@@ -1027,6 +1070,7 @@ class HoldingRow extends DataClass implements Insertable<HoldingRow> {
           : Value(categoryOverride),
       note: note == null && nullToAbsent ? const Value.absent() : Value(note),
       archived: Value(archived),
+      costRecorded: Value(costRecorded),
       createdAt: Value(createdAt),
       updatedAt: Value(updatedAt),
     );
@@ -1054,6 +1098,7 @@ class HoldingRow extends DataClass implements Insertable<HoldingRow> {
       categoryOverride: serializer.fromJson<String?>(json['categoryOverride']),
       note: serializer.fromJson<String?>(json['note']),
       archived: serializer.fromJson<bool>(json['archived']),
+      costRecorded: serializer.fromJson<bool>(json['costRecorded']),
       createdAt: serializer.fromJson<DateTime>(json['createdAt']),
       updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
     );
@@ -1078,6 +1123,7 @@ class HoldingRow extends DataClass implements Insertable<HoldingRow> {
       'categoryOverride': serializer.toJson<String?>(categoryOverride),
       'note': serializer.toJson<String?>(note),
       'archived': serializer.toJson<bool>(archived),
+      'costRecorded': serializer.toJson<bool>(costRecorded),
       'createdAt': serializer.toJson<DateTime>(createdAt),
       'updatedAt': serializer.toJson<DateTime>(updatedAt),
     };
@@ -1100,6 +1146,7 @@ class HoldingRow extends DataClass implements Insertable<HoldingRow> {
     Value<String?> categoryOverride = const Value.absent(),
     Value<String?> note = const Value.absent(),
     bool? archived,
+    bool? costRecorded,
     DateTime? createdAt,
     DateTime? updatedAt,
   }) => HoldingRow(
@@ -1121,6 +1168,7 @@ class HoldingRow extends DataClass implements Insertable<HoldingRow> {
         : this.categoryOverride,
     note: note.present ? note.value : this.note,
     archived: archived ?? this.archived,
+    costRecorded: costRecorded ?? this.costRecorded,
     createdAt: createdAt ?? this.createdAt,
     updatedAt: updatedAt ?? this.updatedAt,
   );
@@ -1152,6 +1200,9 @@ class HoldingRow extends DataClass implements Insertable<HoldingRow> {
           : this.categoryOverride,
       note: data.note.present ? data.note.value : this.note,
       archived: data.archived.present ? data.archived.value : this.archived,
+      costRecorded: data.costRecorded.present
+          ? data.costRecorded.value
+          : this.costRecorded,
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
       updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
     );
@@ -1176,6 +1227,7 @@ class HoldingRow extends DataClass implements Insertable<HoldingRow> {
           ..write('categoryOverride: $categoryOverride, ')
           ..write('note: $note, ')
           ..write('archived: $archived, ')
+          ..write('costRecorded: $costRecorded, ')
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt')
           ..write(')'))
@@ -1200,6 +1252,7 @@ class HoldingRow extends DataClass implements Insertable<HoldingRow> {
     categoryOverride,
     note,
     archived,
+    costRecorded,
     createdAt,
     updatedAt,
   );
@@ -1223,6 +1276,7 @@ class HoldingRow extends DataClass implements Insertable<HoldingRow> {
           other.categoryOverride == this.categoryOverride &&
           other.note == this.note &&
           other.archived == this.archived &&
+          other.costRecorded == this.costRecorded &&
           other.createdAt == this.createdAt &&
           other.updatedAt == this.updatedAt);
 }
@@ -1244,6 +1298,7 @@ class HoldingsCompanion extends UpdateCompanion<HoldingRow> {
   final Value<String?> categoryOverride;
   final Value<String?> note;
   final Value<bool> archived;
+  final Value<bool> costRecorded;
   final Value<DateTime> createdAt;
   final Value<DateTime> updatedAt;
   const HoldingsCompanion({
@@ -1263,6 +1318,7 @@ class HoldingsCompanion extends UpdateCompanion<HoldingRow> {
     this.categoryOverride = const Value.absent(),
     this.note = const Value.absent(),
     this.archived = const Value.absent(),
+    this.costRecorded = const Value.absent(),
     this.createdAt = const Value.absent(),
     this.updatedAt = const Value.absent(),
   });
@@ -1283,6 +1339,7 @@ class HoldingsCompanion extends UpdateCompanion<HoldingRow> {
     this.categoryOverride = const Value.absent(),
     this.note = const Value.absent(),
     this.archived = const Value.absent(),
+    this.costRecorded = const Value.absent(),
     this.createdAt = const Value.absent(),
     this.updatedAt = const Value.absent(),
   }) : accountId = Value(accountId),
@@ -1305,6 +1362,7 @@ class HoldingsCompanion extends UpdateCompanion<HoldingRow> {
     Expression<String>? categoryOverride,
     Expression<String>? note,
     Expression<bool>? archived,
+    Expression<bool>? costRecorded,
     Expression<DateTime>? createdAt,
     Expression<DateTime>? updatedAt,
   }) {
@@ -1325,6 +1383,7 @@ class HoldingsCompanion extends UpdateCompanion<HoldingRow> {
       if (categoryOverride != null) 'category_override': categoryOverride,
       if (note != null) 'note': note,
       if (archived != null) 'archived': archived,
+      if (costRecorded != null) 'cost_recorded': costRecorded,
       if (createdAt != null) 'created_at': createdAt,
       if (updatedAt != null) 'updated_at': updatedAt,
     });
@@ -1347,6 +1406,7 @@ class HoldingsCompanion extends UpdateCompanion<HoldingRow> {
     Value<String?>? categoryOverride,
     Value<String?>? note,
     Value<bool>? archived,
+    Value<bool>? costRecorded,
     Value<DateTime>? createdAt,
     Value<DateTime>? updatedAt,
   }) {
@@ -1367,6 +1427,7 @@ class HoldingsCompanion extends UpdateCompanion<HoldingRow> {
       categoryOverride: categoryOverride ?? this.categoryOverride,
       note: note ?? this.note,
       archived: archived ?? this.archived,
+      costRecorded: costRecorded ?? this.costRecorded,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
     );
@@ -1423,6 +1484,9 @@ class HoldingsCompanion extends UpdateCompanion<HoldingRow> {
     if (archived.present) {
       map['archived'] = Variable<bool>(archived.value);
     }
+    if (costRecorded.present) {
+      map['cost_recorded'] = Variable<bool>(costRecorded.value);
+    }
     if (createdAt.present) {
       map['created_at'] = Variable<DateTime>(createdAt.value);
     }
@@ -1451,6 +1515,7 @@ class HoldingsCompanion extends UpdateCompanion<HoldingRow> {
           ..write('categoryOverride: $categoryOverride, ')
           ..write('note: $note, ')
           ..write('archived: $archived, ')
+          ..write('costRecorded: $costRecorded, ')
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt')
           ..write(')'))
@@ -5132,6 +5197,7 @@ typedef $$HoldingsTableCreateCompanionBuilder =
       Value<String?> categoryOverride,
       Value<String?> note,
       Value<bool> archived,
+      Value<bool> costRecorded,
       Value<DateTime> createdAt,
       Value<DateTime> updatedAt,
     });
@@ -5153,6 +5219,7 @@ typedef $$HoldingsTableUpdateCompanionBuilder =
       Value<String?> categoryOverride,
       Value<String?> note,
       Value<bool> archived,
+      Value<bool> costRecorded,
       Value<DateTime> createdAt,
       Value<DateTime> updatedAt,
     });
@@ -5260,6 +5327,11 @@ class $$HoldingsTableFilterComposer
 
   ColumnFilters<bool> get archived => $composableBuilder(
     column: $table.archived,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get costRecorded => $composableBuilder(
+    column: $table.costRecorded,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -5381,6 +5453,11 @@ class $$HoldingsTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<bool> get costRecorded => $composableBuilder(
+    column: $table.costRecorded,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<DateTime> get createdAt => $composableBuilder(
     column: $table.createdAt,
     builder: (column) => ColumnOrderings(column),
@@ -5479,6 +5556,11 @@ class $$HoldingsTableAnnotationComposer
   GeneratedColumn<bool> get archived =>
       $composableBuilder(column: $table.archived, builder: (column) => column);
 
+  GeneratedColumn<bool> get costRecorded => $composableBuilder(
+    column: $table.costRecorded,
+    builder: (column) => column,
+  );
+
   GeneratedColumn<DateTime> get createdAt =>
       $composableBuilder(column: $table.createdAt, builder: (column) => column);
 
@@ -5553,6 +5635,7 @@ class $$HoldingsTableTableManager
                 Value<String?> categoryOverride = const Value.absent(),
                 Value<String?> note = const Value.absent(),
                 Value<bool> archived = const Value.absent(),
+                Value<bool> costRecorded = const Value.absent(),
                 Value<DateTime> createdAt = const Value.absent(),
                 Value<DateTime> updatedAt = const Value.absent(),
               }) => HoldingsCompanion(
@@ -5572,6 +5655,7 @@ class $$HoldingsTableTableManager
                 categoryOverride: categoryOverride,
                 note: note,
                 archived: archived,
+                costRecorded: costRecorded,
                 createdAt: createdAt,
                 updatedAt: updatedAt,
               ),
@@ -5593,6 +5677,7 @@ class $$HoldingsTableTableManager
                 Value<String?> categoryOverride = const Value.absent(),
                 Value<String?> note = const Value.absent(),
                 Value<bool> archived = const Value.absent(),
+                Value<bool> costRecorded = const Value.absent(),
                 Value<DateTime> createdAt = const Value.absent(),
                 Value<DateTime> updatedAt = const Value.absent(),
               }) => HoldingsCompanion.insert(
@@ -5612,6 +5697,7 @@ class $$HoldingsTableTableManager
                 categoryOverride: categoryOverride,
                 note: note,
                 archived: archived,
+                costRecorded: costRecorded,
                 createdAt: createdAt,
                 updatedAt: updatedAt,
               ),
