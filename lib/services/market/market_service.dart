@@ -10,6 +10,7 @@ import 'eastmoney_source.dart';
 import 'fallback_source.dart';
 import 'gold_fx_source.dart';
 import 'market_data_source.dart';
+import 'price_sanity.dart';
 import 'sina_source.dart';
 import 'tencent_quote_source.dart';
 
@@ -33,14 +34,20 @@ class MarketRefreshResult {
 /// holdings and the price cache. Failures degrade gracefully to the
 /// previously cached price.
 class MarketService {
-  MarketService(this._dao);
+  MarketService(this._dao, {Map<MarketSource, MarketDataSource>? sources})
+      : _overrides = sources ?? const {};
 
   final AssetDao _dao;
 
+  /// Source overrides merged over the platform defaults. Used by tests to
+  /// feed deterministic quotes through the real write-back path.
+  final Map<MarketSource, MarketDataSource> _overrides;
+
   // The Sina/Eastmoney endpoints used on native platforms have no CORS
   // headers and require a Referer header, so the web build uses the
-  // CORS-friendly Tencent / Eastmoney push2 endpoints instead.
-  late final Map<MarketSource, MarketDataSource> _sources = kIsWeb
+  // CORS-friendly Tencent quote endpoint and the fund-only Eastmoney mobile
+  // fund API instead.
+  late final Map<MarketSource, MarketDataSource> _sources = _withOverrides(kIsWeb
       ? {
           MarketSource.sina: TencentQuoteSource(source: MarketSource.sina),
           MarketSource.eastmoney: EastmoneyFundQuoteSource(),
@@ -65,7 +72,11 @@ class MarketService {
           MarketSource.sge: FallbackSource(GoldFxSource(), TencentGoldFxAdapter()),
           MarketSource.forex: FallbackSource(GoldFxSource(), TencentGoldFxAdapter()),
           MarketSource.coingecko: CoinGeckoSource(),
-        };
+        });
+
+  Map<MarketSource, MarketDataSource> _withOverrides(
+    Map<MarketSource, MarketDataSource> base,
+  ) => _overrides.isEmpty ? base : {...base, ..._overrides};
 
   /// Refresh prices for all market-linked holdings. Fully exited positions
   /// (quantity <= 0) are skipped: they have no live position to price.
@@ -119,6 +130,16 @@ class MarketService {
         if (symbol == null) continue;
         final quote = quoteMap[symbol];
         if (quote == null || !quote.isSuccess) {
+          failed++;
+          continue;
+        }
+        // Keep the last valid price when the quote looks like it came from a
+        // different instrument on the same code (see price_sanity.dart).
+        if (!isPlausiblePriceRefresh(
+          source: quote.source,
+          previousPrice: h.latestPrice,
+          newPrice: quote.price,
+        )) {
           failed++;
           continue;
         }
@@ -237,6 +258,15 @@ class MarketService {
     if (quotes.isEmpty) return null;
     final quote = quotes.first;
     if (!quote.isSuccess) return null;
+    // Same collision guard as refreshAll: refuse to overwrite a valid price
+    // with one that looks like a different instrument.
+    if (!isPlausiblePriceRefresh(
+      source: quote.source,
+      previousPrice: holding.latestPrice,
+      newPrice: quote.price,
+    )) {
+      return null;
+    }
     await _dao.transaction(() async {
       await _dao.updateHoldingPrice(holding.id, quote.price);
       await _dao.upsertPriceCache(PriceCacheRow(

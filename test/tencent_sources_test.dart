@@ -1,4 +1,6 @@
-﻿import 'package:flutter_test/flutter_test.dart';
+﻿import 'dart:convert';
+
+import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
@@ -130,30 +132,65 @@ void main() {
   });
 
   group('EastmoneyFundQuoteSource', () {
-    test('parses push2 NAV payload (scaled fields)', () async {
-      const body = '{"rc":0,"data":{"f43":577,"f57":"161725",'
-          '"f58":"BLSM","f169":12,"f170":212}}';
+    test('queries the fund-only mobile API and parses the NAV row', () async {
+      const body = '{"Datas":[{"FCODE":"400030","SHORTNAME":"\u4e1c\u65b9\u6dfb\u76ca\u503a\u5238",'
+          '"PDATE":"2026-10-08","NAV":"1.4553","NAVCHGRT":"-2.07"}],'
+          '"ErrCode":0,"Success":true,"TotalCount":1}';
       final client = MockClient((req) async {
-        expect(req.url.queryParameters['secid'], '0.161725');
-        return http.Response(body, 200);
+        expect(req.url.host, 'fundmobapi.eastmoney.com');
+        expect(req.url.path, '/FundMNewApi/FundMNFInfo');
+        expect(req.url.queryParameters['FCODES'], '400030');
+        expect(req.url.queryParameters['plat'], 'Wap');
+        return http.Response.bytes(utf8.encode(body), 200);
       });
       final source = EastmoneyFundQuoteSource(client: client);
-      final quotes = await source.fetch(['161725']);
+      final quotes = await source.fetch(['400030']);
 
       final q = quotes.single;
       expect(q.isSuccess, isTrue);
-      expect(q.symbol, '161725');
-      expect(q.price, closeTo(0.577, 1e-9));
-      expect(q.name, 'BLSM');
-      expect(q.change, closeTo(0.012, 1e-9));
-      expect(q.changePct, closeTo(0.0212, 1e-9));
-      expect(q.prevClose, closeTo(0.565, 1e-9));
+      expect(q.symbol, '400030');
+      expect(q.price, closeTo(1.4553, 1e-9));
+      expect(q.name, '东方添益债券');
+      expect(q.changePct, closeTo(-0.0207, 1e-9));
+      expect(q.prevClose, closeTo(1.4553 / (1 - 0.0207), 1e-6));
     });
 
-    test('returns failure when data is absent', () async {
-      final client = MockClient((req) async => http.Response('{"rc":100}', 200));
+    test('never asks the stock endpoint for a fund code', () async {
+      // Regression: push2's *stock* endpoint answers 400030 with the
+      // unrelated third-board stock 蓝璟5 (0.063) instead of the fund NAV
+      // (1.4553). The fund source must only ever talk to the fund API.
+      final client = MockClient((req) async {
+        expect(req.url.host, isNot('push2.eastmoney.com'));
+        return http.Response.bytes(utf8.encode('{"Datas":null}'), 200);
+      });
       final source = EastmoneyFundQuoteSource(client: client);
-      expect((await source.fetch(['161725'])).single.isSuccess, isFalse);
+      await source.fetch(['400030']);
+    });
+
+    test('returns failure for a code missing from Datas', () async {
+      final client = MockClient((req) async =>
+          http.Response.bytes(utf8.encode('{"Datas":null,"ErrCode":0}'), 200));
+      final source = EastmoneyFundQuoteSource(client: client);
+      expect((await source.fetch(['999999'])).single.isSuccess, isFalse);
+    });
+
+    test('batches every code into a single request', () async {
+      var calls = 0;
+      final client = MockClient((req) async {
+        calls++;
+        expect(req.url.queryParameters['FCODES'], '400030,002943');
+        return http.Response.bytes(
+          utf8.encode('{"Datas":['
+              '{"FCODE":"400030","SHORTNAME":"A","NAV":"1.4553","NAVCHGRT":"0.00"},'
+              '{"FCODE":"002943","SHORTNAME":"B","NAV":"4.6809","NAVCHGRT":"-2.07"}]}'),
+          200,
+        );
+      });
+      final source = EastmoneyFundQuoteSource(client: client);
+      final quotes = await source.fetch(['400030', '002943']);
+      expect(calls, 1);
+      expect(quotes.map((q) => q.price),
+          [closeTo(1.4553, 1e-9), closeTo(4.6809, 1e-9)]);
     });
   });
 
@@ -190,11 +227,13 @@ void main() {
       expect(history['2026-08-06'], 101.0);
     });
 
-    test('queries the bare host first (the `web.` one is WAF-blocked)',
+    test('queries the proxy gateway first (both ifzq hosts are WAF-blocked)',
         () async {
       // `/appstock/app/fqkline/get` on `web.ifzq.gtimg.cn` has been answering
-      // a 501 JS challenge since ~2026-10-08 while the bare host still serves
-      // the qfq payload, so the bare host must be the primary one.
+      // a 501 JS challenge since ~2026-10-08, and by 2026-10-09 the bare
+      // `ifzq.gtimg.cn` host was blocked too — so the `proxy.finance.qq.com`
+      // gateway, which serves the same qfq-adjusted `qfqday` payload under a
+      // different path, must be the primary endpoint.
       const body = '{"code":0,"data":{"sh512480":{"qfqday":[]}}}';
       late Uri seen;
       final client = MockClient((req) async {
@@ -204,17 +243,17 @@ void main() {
       final source = TencentHistorySource(client: client);
       await source.fetch('sh512480', DateTime(2026, 9, 20), DateTime(2026, 10, 8));
 
-      expect(seen.host, 'ifzq.gtimg.cn');
-      expect(seen.path, '/appstock/app/fqkline/get');
+      expect(seen.host, 'proxy.finance.qq.com');
+      expect(seen.path, '/ifzqgtimg/appstock/app/newfqkline/get');
       // 18 calendar days in the window, +20 rows of slack for week-long
       // holidays, qfq-adjusted.
       expect(seen.queryParameters['param'],
           'sh512480,day,2026-09-20,2026-10-08,38,qfq');
     });
 
-    test('falls back to the other host when the first one answers a WAF 501',
+    test('falls back to the next endpoint when the first one answers a WAF 501',
         () async {
-      // A blocked host must not silently end up as "this symbol has no
+      // A blocked endpoint must not silently end up as "this symbol has no
       // history": that empty series is what made the backfill price every
       // historical day from the current quote.
       const body = '{"code":0,"data":{"sh512480":{"qfqday":['
@@ -223,7 +262,7 @@ void main() {
       final hosts = <String>[];
       final client = MockClient((req) async {
         hosts.add(req.url.host);
-        if (req.url.host == 'ifzq.gtimg.cn') {
+        if (req.url.host == 'proxy.finance.qq.com') {
           return http.Response('<!DOCTYPE html>waf', 501);
         }
         return http.Response.bytes(asciiBytes(body), 200);
@@ -232,7 +271,7 @@ void main() {
       final history = await source.fetch(
           'sh512480', DateTime(2026, 9, 20), DateTime(2026, 10, 8));
 
-      expect(hosts, ['ifzq.gtimg.cn', 'web.ifzq.gtimg.cn']);
+      expect(hosts, ['proxy.finance.qq.com', 'ifzq.gtimg.cn']);
       expect(history['2026-09-30'], 0.955);
     });
   });

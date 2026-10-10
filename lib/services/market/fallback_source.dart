@@ -7,7 +7,8 @@ import 'market_data_source.dart';
 /// have the highest fidelity but can still go down or start rejecting
 /// requests. Without a fallback those symbols would degrade to their cached
 /// price for the whole refresh cycle; with one they are served from the
-/// CORS-friendly secondary endpoints (Tencent qt.gtimg.cn, push2) instead.
+/// CORS-friendly secondary endpoints (Tencent qt.gtimg.cn, Eastmoney's
+/// fund-only mobile API) instead.
 ///
 /// The secondary is constructed with the primary's [MarketSource] label
 /// (see the wiring in market_service.dart) so price-cache rows and source
