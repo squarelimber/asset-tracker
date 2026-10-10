@@ -46,6 +46,21 @@ class Formats {
     return _num.format(v);
   }
 
+  /// Plain display form of a stored double: no thousands separators, capped
+  /// to [decimals] decimals, trailing zeros stripped — stays directly
+  /// parseable by `double.tryParse` (unlike [smartNum], which adds commas).
+  ///
+  /// Values like a unit cost (`invested ÷ shares`) are repeating decimals in
+  /// binary, so `toString()` prints 16-17 digits. Every DISPLAY of such a
+  /// value must route through here; the stored number itself is never
+  /// rounded, or the rounding error would leak into totals.
+  static String plainNum(double v, {int decimals = 3}) {
+    if (v == v.roundToDouble()) return v.toInt().toString();
+    var s = v.toStringAsFixed(decimals);
+    s = s.replaceFirst(RegExp(r'\.?0+$'), '');
+    return s;
+  }
+
   /// Currency symbol for common ISO codes, null when unknown.
   static String? _currencySymbol(String code) => switch (code.toUpperCase()) {
     'CNY' || 'RMB' => '¥',

@@ -650,7 +650,7 @@ class TransactionService {
     }
     final holding = await _getHolding(holdingId);
     if (quantity > holding.quantity) {
-      throw ArgumentError('卖出数量超过持仓数量（当前 ${holding.quantity}）');
+      throw ArgumentError('卖出数量超过持仓数量（当前 ${_fmt(holding.quantity)}）');
     }
     final newQty = holding.quantity - quantity;
     // Keep the unit cost after a full sell-out: the realized-gain estimate

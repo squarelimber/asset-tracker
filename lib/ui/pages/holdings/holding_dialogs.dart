@@ -16,11 +16,27 @@ import 'purchase_date_field.dart';
 
 /// Plain number for a text field, without thousands separators, so it stays
 /// directly parseable by double.tryParse.
+///
+/// Used by the type-switch conversion, which WRITES the numbers it produces
+/// (4 decimals is the conversion's own precision), so this stays separate
+/// from the display-only [Formats.plainNum].
 String _plainNum(double v) {
   if (v == v.roundToDouble()) return v.toInt().toString();
   var s = v.toStringAsFixed(4);
   s = s.replaceFirst(RegExp(r'\.?0+$'), '');
   return s;
+}
+
+/// Reads an edited numeric field, keeping the EXACT stored value when the
+/// text was never touched.
+///
+/// Dialogs prefill with the rounded [Formats.plainNum] form, so without this
+/// a plain "open + save" would rewrite a full-precision value (e.g. a unit
+/// cost that divides out to 16 digits) into its rounded display form —
+/// silently changing the number. Untouched fields must round-trip unchanged.
+double? _parseEditable(String text, String prefill, double original) {
+  final t = text.trim();
+  return t == prefill ? original : double.tryParse(t);
 }
 
 /// Caps an AlertDialog's total height so the dialog always fits on screen
@@ -43,9 +59,14 @@ Value<double?> _editFxRateValue(
   TextEditingController currencyCtrl,
   bool autoCny,
   HoldingRow holding,
+  String prefill,
 ) {
   final ccy = autoCny ? 'CNY' : currencyCtrl.text.trim().toUpperCase();
   if (ccy.isEmpty || ccy == 'CNY') return const Value<double?>.absent();
+  // Untouched field: keep the exact stored rate (see _parseEditable).
+  if (holding.costFxRate != null && fxRateCtrl.text.trim() == prefill) {
+    return Value<double?>(holding.costFxRate);
+  }
   final fx = double.tryParse(fxRateCtrl.text.trim());
   if (fx != null && fx > 0) return Value<double?>(fx);
   return const Value<double?>.absent();
@@ -402,7 +423,7 @@ Future<void> showAddHoldingDialog(BuildContext context, WidgetRef ref) async {
                         final rate = fxRates[ccy];
                         fxRateCtrl.text = (rate == null || rate <= 0)
                             ? ''
-                            : rate.toString();
+                            : Formats.plainNum(rate, decimals: 4);
                       },
                     ),
                     ValueListenableBuilder<TextEditingValue>(
@@ -781,9 +802,9 @@ Future<void> showUpdatePriceDialog(
   WidgetRef ref,
   HoldingRow holding,
 ) async {
-  final priceCtrl = TextEditingController(
-    text: holding.latestPrice > 0 ? holding.latestPrice.toString() : '',
-  );
+  final priceText =
+      holding.latestPrice > 0 ? Formats.plainNum(holding.latestPrice) : '';
+  final priceCtrl = TextEditingController(text: priceText);
   final ok = await showDialog<bool>(
     context: context,
     builder: (context) => AlertDialog(
@@ -809,7 +830,9 @@ Future<void> showUpdatePriceDialog(
   );
   if (ok == true) {
     final price = double.tryParse(priceCtrl.text.trim());
-    if (price != null && price > 0) {
+    // The prefill is a rounded display form, so only write when the text was
+    // actually edited — otherwise saving would round the stored price.
+    if (priceCtrl.text.trim() != priceText && price != null && price > 0) {
       await ref.read(daoProvider).updateHoldingPrice(holding.id, price);
     }
   }
@@ -842,17 +865,21 @@ Future<void> showEditHoldingDialog(
   );
   final nameCtrl = TextEditingController(text: holding.name);
   final symbolCtrl = TextEditingController(text: holding.symbol ?? '');
-  final quantityCtrl =
-      TextEditingController(text: holding.quantity.toString());
-  final costCtrl = TextEditingController(text: holding.costPrice.toString());
-  final priceCtrl =
-      TextEditingController(text: holding.latestPrice.toString());
+  // Prefill with the rounded DISPLAY form; the exact stored double is kept
+  // and reused on save while the field is untouched (see _parseEditable).
+  final quantityText = Formats.plainNum(holding.quantity);
+  final costText = Formats.plainNum(holding.costPrice);
+  final priceText = Formats.plainNum(holding.latestPrice);
+  // Rate uses 4 decimals (an FX rate is a conversion factor, and small-unit
+  // currencies lose too much at 3); matches the markets page convention.
+  final fxText = holding.costFxRate == null
+      ? ''
+      : Formats.plainNum(holding.costFxRate!, decimals: 4);
+  final quantityCtrl = TextEditingController(text: quantityText);
+  final costCtrl = TextEditingController(text: costText);
+  final priceCtrl = TextEditingController(text: priceText);
   final currencyCtrl = TextEditingController(text: holding.currency);
-  final fxRateCtrl = TextEditingController(
-    text: holding.costFxRate == null
-        ? ''
-        : holding.costFxRate!.toString(),
-  );
+  final fxRateCtrl = TextEditingController(text: fxText);
   final noteCtrl = TextEditingController(text: holding.note ?? '');
   final purchaseDate = ValueNotifier<DateTime?>(
     holding.purchaseDate ?? holding.createdAt,
@@ -1120,7 +1147,7 @@ Future<void> showEditHoldingDialog(
                             final rate = fxRates[ccy];
                             fxRateCtrl.text = (rate == null || rate <= 0)
                                 ? ''
-                                : rate.toString();
+                                : Formats.plainNum(rate, decimals: 4);
                           },
                         ),
                         ValueListenableBuilder<TextEditingValue>(
@@ -1190,10 +1217,10 @@ Future<void> showEditHoldingDialog(
     // semantics must be re-derived — force a full rebuild instead of the
     // usual light window.
     final crossAmountSwitch = initialType.isAmountBased != type.isAmountBased;
-    final qty = double.tryParse(quantityCtrl.text.trim());
+    final qty = _parseEditable(quantityCtrl.text, quantityText, holding.quantity);
     if (qty == null) return;
-    final cost = double.tryParse(costCtrl.text.trim());
-    final price = double.tryParse(priceCtrl.text.trim());
+    final cost = _parseEditable(costCtrl.text, costText, holding.costPrice);
+    final price = _parseEditable(priceCtrl.text, priceText, holding.latestPrice);
     if (!isAmount && (cost == null || price == null)) return;
     var symbol = symbolCtrl.text.trim();
     // Normalize bare 6-digit A-share/ETF codes (5/6 -> sh, 0/1/3 -> sz),
@@ -1290,7 +1317,8 @@ Future<void> showEditHoldingDialog(
       currency: currencyCtrl.text.trim().toUpperCase().isEmpty
           ? holding.currency
           : currencyCtrl.text.trim().toUpperCase(),
-      costFxRate: _editFxRateValue(fxRateCtrl, currencyCtrl, autoCny, holding),
+      costFxRate:
+          _editFxRateValue(fxRateCtrl, currencyCtrl, autoCny, holding, fxText),
       note: noteCtrl.text.trim().isEmpty ? const Value.absent() : Value(noteCtrl.text.trim()),
     );
     await ref.read(daoProvider).updateHolding(updated);

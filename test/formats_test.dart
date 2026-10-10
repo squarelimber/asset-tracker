@@ -40,6 +40,43 @@ void main() {
     });
   });
 
+  group('plainNum', () {
+    // Real values from the database: a unit cost is `invested ÷ shares`, so
+    // it is a repeating decimal in binary and toString() leaks 16 digits.
+    // The display form must cap it (see Formats.plainNum).
+    test('caps the digits that division leaks', () {
+      expect(Formats.plainNum(0.6307858439201451), '0.631');
+      expect(Formats.plainNum(2.3510340909090908), '2.351');
+      expect(Formats.plainNum(903.488747373734), '903.489');
+      expect(Formats.plainNum(140.66332663652207), '140.663');
+    });
+
+    test('whole numbers stay bare, decimals are trimmed', () {
+      expect(Formats.plainNum(275500), '275500');
+      expect(Formats.plainNum(8800), '8800');
+      expect(Formats.plainNum(0), '0');
+      expect(Formats.plainNum(2.5), '2.5');
+    });
+
+    test('FX rates keep 4 decimals', () {
+      expect(Formats.plainNum(7.1523412, decimals: 4), '7.1523');
+    });
+
+    test('stays parseable by double.tryParse', () {
+      for (final v in const [0.6307858439201451, 275500.0, 0.0, 2.5, -3.7]) {
+        expect(double.tryParse(Formats.plainNum(v)), isNotNull);
+      }
+    });
+
+    test('display rounds — which is why it must never be written back', () {
+      // Contract behind _parseEditable: the rounded display form is LOSSY,
+      // so an untouched dialog field has to keep the stored double instead of
+      // re-parsing this string, or mere "open + save" would alter the cost.
+      const stored = 0.6307858439201451;
+      expect(double.parse(Formats.plainNum(stored)), isNot(stored));
+    });
+  });
+
   group('annualizedReturn', () {
     test('one year -> equals total return', () {
       expect(Formats.annualizedReturn(0.12, 365), closeTo(0.12, 1e-9));
