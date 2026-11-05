@@ -190,7 +190,16 @@ Future<void> showHoldingTransactionDialog(
                     ButtonSegment(value: t, label: Text(t.label)),
                 ],
                 selected: {value},
-                onSelectionChanged: (s) => setState(() => txnType.value = s.first),
+                onSelectionChanged: (s) => setState(() {
+                  final next = s.first;
+                  if (isShare && next != TransactionType.buy &&
+                      !cashHoldings.any((h) => h.id == cashId.value)) {
+                    // A share-based funding source is valid for a purchase,
+                    // but cannot receive a sale or dividend.
+                    cashId.value = null;
+                  }
+                  txnType.value = next;
+                }),
               ),
             ),
             const SizedBox(height: 16),
@@ -304,9 +313,16 @@ Future<void> showHoldingTransactionDialog(
                     ValueListenableBuilder<int?>(
                       valueListenable: cashId,
                       builder: (context, value, _) => DropdownButtonFormField<int>(
+                        key: ValueKey(t),
                         initialValue: value,
                         decoration: terminalDecoration(counterpartyLabel(t, isShare)),
                         items: [
+                          if (isShare &&
+                              (t == TransactionType.buy || t == TransactionType.sell))
+                            const DropdownMenuItem<int>(
+                              value: null,
+                              child: Text('不关联持仓'),
+                            ),
                           for (final c in dropdownHoldings)
                             DropdownMenuItem(
                               value: c.id,
@@ -384,9 +400,8 @@ Future<void> showHoldingTransactionDialog(
                 t == TransactionType.buy &&
                 source != null &&
                 !AssetType.fromStorage(source.assetType).isAmountBased;
-            // 补录历史日期的流水：只新增交易记录（历史回放会从流水重算出
-            // 发生日的余额与扣款），不修改任何持仓的当前快照，也不按今天
-            // 的余额做校验 —— 发生日当时该账户是否有钱由回放决定。
+            // 补录历史日期的流水同样更新当前持仓并校验当前余额；
+            // 日期用于后续历史回放。
             final when = occurredAt.value;
             final now = DateTime.now();
             final backdated =

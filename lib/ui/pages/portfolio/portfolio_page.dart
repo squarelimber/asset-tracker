@@ -27,25 +27,19 @@ import 'portfolio_welcome.dart';
 final summaryProvider = FutureProvider<PortfolioSummary>((ref) async {
   final dao = ref.watch(daoProvider);
   final holdings = await ref.watch(holdingsProvider.future);
-  // Price cache rows are keyed by the normalized cache symbol
-  // (cacheSymbolFor); map them back to each holding's raw symbol so
-  // bare codes entered via the edit dialog still find their row.
-  final cacheKeys = [
-    for (final h in holdings)
-      if (cacheSymbolFor(h) != null) cacheSymbolFor(h)!,
-  ];
+  // Resolve quotes by source and holding, with a source-checked legacy fallback.
+  final cacheKeys = holdingQuoteCacheKeys(holdings);
   final cache = await dao.getCachedPrices(cacheKeys);
   // Only quotes whose `change` genuinely describes today may enter the
   // prev-close map: outside the trading session (weekend, before the open)
   // an exchange still serves the previous session's close pair, and
   // counting it as today's move double-books that session.
   final now = DateTime.now();
-  final prev = <String, double>{
+  final prev = <int, double>{
     for (final h in holdings)
-      if (h.symbol != null &&
-          cache[cacheSymbolFor(h)]?.prevClose != null &&
+      if (cachedQuoteForHolding(cache, h)?.prevClose != null &&
           quoteChangeIsToday(now, MarketSource.fromStorage(h.marketSource)))
-        h.symbol!: cache[cacheSymbolFor(h)]!.prevClose!,
+        h.id: cachedQuoteForHolding(cache, h)!.prevClose!,
   };
   // Convert non-CNY holdings into CNY using the shared FX rates.
   final cnyRates = await ref.watch(cnyRatesProvider.future);
@@ -55,7 +49,7 @@ final summaryProvider = FutureProvider<PortfolioSummary>((ref) async {
       .toList();
   return const PortfolioCalculator().compute(
     holdings,
-    prevPriceBySymbol: prev,
+    prevPriceByHoldingId: prev,
     cnyRates: cnyRates,
     sellTransactions: sells,
   );
@@ -90,7 +84,7 @@ class _PortfolioPageState extends ConsumerState<PortfolioPage> {
     if (_refreshing.value) return;
     _refreshing.value = true;
     MarketRefreshResult? result;
-    Object? error;
+    var failed = false;
     try {
       result = await ref.read(marketServiceProvider).refreshAll();
       // Refresh quotes only — DO NOT rewrite today's snapshot here. Today's
@@ -107,20 +101,26 @@ class _PortfolioPageState extends ConsumerState<PortfolioPage> {
       // Prices are fresh: re-evaluate alert rules and notify for anything
       // newly fired (no-op when disabled or nothing changed today).
       unawaited(ref.read(alertNotificationServiceProvider).checkAndNotify());
-    } catch (e) {
-      error = e;
+    } catch (_) {
+      failed = true;
     } finally {
-      _refreshing.value = false;
+      if (mounted) _refreshing.value = false;
     }
-    if (!mounted || result == null) return;
+    if (!mounted) return;
+    if (failed || result == null) {
+      if (showSnack) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('行情刷新失败，请稍后重试')));
+      }
+      return;
+    }
     setState(() => _lastRefreshAt = DateTime.now());
     if (showSnack) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            error != null
-                ? '行情刷新失败，请稍后重试'
-                : result.failed == 0
+            result.failed == 0
                 ? '行情已更新 (${result.updated} 项)'
                 : '更新 ${result.updated} 项，失败 ${result.failed} 项',
           ),

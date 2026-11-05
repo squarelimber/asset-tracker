@@ -33,23 +33,18 @@ class AlertService {
         ? const <String, double>{}
         : await MarketService(_dao).loadCnyRates(currencies);
 
-    // Price cache keyed by the normalized cache symbol (cacheSymbolFor),
-    // then mapped back to the holding's raw symbol for the calculator.
-    final cacheKeys = [
-      for (final h in holdings)
-        if (cacheSymbolFor(h) != null) cacheSymbolFor(h)!,
-    ];
+    // Resolve quotes by source and holding, including source-checked legacy rows.
+    final cacheKeys = holdingQuoteCacheKeys(holdings);
     final cache = await _dao.getCachedPrices(cacheKeys);
-    final prev = <String, double>{
+    final prev = <int, double>{
       for (final h in holdings)
-        if (h.symbol != null &&
-            cache[cacheSymbolFor(h)]?.prevClose != null)
-          h.symbol!: cache[cacheSymbolFor(h)]!.prevClose!,
+        if (cachedQuoteForHolding(cache, h)?.prevClose != null)
+          h.id: cachedQuoteForHolding(cache, h)!.prevClose!,
     };
 
     final summary = const PortfolioCalculator().compute(
       holdings,
-      prevPriceBySymbol: prev,
+      prevPriceByHoldingId: prev,
       cnyRates: cnyRates,
     );
     final ctx = RuleContext(

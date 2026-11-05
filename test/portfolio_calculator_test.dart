@@ -111,6 +111,14 @@ void main() {
     expect(s.todayChangePct, isNull);
   });
 
+  test('today change keeps same-symbol holdings separate by id', () {
+    final s = calc.compute([
+      _holding(id: 1, type: 'stock', symbol: 'same', price: 110),
+      _holding(id: 2, type: 'mutual_fund', symbol: 'same', price: 20),
+    ], prevPriceByHoldingId: {1: 100, 2: 15});
+    expect(s.todayChange, 15);
+  });
+
   test('non-CNY holdings are converted into CNY', () {
     final s = calc.compute(
       [

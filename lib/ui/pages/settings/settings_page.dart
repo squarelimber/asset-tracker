@@ -58,7 +58,7 @@ class SettingsPage extends ConsumerWidget {
                     DataRow(
                       leading: const Icon(Icons.download, color: T.warning),
                       title: '导入备份',
-                      subtitle: const Text('从 JSON 文件恢复（将覆盖当前全部数据）'),
+                      subtitle: const Text('从 JSON 文件恢复（将覆盖本机数据）'),
                       trailing: const SizedBox.shrink(),
                       onTap: () => _import(context, ref),
                     ),
@@ -200,7 +200,10 @@ class SettingsPage extends ConsumerWidget {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('导入备份'),
-        content: const Text('导入将覆盖当前全部数据，且无法撤销。确定继续吗？'),
+        content: const Text(
+          '导入将覆盖本机数据，且无法撤销。同步服务器上的其他记录不会被删除，'
+          '之后同步时可能重新出现。确定继续吗？',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),

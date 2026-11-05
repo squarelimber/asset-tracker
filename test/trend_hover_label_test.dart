@@ -33,7 +33,7 @@ void main() {
     expect(lines[0], contains('09-16'));
     expect(lines[1], contains('101,000'));
     // 较昨日：101000+500 − 100000 = 1500（正号）。
-    expect(lines[2], contains('较昨日 +'));
+    expect(lines[2], contains('资产较上次 +'));
     expect(lines[2], contains('1,500'));
   });
 
@@ -59,7 +59,7 @@ void main() {
     );
     expect(lines[1], startsWith('¥'));
     expect(lines[1], isNot(contains('101,000')));
-    expect(lines[2], contains('较昨日'));
+    expect(lines[2], contains('资产较上次'));
     expect(lines[2], isNot(contains('1,500')));
   });
 
@@ -74,10 +74,24 @@ void main() {
     expect(lines, hasLength(3));
     expect(lines[1], startsWith('-'));
     expect(lines[1], contains('-0.5'));
-    expect(lines[2], contains('较昨日 '));
-    expect(lines[2], startsWith('较昨日 -'));
-    // 较昨日：-0.5 − 1.0 = -1.5 个百分点 → -1.5%。
+    expect(lines[2], startsWith('较上次 -'));
+    // 上次快照：-0.5 − 1.0 = -1.5 个百分点。
     expect(lines[2], contains('1.5'));
+  });
+
+  test('收益率悬停以区间首日归零，与曲线坐标一致', () {
+    final nonzeroRates = [10.0, 12.0, 9.5];
+    List<String> label(int index) => trendHoverLabelLines(
+      list: list,
+      isRate: true,
+      rates: nonzeroRates,
+      index: index,
+      hideAmounts: false,
+    );
+    expect(label(0)[1], '+0.00%');
+    expect(label(1)[1], '+2.00%');
+    expect(label(2)[1], '-0.50%');
+    expect(label(2)[2], '较上次 -2.50 个百分点');
   });
 
   test('越界 index 返回空', () {

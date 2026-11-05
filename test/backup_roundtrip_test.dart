@@ -184,4 +184,19 @@ void main() {
     expect(holdings.single.accountId, accounts.single.id); // auto-increment
     expect(await dao.getTransactions(), hasLength(1));
   });
+
+  test('malformed backups cannot erase existing data', () async {
+    await dao.createAccount(AccountsCompanion.insert(name: '保留', type: 'cash'));
+    for (final payload in [
+      {'app': 'asset_tracker'},
+      {'app': 'asset_tracker', 'accounts': [], 'holdings': [], 'transactions': [42]},
+      {'app': 'asset_tracker', 'accounts': [], 'holdings': [], 'transactions': 'invalid'},
+      {'app': 'asset_tracker', 'accounts': [{'id': 'bad'}], 'holdings': [], 'transactions': []},
+      {'app': 'asset_tracker', 'accounts': [], 'holdings': [{'name': 'orphan'}], 'transactions': []},
+    ]) {
+      final result = await service.importJson(jsonEncode(payload));
+      expect(result.ok, isFalse, reason: '$payload');
+      expect((await dao.getAccounts()).single.name, '保留');
+    }
+  });
 }

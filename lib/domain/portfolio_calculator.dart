@@ -103,12 +103,15 @@ class PortfolioCalculator {
   ///
   /// [prevPriceBySymbol] maps symbol -> previous close price (same currency
   /// as the holding) used to compute today's change.
+  /// [prevPriceByHoldingId] takes precedence and distinguishes sources that
+  /// share a symbol.
   /// [cnyRates] maps ISO currency code -> CNY per unit (default 1 = CNY),
   /// applied to convert every holding's market value and cost into CNY.
   /// [sellTransactions] (optional) feeds the realized-profit estimate.
   PortfolioSummary compute(
     List<HoldingRow> holdings, {
     Map<String, double> prevPriceBySymbol = const {},
+    Map<int, double> prevPriceByHoldingId = const {},
     Map<String, double> cnyRates = const {},
     List<TransactionRow> sellTransactions = const [],
   }) {
@@ -153,9 +156,9 @@ class PortfolioCalculator {
       costByRisk[risk] = (costByRisk[risk] ?? 0) + holdingCost;
 
       final symbol = h.symbol;
-      final prev = (symbol != null && prevPriceBySymbol.containsKey(symbol))
+      final prev = prevPriceByHoldingId[h.id] ?? ((symbol != null && prevPriceBySymbol.containsKey(symbol))
           ? prevPriceBySymbol[symbol]
-          : null;
+          : null);
       if (prev != null && prev > 0) {
         todayChange += (h.latestPrice - prev) * h.quantity * rate;
         prevTotal += prev * h.quantity * rate;

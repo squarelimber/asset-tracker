@@ -127,15 +127,17 @@ class MarketService {
       symbolOf[h.id] = symbol;
     }
 
-    final quoteMap = <String, MarketQuote>{};
+    final quoteMap = <MarketSource, Map<String, MarketQuote>>{};
     final futures = <Future<List<MarketQuote>>>[];
     for (final entry in bySource.entries) {
       futures.add(_fetchFromSource(entry.key, entry.value));
     }
     final batches = await Future.wait(futures);
-    for (final batch in batches) {
-      for (final q in batch) {
-        quoteMap[q.symbol] = q;
+    for (var i = 0; i < batches.length; i++) {
+      final source = bySource.keys.elementAt(i);
+      final sourceQuotes = quoteMap.putIfAbsent(source, () => {});
+      for (final q in batches[i]) {
+        sourceQuotes[_quoteKey(source, q.symbol)] = q;
       }
     }
 
@@ -146,7 +148,8 @@ class MarketService {
       for (final h in holdings) {
         final symbol = symbolOf[h.id];
         if (symbol == null) continue;
-        final quote = quoteMap[symbol];
+        final source = MarketSource.fromStorage(h.marketSource);
+        final quote = quoteMap[source]?[_quoteKey(source, symbol)];
         if (quote == null || !quote.isSuccess) {
           failed++;
           continue;
@@ -162,7 +165,8 @@ class MarketService {
           continue;
         }
         await _dao.updateHoldingPrice(h.id, quote.price);
-        await _dao.upsertPriceCache(_priceCacheCompanion(symbol, quote));
+        await _dao.upsertPriceCache(
+            _priceCacheCompanion(quoteCacheKey(source, symbol), quote));
         updated++;
       }
     });
@@ -189,6 +193,13 @@ class MarketService {
     return adapter.fetch(symbols);
   }
 
+  // Gold and FX adapters normalize aliases to upper case, while the stored
+  // holding symbol can retain the user's original case.
+  static String _quoteKey(MarketSource source, String symbol) =>
+      source == MarketSource.sge || source == MarketSource.forex
+          ? symbol.toUpperCase()
+          : symbol;
+
   /// Fetch quotes for symbols of a specific source without touching the DB.
   Future<List<MarketQuote>> fetchQuotes(MarketSource source, List<String> symbols) {
     return _fetchFromSource(source, symbols);
@@ -207,10 +218,14 @@ class MarketService {
     final rates = <String, double>{};
     final stale = <String, double>{};
 
-    final cached = await _dao.getCachedPrices(unique);
+    final cached = await _dao.getCachedPrices([
+      for (final c in unique) ...[quoteCacheKey(MarketSource.forex, c), c],
+    ]);
     final now = DateTime.now();
     for (final c in unique) {
-      final row = cached[c];
+      final legacy = cached[c];
+      final row = cached[quoteCacheKey(MarketSource.forex, c)] ??
+          (legacy?.source == MarketSource.forex.storageName ? legacy : null);
       if (row == null || row.price <= 0) continue;
       if (now.difference(row.fetchedAt) <= _fxTtl) {
         rates[c] = row.price;
@@ -226,7 +241,8 @@ class MarketService {
         for (final q in quotes) {
           if (q.isSuccess && q.price > 0) {
             rates[q.symbol] = q.price;
-            await _dao.upsertPriceCache(_priceCacheCompanion(q.symbol, q));
+            await _dao.upsertPriceCache(_priceCacheCompanion(
+                quoteCacheKey(MarketSource.forex, q.symbol), q));
           }
         }
       } catch (_) {
@@ -254,7 +270,11 @@ class MarketService {
     final symbol = rawSymbol;
     final quotes = await _fetchFromSource(source, [symbol]);
     if (quotes.isEmpty) return null;
-    final quote = quotes.first;
+    final matching = quotes.where(
+      (q) => _quoteKey(source, q.symbol) == _quoteKey(source, symbol),
+    );
+    if (matching.isEmpty) return null;
+    final quote = matching.first;
     if (!quote.isSuccess) return null;
     // Same collision guard as refreshAll: refuse to overwrite a valid price
     // with one that looks like a different instrument.
@@ -267,7 +287,8 @@ class MarketService {
     }
     await _dao.transaction(() async {
       await _dao.updateHoldingPrice(holding.id, quote.price);
-      await _dao.upsertPriceCache(_priceCacheCompanion(symbol, quote));
+      await _dao.upsertPriceCache(
+          _priceCacheCompanion(quoteCacheKey(source, symbol), quote));
     });
     return quote;
   }

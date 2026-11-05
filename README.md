@@ -4,10 +4,6 @@ A local-first asset tracker that keeps every position — stocks, funds, gold, d
 
 **Live web version:** https://squarelimber.github.io/asset-tracker/
 
-<p align="center">
-  <img src="docs/screenshots/dashboard.png" alt="Dashboard" width="800">
-</p>
-
 ## Why
 
 Most portfolio apps force a choice: a cloud service that wants your financial data, or a spreadsheet you update by hand. Asset Tracker takes a third path — a real database on your own device, live market prices from free public endpoints, and an optional sync server **you** host. There is no account, no telemetry, and no third party in the loop.
@@ -99,7 +95,7 @@ server/         # optional self-hosted sync server (Dart/shelf, Docker)
 
 ## Releases
 
-Latest: **v0.11.0** — see [CHANGELOG.md](CHANGELOG.md) for per-version notes. Releases ship Android APKs, Windows zip and the web build via GitHub Actions.
+Latest: **v0.11.1** — see [CHANGELOG.md](CHANGELOG.md) for per-version notes. Releases ship Android APKs, Windows zip and the web build via GitHub Actions.
 
 ## Disclaimer
 

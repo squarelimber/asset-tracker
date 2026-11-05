@@ -679,6 +679,7 @@ class TransactionService {
     required int? targetId,
     required double amount,
     bool moveCost = true,
+    double? movedCostOverride,
   }) async {
     if (sourceId == null || targetId == null || amount <= 0) {
       throw ArgumentError('转账需指定源和目标持仓');
@@ -703,7 +704,11 @@ class TransactionService {
     // portfolio's total cost is exactly conserved. An internal transfer
     // must never create or destroy cost — when it did, the account's
     // unrealized gain turned into a same-sized loss on the overview card.
-    final moved = moveCost ? movedCostOf(source, amount) : 0.0;
+    final moved = moveCost ? (movedCostOverride ?? movedCostOf(source, amount)) : 0.0;
+    if (movedCostOverride != null && sourceType.isAmountBased &&
+        effectiveCostOf(source) + 1e-6 < moved) {
+      throw ArgumentError('该账户的本金已发生变化，请先撤销后续流水');
+    }
     await _applyBalanceMove(sourceId, -amount, costDelta: -moved);
     await _applyBalanceMove(targetId, amount, costDelta: moved);
     return moved;
@@ -868,6 +873,10 @@ class TransactionService {
     if (costCredit != null) {
       movedCost = costCredit;
       newCost = effectiveCostOf(holding) + costCredit;
+      if (newCost < -1e-6) {
+        throw ArgumentError('该账户的本金已发生变化，请先撤销后续流水');
+      }
+      if (newCost < 0) newCost = 0;
     }
     // 资产类账户不允许扣成负数（负债账户经 transfer 流转，不在这里）。
     // 只有钱确实离开才校验：卖出回款入账（costCredit）与收入是流入，跳过。
@@ -896,7 +905,13 @@ class TransactionService {
     double? costPrice,
   }) {
     return _dao.updateHolding(
-      holding.copyWith(quantity: quantity, costPrice: costPrice ?? holding.costPrice),
+      holding.copyWith(
+        quantity: quantity,
+        costPrice: costPrice ?? holding.costPrice,
+        costRecorded: holding.costRecorded ||
+            (AssetType.fromStorage(holding.assetType).isAmountBased &&
+                costPrice != null && costPrice != holding.costPrice),
+      ),
     );
   }
 
@@ -926,13 +941,19 @@ class TransactionService {
               targetId: txn.cashSourceId,
               amount: txn.amount,
               moveCost: txn.costMoved,
+              movedCostOverride: txn.costMovedAmount,
             );
           case TransactionType.dividend:
             await _applyDividend(txn.holdingId, -txn.amount, txn.cashTargetId);
           case TransactionType.income:
-            await _applyCashMove(txn.cashTargetId, -txn.amount, invested: true);
+            await _applyCashMove(txn.cashTargetId, -txn.amount,
+                invested: true,
+                costCredit: txn.costMovedAmount == null
+                    ? null
+                    : -txn.costMovedAmount!);
           case TransactionType.expense:
-            await _applyCashMove(txn.cashTargetId, txn.amount, invested: true);
+            await _applyCashMove(txn.cashTargetId, txn.amount,
+                invested: true, costCredit: txn.costMovedAmount);
           case TransactionType.consume:
             await _applyConsume(txn.holdingId, -txn.amount);
           case TransactionType.split:
@@ -970,8 +991,7 @@ class TransactionService {
         ? (txn.costMovedAmount ?? txn.amount)
         : txn.amount;
     if (qty > holding.quantity) {
-      // Already reversed or inconsistent data; just zero the quantity.
-      await _updateHolding(holding, quantity: 0);
+      throw ArgumentError('当前持仓数量不足，无法撤销该买入');
     } else {
       final newQty = holding.quantity - qty;
       // A full reversal keeps the unit cost (same invariant as a full
@@ -982,7 +1002,12 @@ class TransactionService {
       await _updateHolding(holding, quantity: newQty, costPrice: cost < 0 ? 0.0 : cost);
     }
     if (txn.cashSourceId != null) {
-      await _applyCashMove(txn.cashSourceId, txn.amount, invested: true);
+      // Restore the exact principal removed by the original buy. The cash
+      // balance may include gains, so its moved principal can be smaller
+      // than the amount refunded. Legacy rows without a recorded amount
+      // retain the previous full-amount fallback.
+      await _applyCashMove(txn.cashSourceId, txn.amount,
+          invested: true, costCredit: txn.costMovedAmount);
     }
   }
 
@@ -990,6 +1015,9 @@ class TransactionService {
     final holdingId = txn.holdingId;
     if (holdingId == null) throw ArgumentError('卖出流水缺少持仓');
     final holding = await _getHolding(holdingId);
+    if (await _dao.hasNewerTransaction(holdingId, txn.id)) {
+      throw ArgumentError('该持仓存在更晚的交易，请先删除更晚的流水');
+    }
     final qty = txn.quantity ?? 0;
     // An internal redemption recorded on an amount-based holding itself
     // debited its balance *and* invested; reversing must restore both,

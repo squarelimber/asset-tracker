@@ -3,6 +3,7 @@ import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:asset_tracker/core/enums.dart';
+import 'package:asset_tracker/core/symbols.dart';
 import 'package:asset_tracker/data/asset_dao.dart';
 import 'package:asset_tracker/data/database.dart';
 import 'package:asset_tracker/services/market/market_data_source.dart';
@@ -25,6 +26,14 @@ class _FixedSource extends MarketDataSource {
             fetchedAt: DateTime.now(),
           ))
       .toList();
+}
+
+class _UppercaseSource extends _FixedSource {
+  _UppercaseSource(super.source, super.price);
+
+  @override
+  Future<List<MarketQuote>> fetch(List<String> symbols) =>
+      super.fetch(symbols.map((s) => s.toUpperCase()).toList());
 }
 
 void main() {
@@ -80,6 +89,101 @@ void main() {
         reason: '被拒收的行情不得覆盖上一个有效净值');
   });
 
+  test('gold aliases match the adapter response regardless of case', () async {
+    final account = await dao.createAccount(
+        AccountsCompanion.insert(name: 'gold', type: 'general'));
+    await dao.createHolding(HoldingsCompanion.insert(
+      accountId: account,
+      name: 'gold',
+      assetType: AssetType.gold.storageName,
+      marketSource: Value(MarketSource.sge.storageName),
+      symbol: const Value('xau'),
+      quantity: const Value(1),
+      latestPrice: const Value(700),
+    ));
+    final service = MarketService(dao, sources: {
+      MarketSource.sge: _UppercaseSource(MarketSource.sge, 710),
+    });
+    final result = await service.refreshAll();
+    expect(result.updated, 1);
+    expect((await dao.getHoldings()).single.latestPrice, 710);
+    final key = quoteCacheKey(MarketSource.sge, 'xau');
+    expect((await dao.getCachedPrices([key]))[key]?.price, 710);
+  });
+
+  test('same symbol from different sources does not mix holding prices', () async {
+    final account = await dao.createAccount(
+        AccountsCompanion.insert(name: 'mixed', type: 'general'));
+    for (final item in [
+      (AssetType.mutualFund, MarketSource.eastmoney),
+      (AssetType.mutualFund, MarketSource.coingecko),
+    ]) {
+      await dao.createHolding(HoldingsCompanion.insert(
+        accountId: account,
+        name: item.$2.storageName,
+        assetType: item.$1.storageName,
+        marketSource: Value(item.$2.storageName),
+        symbol: const Value('same'),
+        quantity: const Value(1),
+        latestPrice: const Value(10),
+      ));
+    }
+    final result = await MarketService(dao, sources: {
+      MarketSource.eastmoney: _FixedSource(MarketSource.eastmoney, 11),
+      MarketSource.coingecko: _FixedSource(MarketSource.coingecko, 12),
+    }).refreshAll();
+    expect(result.updated, 2);
+    final holdings = await dao.getHoldings();
+    expect(holdings.firstWhere((h) => h.marketSource == 'eastmoney').latestPrice, 11);
+    expect(holdings.firstWhere((h) => h.marketSource == 'coingecko').latestPrice, 12);
+    final cache = await dao.getCachedPrices(holdingQuoteCacheKeys(holdings));
+    expect(cachedQuoteForHolding(cache, holdings.firstWhere((h) => h.marketSource == 'eastmoney'))?.price, 11);
+    expect(cachedQuoteForHolding(cache, holdings.firstWhere((h) => h.marketSource == 'coingecko'))?.price, 12);
+  });
+
+  test('legacy cache is accepted only for its matching source', () async {
+    await seedFund(latestPrice: 1.4553);
+    final holding = (await dao.getHoldings()).single;
+    await dao.upsertPriceCache(PriceCacheCompanion(
+      symbol: const Value('400030'),
+      source: Value(MarketSource.sina.storageName),
+      name: const Value('other source'),
+      price: const Value(2),
+      currency: const Value('CNY'),
+      fetchedAt: Value(DateTime.now()),
+    ));
+    var cache = await dao.getCachedPrices(holdingQuoteCacheKeys([holding]));
+    expect(cachedQuoteForHolding(cache, holding) == null, isTrue);
+    await dao.upsertPriceCache(PriceCacheCompanion(
+      symbol: const Value('400030'),
+      source: Value(MarketSource.eastmoney.storageName),
+      name: const Value('legacy fund'),
+      price: const Value(1.5),
+      currency: const Value('CNY'),
+      fetchedAt: Value(DateTime.now()),
+    ));
+    cache = await dao.getCachedPrices(holdingQuoteCacheKeys([holding]));
+    expect(cachedQuoteForHolding(cache, holding)?.price, 1.5);
+  });
+
+  test('FX cache ignores unrelated old quote and uses new namespaced rate', () async {
+    await dao.upsertPriceCache(PriceCacheCompanion(
+      symbol: const Value('USD'),
+      source: Value(MarketSource.coingecko.storageName),
+      name: const Value('unrelated'),
+      price: const Value(99),
+      currency: const Value('CNY'),
+      fetchedAt: Value(DateTime.now()),
+    ));
+    final service = MarketService(dao, sources: {
+      MarketSource.forex: _FixedSource(MarketSource.forex, 7.2),
+    });
+    expect(await service.loadCnyRates(['USD']), {'USD': 7.2});
+    expect(await service.loadCnyRates(['USD']), {'USD': 7.2});
+    final key = quoteCacheKey(MarketSource.forex, 'USD');
+    expect((await dao.getCachedPrices([key]))[key]?.price, 7.2);
+  });
+
   test('an ordinary update is still written', () async {
     await seedFund(latestPrice: 1.4553);
     final service = MarketService(dao, sources: {
@@ -121,7 +225,8 @@ void main() {
     });
     await service.refreshAll();
 
-    final row = (await dao.getCachedPrices(const ['400030']))['400030'];
+    final key = quoteCacheKey(MarketSource.eastmoney, '400030');
+    final row = (await dao.getCachedPrices([key]))[key];
     // drift and flutter_test both export `isNull` / `isNotNull`, so assert
     // through plain booleans to avoid the ambiguous import.
     expect(row != null, isTrue);

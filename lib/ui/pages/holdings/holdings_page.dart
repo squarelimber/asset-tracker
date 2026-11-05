@@ -551,8 +551,7 @@ class _HoldingRowCard extends ConsumerWidget {
     final marketValue = _holdingMarketValue(holding);
     // Today's change from the price cache (only when written today).
     final cache = ref.watch(priceCacheProvider).value ?? const <String, PriceCacheRow>{};
-    final cacheSymbol = cacheSymbolFor(holding);
-    final todayRow = cacheSymbol == null ? null : cache[cacheSymbol];
+    final todayRow = cachedQuoteForHolding(cache, holding);
     final source = MarketSource.fromStorage(holding.marketSource);
     final todayProfit = todayProfitOf(todayRow, holding.quantity, source: source);
     final todayPct = todayChangePctOf(todayRow, source: source);

@@ -34,6 +34,38 @@ String? cacheSymbolFor(HoldingRow holding) {
   return source == MarketSource.sina ? normalizeSinaSymbol(raw) : raw;
 }
 
+/// Namespace quote keys by source while retaining the existing SQLite schema.
+String quoteCacheKey(MarketSource source, String symbol) =>
+    'quote:${source.storageName}:$symbol';
+
+String? holdingQuoteCacheKey(HoldingRow holding) {
+  final symbol = cacheSymbolFor(holding);
+  return symbol == null
+      ? null
+      : quoteCacheKey(MarketSource.fromStorage(holding.marketSource), symbol);
+}
+
+/// Include old keys for safe source-checked fallback during upgrades.
+List<String> holdingQuoteCacheKeys(Iterable<HoldingRow> holdings) => [
+  for (final h in holdings) ...[
+    if (holdingQuoteCacheKey(h) != null) holdingQuoteCacheKey(h)!,
+    if (cacheSymbolFor(h) != null) cacheSymbolFor(h)!,
+  ],
+];
+
+PriceCacheRow? cachedQuoteForHolding(
+    Map<String, PriceCacheRow> cache, HoldingRow holding) {
+  final symbol = cacheSymbolFor(holding);
+  if (symbol == null) return null;
+  final source = MarketSource.fromStorage(holding.marketSource);
+  final current = cache[quoteCacheKey(source, symbol)];
+  if (current != null) return current;
+  final legacy = cache[symbol];
+  // Native gold quotes were historically labelled forex by GoldFxSource.
+  final legacySource = source == MarketSource.sge ? MarketSource.forex : source;
+  return legacy?.source == legacySource.storageName ? legacy : null;
+}
+
 /// Currency codes with a live FX quote (Sina `fx_s{ccy}cny`, see
 /// `GoldFxSource`). A holding whose *code* is one of these has an exchange
 /// rate as its symbol — the only case where a unit price can legitimately

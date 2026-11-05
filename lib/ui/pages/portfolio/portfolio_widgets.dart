@@ -970,12 +970,6 @@ class _TrendChartState extends State<_TrendChart> {
         : hideAmounts
         ? Formats.masked()
         : Formats.amountCompact(v);
-    String tooltipText(double v) => isRate
-        ? '${v >= 0 ? '+' : ''}${Formats.pct(v / 100)}'
-        : hideAmounts
-        ? Formats.masked()
-        : Formats.money(v);
-
     const ds = ChartDownsample();
     List<FlSpot> toSpots(List<ChartPoint> pts) => [
       for (final p in pts) FlSpot(p.x, p.y),
@@ -1135,69 +1129,27 @@ class _TrendChartState extends State<_TrendChart> {
                       ),
                     ),
                     lineTouchData: LineTouchData(
-                      touchTooltipData: LineTouchTooltipData(
-                        getTooltipColor: (_) => T.surface2,
-                        tooltipBorder: const BorderSide(color: T.border),
-                        tooltipBorderRadius: BorderRadius.circular(8),
-                        getTooltipItems: (spots) {
-                          final items = <LineTooltipItem>[
-                            for (final spot in spots)
-                              LineTooltipItem(
-                                '${Formats.date(DateTime.parse(list[spot.x.toInt()].date))}\n${tooltipText(spot.y)}',
-                                T.mono(
-                                  size: 12,
-                                  color: T.text1,
-                                  weight: FontWeight.w600,
-                                ),
-                              ),
-                          ];
-                          if (spots.isNotEmpty) {
-                            final i = spots.first.x.toInt();
-                            if (i > 0 && i < list.length) {
-                              // Asset-based delta (net worth + liabilities):
-                              // credit-card spending etc. moves the debt line,
-                              // not the portfolio, so it is not a loss.
-                              final delta =
-                                  (list[i].totalValue + list[i].liabilities) -
-                                  (list[i - 1].totalValue +
-                                      list[i - 1].liabilities);
-                              items.add(
-                                LineTooltipItem(
-                                  '较昨日 ${hideAmounts ? Formats.masked() : '${delta >= 0 ? '+' : ''}${Formats.money(delta)}'}',
-                                  T.mono(
-                                    size: 11,
-                                    color: T.changeColor(delta),
-                                    weight: FontWeight.w600,
-                                  ),
-                                ),
-                              );
-                            }
-                          }
-                          return items;
-                        },
-                      ),
+                      // The custom overlay below owns the crosshair and label.
+                      // Keep the touch callback without drawing a second tooltip.
+                      handleBuiltInTouches: false,
                       touchCallback: (event, response) {
-                        final spots = response?.lineBarSpots;
-                        final idx = (spots != null && spots.isNotEmpty)
-                            ? spots.first.x.toInt()
-                            : null;
-                        if (idx != null && idx >= 0 && idx < list.length) {
-                          _hoverIndex.value = idx;
-                        } else if (event is FlPanEndEvent ||
+                        // Lines can be sampled at different dates and sorted
+                        // by touch distance. The overlay describes the asset,
+                        // so never use a benchmark's point as its date.
+                        final idx = trendAssetSpotIndex(response?.lineBarSpots);
+                        final ended = event is FlPanEndEvent ||
                             event is FlPanCancelEvent ||
                             event is FlPointerExitEvent ||
-                            event is FlTapCancelEvent) {
+                            event is FlTapCancelEvent;
+                        if (!ended && idx != null && idx >= 0 && idx < list.length) {
+                          _hoverIndex.value = idx;
+                        } else {
                           _hoverIndex.value = null;
                         }
 
-                        if (event is FlTapUpEvent && response != null) {
-                          final tapped = response.lineBarSpots;
-                          if (tapped != null && tapped.isNotEmpty) {
-                            final i = tapped.first.x.toInt();
-                            if (i >= 0 && i < list.length) {
-                              widget.onDayTap?.call(list[i].date);
-                            }
-                          }
+                        if (event is FlTapUpEvent && idx != null &&
+                            idx >= 0 && idx < list.length) {
+                          widget.onDayTap?.call(list[idx].date);
                         }
                       },
                     ),
@@ -1262,10 +1214,18 @@ class _TrendChartState extends State<_TrendChart> {
   }
 }
 
-/// 走势图悬停/按压时的信息标签行：[日期, 数值, 较昨日?]。
+/// The chart's first line is the portfolio; benchmark spots may sort first.
+int? trendAssetSpotIndex(List<LineBarSpot>? spots) {
+  if (spots == null) return null;
+  for (final spot in spots) {
+    if (spot.barIndex == 0) return spot.x.toInt();
+  }
+  return null;
+}
+
+/// 走势图悬停/按压时的信息标签行：[日期, 数值, 较上次快照?]。
 /// 数值口径与图表一致：净值模式显示金额（隐私掩码生效），收益率模式
-/// 显示累计涨跌幅百分比；「较昨日」用资产口径（净资产+负债）计算，
-/// 本金进出不影响当日盈亏。
+/// 显示区间涨跌幅百分比；资产变化为相邻快照的总资产差额，可能包含资金进出。
 List<String> trendHoverLabelLines({
   required List<SnapshotRow> list,
   required bool isRate,
@@ -1278,7 +1238,7 @@ List<String> trendHoverLabelLines({
   final date = DateTime.tryParse(row.date);
   final lines = <String>[date == null ? row.date : Formats.date(date)];
   if (isRate) {
-    final rate = index < rates.length ? rates[index] : null;
+    final rate = index < rates.length ? rates[index] - rates.first : null;
     lines.add(
       rate == null ? '--' : '${rate >= 0 ? '+' : ''}${Formats.pct(rate / 100)}',
     );
@@ -1294,11 +1254,11 @@ List<String> trendHoverLabelLines({
               (list[index - 1].totalValue + list[index - 1].liabilities);
     if (delta != null) {
       final text = isRate
-          ? '${delta >= 0 ? '+' : ''}${Formats.pct(delta / 100)}'
+          ? '${delta >= 0 ? '+' : ''}${delta.toStringAsFixed(2)} 个百分点'
           : hideAmounts
           ? Formats.masked()
           : '${delta >= 0 ? '+' : ''}${Formats.money(delta)}';
-      lines.add('较昨日 $text');
+      lines.add('${isRate ? '较上次' : '资产较上次'} $text');
     }
   }
   return lines;
@@ -1384,7 +1344,7 @@ class _TrendOverlayPainter extends CustomPainter {
     );
   }
 
-  /// 悬停/按压信息块：日期、数值、较昨日。
+  /// 悬停/按压信息块：日期、数值、较上次快照。
   void _drawHoverLabel(
     Canvas canvas,
     Size size, {

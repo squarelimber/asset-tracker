@@ -65,6 +65,167 @@ void main() {
   }
 
   group('buy', () {
+    test('refuses to reverse a sell after a newer buy changes the cost', () async {
+      final acc = await addAccount('A');
+      final fund = await addHolding(
+        accountId: acc, name: '基金', type: AssetType.mutualFund,
+        quantity: 100, costPrice: 10, latestPrice: 10,
+      );
+      await service.record(accountId: acc, holdingId: fund,
+          type: TransactionType.sell, quantity: 50, price: 10, amount: 500);
+      final sell = (await dao.getTransactions()).single;
+      await service.record(accountId: acc, holdingId: fund,
+          type: TransactionType.buy, quantity: 50, price: 20, amount: 1000);
+      final before = (await dao.getHolding(fund))!;
+      expect((await service.remove(sell.id)).ok, isFalse);
+      final after = (await dao.getHolding(fund))!;
+      expect(after.quantity, before.quantity);
+      expect(after.costPrice, before.costPrice);
+      expect(await dao.getTransaction(sell.id) != null, isTrue);
+    });
+
+    test('refuses to reverse a buy if its quantity is no longer present', () async {
+      final acc = await addAccount('A');
+      final cash = await addHolding(accountId: acc, name: '现金',
+          type: AssetType.cash, quantity: 1000, costPrice: 1000);
+      final fund = await addHolding(accountId: acc, name: '基金',
+          type: AssetType.mutualFund);
+      await service.record(accountId: acc, holdingId: fund,
+          type: TransactionType.buy, quantity: 100, price: 1, amount: 100,
+          cashSourceId: cash);
+      final buy = (await dao.getTransactions()).single;
+      final current = (await dao.getHolding(fund))!;
+      await dao.updateHolding(current.copyWith(quantity: 50));
+      expect((await service.remove(buy.id)).ok, isFalse);
+      expect((await dao.getHolding(fund))!.quantity, 50);
+      expect((await dao.getHolding(cash))!.quantity, 900);
+      expect(await dao.getTransaction(buy.id) != null, isTrue);
+    });
+
+    test('refuses to reverse income if later flows consumed its principal', () async {
+      final acc = await addAccount('A');
+      final cash = await addHolding(
+        accountId: acc, name: '现金', type: AssetType.cash,
+        quantity: 1000, costPrice: 500, latestPrice: 1,
+      );
+      await service.record(accountId: acc, type: TransactionType.income,
+          amount: 1000, cashTargetId: cash);
+      final income = (await dao.getTransactions()).single;
+      await service.record(accountId: acc, type: TransactionType.expense,
+          amount: 1200, cashTargetId: cash);
+      final before = (await dao.getHolding(cash))!;
+      final result = await service.remove(income.id);
+      expect(result.ok, isFalse);
+      final after = (await dao.getHolding(cash))!;
+      expect(after.quantity, before.quantity);
+      expect(after.costPrice, before.costPrice);
+      expect(await dao.getTransaction(income.id) != null, isTrue);
+    });
+
+    test('reversing income preserves an explicitly zero remaining principal', () async {
+      final acc = await addAccount('A');
+      final cash = await addHolding(
+        accountId: acc, name: '现金', type: AssetType.cash,
+        quantity: 1000, costPrice: 500, latestPrice: 1,
+      );
+      expect((await service.record(
+        accountId: acc, type: TransactionType.income,
+        amount: 500, cashTargetId: cash,
+      )).ok, isTrue);
+      final income = (await dao.getTransactions()).single;
+      expect((await service.record(
+        accountId: acc, type: TransactionType.expense,
+        amount: 750, cashTargetId: cash,
+      )).ok, isTrue);
+      expect((await service.remove(income.id)).ok, isTrue);
+      final restored = (await dao.getHolding(cash))!;
+      expect(restored.quantity, closeTo(250, 1e-9));
+      expect(restored.costPrice, 0);
+      expect(restored.costRecorded, isTrue);
+    });
+
+    test('removing income restores the original cash principal', () async {
+      final acc = await addAccount('A');
+      final cash = await addHolding(
+        accountId: acc, name: '现金', type: AssetType.cash,
+        quantity: 1000, costPrice: 500, latestPrice: 1,
+      );
+      expect((await service.record(
+        accountId: acc, type: TransactionType.income,
+        amount: 100, cashTargetId: cash,
+      )).ok, isTrue);
+      final txn = (await dao.getTransactions()).single;
+      expect((await service.remove(txn.id)).ok, isTrue);
+      final restored = (await dao.getHolding(cash))!;
+      expect(restored.quantity, closeTo(1000, 1e-9));
+      expect(restored.costPrice, closeTo(500, 1e-9));
+    });
+
+    test('reversing a transfer restores its recorded principal after later income', () async {
+      final acc = await addAccount('A');
+      final source = await addHolding(
+        accountId: acc, name: '来源', type: AssetType.cash,
+        quantity: 1000, costPrice: 500, latestPrice: 1,
+      );
+      final target = await addHolding(
+        accountId: acc, name: '目标', type: AssetType.cash,
+        quantity: 0, costPrice: 0, latestPrice: 1,
+      );
+      expect((await service.record(
+        accountId: acc, type: TransactionType.transferOut,
+        amount: 100, cashSourceId: source, cashTargetId: target,
+      )).ok, isTrue);
+      final transfer = (await dao.getTransactions()).single;
+      expect((await service.record(
+        accountId: acc, type: TransactionType.income,
+        amount: 100, cashTargetId: target,
+      )).ok, isTrue);
+      expect((await service.remove(transfer.id)).ok, isTrue);
+      expect((await dao.getHolding(source))!.costPrice, closeTo(500, 1e-9));
+      expect((await dao.getHolding(target))!.costPrice, closeTo(100, 1e-9));
+    });
+
+    test('removing an expense restores the principal originally spent', () async {
+      final acc = await addAccount('A');
+      final cash = await addHolding(
+        accountId: acc, name: '现金', type: AssetType.bankDeposit,
+        quantity: 1000, costPrice: 500, latestPrice: 1,
+      );
+      expect((await service.record(
+        accountId: acc, type: TransactionType.expense,
+        amount: 100, cashTargetId: cash,
+      )).ok, isTrue);
+      expect((await dao.getHolding(cash))!.costPrice, closeTo(450, 1e-9));
+      final txn = (await dao.getTransactions()).single;
+      expect((await service.remove(txn.id)).ok, isTrue);
+      final restored = (await dao.getHolding(cash))!;
+      expect(restored.quantity, closeTo(1000, 1e-9));
+      expect(restored.costPrice, closeTo(500, 1e-9));
+    });
+
+    test('removing a cash-funded buy restores the original cash principal', () async {
+      final acc = await addAccount('A');
+      final cash = await addHolding(
+        accountId: acc, name: '现金', type: AssetType.bankDeposit,
+        quantity: 1000, costPrice: 500, latestPrice: 1,
+      );
+      final fund = await addHolding(
+        accountId: acc, name: '基金', type: AssetType.mutualFund,
+        quantity: 0, costPrice: 0, latestPrice: 1,
+      );
+      final result = await service.record(
+        accountId: acc, holdingId: fund, type: TransactionType.buy,
+        quantity: 100, price: 1, amount: 100, cashSourceId: cash,
+      );
+      expect(result.ok, isTrue);
+      expect((await dao.getHolding(cash))!.costPrice, closeTo(450, 1e-9));
+      final txn = (await dao.getTransactions()).single;
+      expect((await service.remove(txn.id)).ok, isTrue);
+      final restored = (await dao.getHolding(cash))!;
+      expect(restored.quantity, closeTo(1000, 1e-9));
+      expect(restored.costPrice, closeTo(500, 1e-9));
+    });
+
     test('increases quantity with moving average cost', () async {
       final acc = await addAccount('A');
       final fund = await addHolding(

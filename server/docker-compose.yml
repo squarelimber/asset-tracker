@@ -10,5 +10,9 @@ services:
       # send it in Authorization: Bearer <token>; generate one with e.g.
       # `openssl rand -hex 32`. Empty/missing ASSET_SYNC_TOKEN fails startup.
       ASSET_SYNC_TOKEN: "${ASSET_SYNC_TOKEN:?set ASSET_SYNC_TOKEN in your .env}"
+      # Optional: set to true only behind a trusted reverse proxy that removes
+      # client-supplied X-Forwarded-For and replaces it with the real address.
+      # Prevent direct access to this server when enabling this setting.
+      ASSET_SYNC_TRUST_PROXY: "${ASSET_SYNC_TRUST_PROXY:-false}"
     volumes:
       - ./data:/data

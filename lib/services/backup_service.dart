@@ -65,13 +65,30 @@ class BackupService {
       return const ImportResult(ok: false, message: '不是 asset-tracker 的备份文件');
     }
 
+    // A damaged or partial file must never be treated as an empty backup:
+    // import replaces all existing rows. Older backups may omit the optional
+    // snapshots and alertRules collections, but the core collections are required.
+    for (final key in ['accounts', 'holdings', 'transactions', 'snapshots', 'alertRules']) {
+      final value = decoded[key];
+      final required = key == 'accounts' || key == 'holdings' || key == 'transactions';
+      if ((value == null && required) ||
+          (value != null && (value is! List || value.any((row) => row is! Map<String, dynamic>)))) {
+        return ImportResult(ok: false, message: '备份数据格式错误：$key');
+      }
+    }
+
     final accounts = _parseList(decoded['accounts']);
     final holdings = _parseList(decoded['holdings']);
     final transactions = _parseList(decoded['transactions']);
     final snapshots = _parseList(decoded['snapshots']);
     final rules = _parseList(decoded['alertRules']);
 
-    final problems = _validateReferences(accounts, holdings, transactions);
+    final List<String> problems;
+    try {
+      problems = _validateReferences(accounts, holdings, transactions);
+    } catch (_) {
+      return const ImportResult(ok: false, message: '备份数据格式错误：无效的记录引用');
+    }
     if (problems.isNotEmpty) {
       return ImportResult(
         ok: false,
@@ -290,13 +307,13 @@ class BackupService {
     final problems = <String>[];
     for (final h in holdings) {
       final accountId = (h['accountId'] as num?)?.toInt();
-      if (accountId != null && !accountIds.contains(accountId)) {
+      if (accountId == null || !accountIds.contains(accountId)) {
         problems.add('持仓「${h['name']}」引用的账户 $accountId 不存在');
       }
     }
     for (final t in transactions) {
       final accountId = (t['accountId'] as num?)?.toInt();
-      if (accountId != null && !accountIds.contains(accountId)) {
+      if (accountId == null || !accountIds.contains(accountId)) {
         problems.add('交易 #${t['id']} 引用的账户 $accountId 不存在');
       }
       for (final field in ['holdingId', 'cashSourceId', 'cashTargetId']) {

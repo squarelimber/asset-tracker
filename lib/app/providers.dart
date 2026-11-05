@@ -296,17 +296,13 @@ final holdingsByAccountProvider = StreamProvider.family<List<HoldingRow>, int>(
 // Price cache (today's change for each holding's quote)
 // ---------------------------------------------------------------------------
 
-/// Cached quotes by normalized cache symbol, keyed the same way
-/// `MarketService` writes them. Invalidated after every market refresh.
+/// Cached quotes by source and normalized symbol, plus compatible legacy rows.
+/// Invalidated after every market refresh.
 final priceCacheProvider = FutureProvider<Map<String, PriceCacheRow>>((
   ref,
 ) async {
   final holdings = await ref.watch(holdingsProvider.future);
-  final symbols = holdings
-      .map(cacheSymbolFor)
-      .whereType<String>()
-      .toSet()
-      .toList();
+  final symbols = holdingQuoteCacheKeys(holdings).toSet().toList();
   return ref.read(daoProvider).getCachedPrices(symbols);
 });
 
