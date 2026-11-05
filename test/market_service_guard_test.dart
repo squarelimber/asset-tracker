@@ -31,6 +31,11 @@ void main() {
   late AppDatabase db;
   late AssetDao dao;
 
+  /// One wall-clock reading per test run: the assertion below compares the
+  /// freshly-written `fetched_at` against "today", and calling DateTime.now()
+  /// twice straddles midnight often enough to flake CI.
+  final runStart = DateTime.now();
+
   setUp(() {
     db = AppDatabase(NativeDatabase.memory());
     dao = AssetDao(db);
@@ -125,6 +130,6 @@ void main() {
         reason: '没有涨跌的新报价必须清掉上一次会话残留的 change');
     expect(row.prevClose == null, isTrue);
     expect(row.changePct == null, isTrue);
-    expect(row.fetchedAt.day, DateTime.now().day);
+    expect(row.fetchedAt.day, runStart.day);
   });
 }

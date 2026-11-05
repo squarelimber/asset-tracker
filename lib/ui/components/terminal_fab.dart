@@ -19,20 +19,19 @@ class TerminalFab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ElevatedButton.icon(
+    return FilledButton.icon(
       onPressed: onPressed,
       icon: Icon(icon, size: 18),
       label: Text(label),
-      style: ElevatedButton.styleFrom(
+      style: FilledButton.styleFrom(
         backgroundColor: T.accent,
         foregroundColor: Colors.black,
         disabledBackgroundColor: T.surface2,
         disabledForegroundColor: T.text3,
-        elevation: 0,
         padding: const EdgeInsets.symmetric(horizontal: T.s4, vertical: T.s3),
         textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(T.rCard),
+          borderRadius: BorderRadius.circular(T.rInput),
         ),
       ),
     );

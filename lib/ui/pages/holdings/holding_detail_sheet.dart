@@ -181,7 +181,7 @@ class HoldingDetailSheet extends ConsumerWidget {
                       '${realizedPct == null ? '' : ' (${Formats.pct(realizedPct)})'}',
                   valueColor: T.changeColor(realized),
                 ),
-                InfoRow(label: '成本单价', value: holding.costPrice.toStringAsFixed(4)),
+                InfoRow(label: '成本单价', value: Formats.plainNum(holding.costPrice)),
                 if (lastSell != null)
                   InfoRow(label: '清仓日期', value: Formats.date(lastSell)),
               ] else if (type.isAmountBased) ...[
@@ -194,8 +194,8 @@ class HoldingDetailSheet extends ConsumerWidget {
                   valueColor: T.changeColor(profit),
                 ),
               ] else ...[
-                InfoRow(label: '最新单价', value: holding.latestPrice.toStringAsFixed(4)),
-                InfoRow(label: '成本单价', value: holding.costPrice.toStringAsFixed(4)),
+                InfoRow(label: '最新单价', value: Formats.plainNum(holding.latestPrice)),
+                InfoRow(label: '成本单价', value: Formats.plainNum(holding.costPrice)),
                 InfoRow(label: '数量/份额', value: Formats.smartNum(holding.quantity)),
               ],
               InfoRow(label: '币种', value: holding.currency),

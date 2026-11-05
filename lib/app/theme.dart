@@ -23,12 +23,77 @@ class AppTheme {
       useMaterial3: true,
       brightness: Brightness.dark,
       colorScheme: scheme,
+      fontFamily: 'Segoe UI',
+      fontFamilyFallback: const ['Microsoft YaHei', 'Noto Sans SC', 'Arial'],
       scaffoldBackgroundColor: T.bg,
+      hoverColor: T.text1.withValues(alpha: 0.04),
+      focusColor: T.accent.withValues(alpha: 0.12),
+      splashFactory: NoSplash.splashFactory,
+      iconButtonTheme: IconButtonThemeData(
+        style: IconButton.styleFrom(
+          foregroundColor: T.text2,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(T.rInput),
+          ),
+        ),
+      ),
+      textSelectionTheme: TextSelectionThemeData(
+        cursorColor: T.accent,
+        selectionColor: T.accent.withValues(alpha: 0.24),
+        selectionHandleColor: T.accent,
+      ),
+      chipTheme: ChipThemeData(
+        backgroundColor: T.surface,
+        selectedColor: T.surface2,
+        side: const BorderSide(color: T.border),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(T.rInput),
+        ),
+        labelStyle: const TextStyle(fontSize: 12, color: T.text2),
+        secondaryLabelStyle: const TextStyle(fontSize: 12, color: T.text1),
+        checkmarkColor: T.accent,
+      ),
+      tooltipTheme: TooltipThemeData(
+        decoration: BoxDecoration(
+          color: T.surface2,
+          border: Border.all(color: T.border),
+          borderRadius: BorderRadius.circular(T.rInput),
+        ),
+        textStyle: const TextStyle(fontSize: 12, color: T.text1),
+        waitDuration: const Duration(milliseconds: 450),
+      ),
+      filledButtonTheme: FilledButtonThemeData(
+        style: FilledButton.styleFrom(
+          minimumSize: const Size(48, 44),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(T.rInput),
+          ),
+          textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+        ),
+      ),
+      outlinedButtonTheme: OutlinedButtonThemeData(
+        style: OutlinedButton.styleFrom(
+          minimumSize: const Size(48, 44),
+          foregroundColor: T.text1,
+          side: const BorderSide(color: T.border),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(T.rInput),
+          ),
+        ),
+      ),
       appBarTheme: const AppBarTheme(
+        toolbarHeight: 56,
+        titleSpacing: 20,
+        titleTextStyle: TextStyle(
+          fontSize: 17,
+          fontWeight: FontWeight.w600,
+          color: T.text1,
+        ),
         centerTitle: false,
         elevation: 0,
         scrolledUnderElevation: 0,
-        backgroundColor: T.bg,
+        backgroundColor: T.surface,
         foregroundColor: T.text1,
       ),
       cardTheme: CardThemeData(
@@ -89,9 +154,17 @@ class AppTheme {
         filled: true,
         fillColor: T.surface2,
         hintStyle: const TextStyle(color: T.text3),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 14,
+          vertical: 14,
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(T.rInput),
+          borderSide: const BorderSide(color: T.border),
+        ),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(T.rInput),
-          borderSide: BorderSide.none,
+          borderSide: const BorderSide(color: T.border),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(T.rInput),
@@ -100,8 +173,16 @@ class AppTheme {
       ),
       textTheme: TextTheme(
         headlineMedium: T.mono(size: 30, weight: FontWeight.w700),
-        titleLarge: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: T.text1),
-        titleMedium: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: T.text1),
+        titleLarge: const TextStyle(
+          fontSize: 18,
+          fontWeight: FontWeight.w600,
+          color: T.text1,
+        ),
+        titleMedium: const TextStyle(
+          fontSize: 15,
+          fontWeight: FontWeight.w600,
+          color: T.text1,
+        ),
         bodyMedium: const TextStyle(fontSize: 14, color: T.text1),
         bodySmall: const TextStyle(fontSize: 12, color: T.text2),
       ),

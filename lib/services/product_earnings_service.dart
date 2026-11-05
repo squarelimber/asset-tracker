@@ -104,6 +104,7 @@ class ProductEarningsService {
             flows,
             from: from,
             to: current,
+            today: current,
           );
         } else {
           // Share-based smoothed holdings (manual-NAV / FX-linked bank

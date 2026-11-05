@@ -72,8 +72,10 @@ class Transactions extends Table {
   IntColumn get id => integer().autoIncrement()();
   IntColumn get accountId => integer().references(Accounts, #id)();
   IntColumn get holdingId => integer().nullable().references(Holdings, #id)();
-  IntColumn get cashSourceId => integer().nullable().references(Holdings, #id)();
-  IntColumn get cashTargetId => integer().nullable().references(Holdings, #id)();
+  IntColumn get cashSourceId =>
+      integer().nullable().references(Holdings, #id)();
+  IntColumn get cashTargetId =>
+      integer().nullable().references(Holdings, #id)();
   TextColumn get type => text()();
   RealColumn get quantity => real().nullable()();
   RealColumn get price => real().nullable()();
@@ -104,23 +106,23 @@ class Transactions extends Table {
   RealColumn get costMovedAmount => real().nullable()();
 
   /// True on the sell leg of an **internal** movement whose proceeds stay in
-/// the portfolio: a redemption funding another holding (「赎回购买」/「由 X
-/// 出资」) or a sell parked in a tracked cash holding (回款到现金). The money
-/// never leaves the portfolio, the cost basis travels with it (total cost
-/// conserved), and the row is therefore *not* a realization — it must not
-/// feed the realized-profit estimates, or the same gain is counted twice
-/// (once carried into the new position, once "realized").
-///
-/// False (the default) for ordinary sells, including "回款不入账" ones,
-/// whose proceeds genuinely leave the tracker and do realize.
+  /// the portfolio: a redemption funding another holding (「赎回购买」/「由 X
+  /// 出资」) or a sell parked in a tracked cash holding (回款到现金). The money
+  /// never leaves the portfolio, the cost basis travels with it (total cost
+  /// conserved), and the row is therefore *not* a realization — it must not
+  /// feed the realized-profit estimates, or the same gain is counted twice
+  /// (once carried into the new position, once "realized").
+  ///
+  /// False (the default) for ordinary sells, including "回款不入账" ones,
+  /// whose proceeds genuinely leave the tracker and do realize.
   BoolColumn get internalMove => boolean().withDefault(const Constant(false))();
 
   DateTimeColumn get updatedAt => dateTime().withDefault(currentDateAndTime)();
 
   @override
   List<Set<Column>> get uniqueKeys => [
-        {accountId, holdingId, type, occurredAt, amount},
-      ];
+    {accountId, holdingId, type, occurredAt, amount},
+  ];
 }
 
 /// Latest market price cache written by the market data engine.
@@ -151,6 +153,10 @@ class Snapshots extends Table {
   /// Outstanding liabilities on that day, so the earning view can exclude
   /// principal repayments/borrowing from the return (cash-flow, not gain).
   RealColumn get liabilities => real().withDefault(const Constant(0))();
+
+  /// CNY holding valuations captured in the same write as the aggregate.
+  /// Null on older snapshots; never reconstruct those with today's quotes.
+  TextColumn get holdingValues => text().nullable()();
 
   /// Last time this day's value was (re)derived.
   ///
@@ -203,7 +209,8 @@ class AlertEvents extends Table {
   IntColumn get ruleId => integer().references(AlertRules, #id)();
   TextColumn get title => text()();
   TextColumn get message => text()();
-  DateTimeColumn get triggeredAt => dateTime().withDefault(currentDateAndTime)();
+  DateTimeColumn get triggeredAt =>
+      dateTime().withDefault(currentDateAndTime)();
 }
 
 /// Simple key-value store for app-level state (e.g. data migration markers).

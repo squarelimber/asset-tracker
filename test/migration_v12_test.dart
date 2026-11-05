@@ -163,54 +163,60 @@ Future<AppDatabase> _openOnV11() async {
 }
 
 void main() {
-  test('v11 -> v12 backfills cost_recorded from the old "0 means unset" rule',
-      () async {
-    final db = await _openOnV11();
-    final dao = AssetDao(db);
+  test(
+    'v11 -> v12 backfills cost_recorded from the old "0 means unset" rule',
+    () async {
+      final db = await _openOnV11();
+      final dao = AssetDao(db);
 
-    final holdings = await dao.getHoldings();
-    expect(holdings, hasLength(2));
-    final withCost = holdings.firstWhere((h) => h.id == 1);
-    final unset = holdings.firstWhere((h) => h.id == 2);
+      final holdings = await dao.getHoldings();
+      expect(holdings, hasLength(2));
+      final withCost = holdings.firstWhere((h) => h.id == 1);
+      final unset = holdings.firstWhere((h) => h.id == 2);
 
-    // A positive cost had been recorded; a bare 0 had not.
-    expect(withCost.costRecorded, isTrue);
-    expect(unset.costRecorded, isFalse);
+      // A positive cost had been recorded; a bare 0 had not.
+      expect(withCost.costRecorded, isTrue);
+      expect(unset.costRecorded, isFalse);
 
-    // And both keep reading exactly as before the migration.
-    expect(effectiveCostOf(withCost), closeTo(9000, 1e-6));
-    expect(effectiveCostOf(unset), closeTo(5000, 1e-6));
+      // And both keep reading exactly as before the migration.
+      expect(effectiveCostOf(withCost), closeTo(9000, 1e-6));
+      expect(effectiveCostOf(unset), closeTo(5000, 1e-6));
 
-    // Raw storage: the column exists, is at the end, and version bumped.
-    final userVersion =
-        await db.customSelect('PRAGMA user_version;').getSingle();
-    expect(userVersion.data.values.single, 12);
+      // Raw storage: the column exists, is at the end, and version bumped.
+      final userVersion = await db
+          .customSelect('PRAGMA user_version;')
+          .getSingle();
+      expect(userVersion.data.values.single, greaterThanOrEqualTo(12));
 
-    final raw = await db
-        .customSelect('SELECT cost_recorded FROM holdings WHERE id = 1;')
-        .getSingle();
-    expect(raw.data.values.single, 1);
-    final rawUnset = await db
-        .customSelect('SELECT cost_recorded FROM holdings WHERE id = 2;')
-        .getSingle();
-    expect(rawUnset.data.values.single, 0);
+      final raw = await db
+          .customSelect('SELECT cost_recorded FROM holdings WHERE id = 1;')
+          .getSingle();
+      expect(raw.data.values.single, 1);
+      final rawUnset = await db
+          .customSelect('SELECT cost_recorded FROM holdings WHERE id = 2;')
+          .getSingle();
+      expect(rawUnset.data.values.single, 0);
 
-    await db.close();
-  });
+      await db.close();
+    },
+  );
 
   test('an explicitly recorded zero reads as a real zero principal', () async {
     final db = AppDatabase(NativeDatabase.memory());
     final dao = AssetDao(db);
     await dao.createAccount(
-        AccountsCompanion.insert(name: 'A', type: 'general'));
-    await dao.createHolding(HoldingsCompanion.insert(
-      accountId: 1,
-      name: '朋友赠予',
-      assetType: 'bank_deposit',
-      quantity: const Value(10000),
-      costPrice: const Value(0),
-      costRecorded: const Value(true),
-    ));
+      AccountsCompanion.insert(name: 'A', type: 'general'),
+    );
+    await dao.createHolding(
+      HoldingsCompanion.insert(
+        accountId: 1,
+        name: '朋友赠予',
+        assetType: 'bank_deposit',
+        quantity: const Value(10000),
+        costPrice: const Value(0),
+        costRecorded: const Value(true),
+      ),
+    );
 
     final h = (await dao.getHoldings()).single;
     // Real zero principal: the whole balance is gain, not a fabricated 0.
@@ -219,22 +225,27 @@ void main() {
     await db.close();
   });
 
-  test('a v12 database created from scratch still works (no regression)',
-      () async {
-    final db = AppDatabase(NativeDatabase.memory());
-    final dao = AssetDao(db);
-    await dao.createAccount(
-        AccountsCompanion.insert(name: '全新库', type: 'general'));
-    await dao.createHolding(HoldingsCompanion.insert(
-      accountId: 1,
-      name: '现金',
-      assetType: 'bank_deposit',
-      quantity: const Value(100),
-      costPrice: const Value(100),
-    ));
-    final h = (await dao.getHoldings()).single;
-    expect(h.costRecorded, isFalse);
-    expect(effectiveCostOf(h), 100);
-    await db.close();
-  });
+  test(
+    'a v12 database created from scratch still works (no regression)',
+    () async {
+      final db = AppDatabase(NativeDatabase.memory());
+      final dao = AssetDao(db);
+      await dao.createAccount(
+        AccountsCompanion.insert(name: '全新库', type: 'general'),
+      );
+      await dao.createHolding(
+        HoldingsCompanion.insert(
+          accountId: 1,
+          name: '现金',
+          assetType: 'bank_deposit',
+          quantity: const Value(100),
+          costPrice: const Value(100),
+        ),
+      );
+      final h = (await dao.getHoldings()).single;
+      expect(h.costRecorded, isFalse);
+      expect(effectiveCostOf(h), 100);
+      await db.close();
+    },
+  );
 }

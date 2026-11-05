@@ -129,12 +129,18 @@ class SmoothHistoryCalculator {
   /// value was already 0 — the 2026-09-18 "today's earning is -114,713.84"
   /// report (a full 余额宝 -> cash transfer, re-derived by the backfill on
   /// every cold start until the next price refresh overwrote the day).
+  ///
+  /// [today] is the reference "now" used to decide whether [to] is a past day
+  /// (and therefore whether the last-day pin applies). It must be the same
+  /// reference [amountHistory] receives, or a run that crosses midnight can
+  /// pin one day's cost onto another. Defaults to [DateTime.now].
   Map<String, double> amountPrincipal(
     HoldingRow h,
     List<TransactionRow> flows, {
     required DateTime from,
     required DateTime to,
     Map<int, double>? soldPrincipalById,
+    DateTime? today,
   }) {
     final result = <String, double>{};
     final dayTo = _dayOf(to);
@@ -167,7 +173,7 @@ class SmoothHistoryCalculator {
     // was already pinned to the live balance, so the day after the clamp the
     // product's Δ(value−cost) reported a phantom loss equal to the whole
     // clamped amount (2026-10-02 现金账户 −2,342.69 in the day-detail panel).
-    if (!to.isBefore(_dayOf(DateTime.now()))) {
+    if (!to.isBefore(_dayOf(today ?? DateTime.now()))) {
       result[todayKey(dayTo)] = effectiveCostOf(h);
     }
     return result;

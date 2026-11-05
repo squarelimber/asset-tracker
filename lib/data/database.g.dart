@@ -3087,6 +3087,17 @@ class $SnapshotsTable extends Snapshots
     requiredDuringInsert: false,
     defaultValue: const Constant(0),
   );
+  static const VerificationMeta _holdingValuesMeta = const VerificationMeta(
+    'holdingValues',
+  );
+  @override
+  late final GeneratedColumn<String> holdingValues = GeneratedColumn<String>(
+    'holding_values',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
   static const VerificationMeta _createdAtMeta = const VerificationMeta(
     'createdAt',
   );
@@ -3106,6 +3117,7 @@ class $SnapshotsTable extends Snapshots
     totalValue,
     totalCost,
     liabilities,
+    holdingValues,
     createdAt,
   ];
   @override
@@ -3159,6 +3171,15 @@ class $SnapshotsTable extends Snapshots
         ),
       );
     }
+    if (data.containsKey('holding_values')) {
+      context.handle(
+        _holdingValuesMeta,
+        holdingValues.isAcceptableOrUnknown(
+          data['holding_values']!,
+          _holdingValuesMeta,
+        ),
+      );
+    }
     if (data.containsKey('created_at')) {
       context.handle(
         _createdAtMeta,
@@ -3194,6 +3215,10 @@ class $SnapshotsTable extends Snapshots
         DriftSqlType.double,
         data['${effectivePrefix}liabilities'],
       )!,
+      holdingValues: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}holding_values'],
+      ),
       createdAt: attachedDatabase.typeMapping.read(
         DriftSqlType.dateTime,
         data['${effectivePrefix}created_at'],
@@ -3217,6 +3242,10 @@ class SnapshotRow extends DataClass implements Insertable<SnapshotRow> {
   /// principal repayments/borrowing from the return (cash-flow, not gain).
   final double liabilities;
 
+  /// CNY holding valuations captured in the same write as the aggregate.
+  /// Null on older snapshots; never reconstruct those with today's quotes.
+  final String? holdingValues;
+
   /// Last time this day's value was (re)derived.
   ///
   /// Doubles as the cross-device last-write-wins version for snapshots
@@ -3232,6 +3261,7 @@ class SnapshotRow extends DataClass implements Insertable<SnapshotRow> {
     required this.totalValue,
     required this.totalCost,
     required this.liabilities,
+    this.holdingValues,
     required this.createdAt,
   });
   @override
@@ -3242,6 +3272,9 @@ class SnapshotRow extends DataClass implements Insertable<SnapshotRow> {
     map['total_value'] = Variable<double>(totalValue);
     map['total_cost'] = Variable<double>(totalCost);
     map['liabilities'] = Variable<double>(liabilities);
+    if (!nullToAbsent || holdingValues != null) {
+      map['holding_values'] = Variable<String>(holdingValues);
+    }
     map['created_at'] = Variable<DateTime>(createdAt);
     return map;
   }
@@ -3253,6 +3286,9 @@ class SnapshotRow extends DataClass implements Insertable<SnapshotRow> {
       totalValue: Value(totalValue),
       totalCost: Value(totalCost),
       liabilities: Value(liabilities),
+      holdingValues: holdingValues == null && nullToAbsent
+          ? const Value.absent()
+          : Value(holdingValues),
       createdAt: Value(createdAt),
     );
   }
@@ -3268,6 +3304,7 @@ class SnapshotRow extends DataClass implements Insertable<SnapshotRow> {
       totalValue: serializer.fromJson<double>(json['totalValue']),
       totalCost: serializer.fromJson<double>(json['totalCost']),
       liabilities: serializer.fromJson<double>(json['liabilities']),
+      holdingValues: serializer.fromJson<String?>(json['holdingValues']),
       createdAt: serializer.fromJson<DateTime>(json['createdAt']),
     );
   }
@@ -3280,6 +3317,7 @@ class SnapshotRow extends DataClass implements Insertable<SnapshotRow> {
       'totalValue': serializer.toJson<double>(totalValue),
       'totalCost': serializer.toJson<double>(totalCost),
       'liabilities': serializer.toJson<double>(liabilities),
+      'holdingValues': serializer.toJson<String?>(holdingValues),
       'createdAt': serializer.toJson<DateTime>(createdAt),
     };
   }
@@ -3290,6 +3328,7 @@ class SnapshotRow extends DataClass implements Insertable<SnapshotRow> {
     double? totalValue,
     double? totalCost,
     double? liabilities,
+    Value<String?> holdingValues = const Value.absent(),
     DateTime? createdAt,
   }) => SnapshotRow(
     date: date ?? this.date,
@@ -3297,6 +3336,9 @@ class SnapshotRow extends DataClass implements Insertable<SnapshotRow> {
     totalValue: totalValue ?? this.totalValue,
     totalCost: totalCost ?? this.totalCost,
     liabilities: liabilities ?? this.liabilities,
+    holdingValues: holdingValues.present
+        ? holdingValues.value
+        : this.holdingValues,
     createdAt: createdAt ?? this.createdAt,
   );
   SnapshotRow copyWithCompanion(SnapshotsCompanion data) {
@@ -3310,6 +3352,9 @@ class SnapshotRow extends DataClass implements Insertable<SnapshotRow> {
       liabilities: data.liabilities.present
           ? data.liabilities.value
           : this.liabilities,
+      holdingValues: data.holdingValues.present
+          ? data.holdingValues.value
+          : this.holdingValues,
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
     );
   }
@@ -3322,6 +3367,7 @@ class SnapshotRow extends DataClass implements Insertable<SnapshotRow> {
           ..write('totalValue: $totalValue, ')
           ..write('totalCost: $totalCost, ')
           ..write('liabilities: $liabilities, ')
+          ..write('holdingValues: $holdingValues, ')
           ..write('createdAt: $createdAt')
           ..write(')'))
         .toString();
@@ -3334,6 +3380,7 @@ class SnapshotRow extends DataClass implements Insertable<SnapshotRow> {
     totalValue,
     totalCost,
     liabilities,
+    holdingValues,
     createdAt,
   );
   @override
@@ -3345,6 +3392,7 @@ class SnapshotRow extends DataClass implements Insertable<SnapshotRow> {
           other.totalValue == this.totalValue &&
           other.totalCost == this.totalCost &&
           other.liabilities == this.liabilities &&
+          other.holdingValues == this.holdingValues &&
           other.createdAt == this.createdAt);
 }
 
@@ -3354,6 +3402,7 @@ class SnapshotsCompanion extends UpdateCompanion<SnapshotRow> {
   final Value<double> totalValue;
   final Value<double> totalCost;
   final Value<double> liabilities;
+  final Value<String?> holdingValues;
   final Value<DateTime> createdAt;
   final Value<int> rowid;
   const SnapshotsCompanion({
@@ -3362,6 +3411,7 @@ class SnapshotsCompanion extends UpdateCompanion<SnapshotRow> {
     this.totalValue = const Value.absent(),
     this.totalCost = const Value.absent(),
     this.liabilities = const Value.absent(),
+    this.holdingValues = const Value.absent(),
     this.createdAt = const Value.absent(),
     this.rowid = const Value.absent(),
   });
@@ -3371,6 +3421,7 @@ class SnapshotsCompanion extends UpdateCompanion<SnapshotRow> {
     required double totalValue,
     required double totalCost,
     this.liabilities = const Value.absent(),
+    this.holdingValues = const Value.absent(),
     this.createdAt = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : date = Value(date),
@@ -3382,6 +3433,7 @@ class SnapshotsCompanion extends UpdateCompanion<SnapshotRow> {
     Expression<double>? totalValue,
     Expression<double>? totalCost,
     Expression<double>? liabilities,
+    Expression<String>? holdingValues,
     Expression<DateTime>? createdAt,
     Expression<int>? rowid,
   }) {
@@ -3391,6 +3443,7 @@ class SnapshotsCompanion extends UpdateCompanion<SnapshotRow> {
       if (totalValue != null) 'total_value': totalValue,
       if (totalCost != null) 'total_cost': totalCost,
       if (liabilities != null) 'liabilities': liabilities,
+      if (holdingValues != null) 'holding_values': holdingValues,
       if (createdAt != null) 'created_at': createdAt,
       if (rowid != null) 'rowid': rowid,
     });
@@ -3402,6 +3455,7 @@ class SnapshotsCompanion extends UpdateCompanion<SnapshotRow> {
     Value<double>? totalValue,
     Value<double>? totalCost,
     Value<double>? liabilities,
+    Value<String?>? holdingValues,
     Value<DateTime>? createdAt,
     Value<int>? rowid,
   }) {
@@ -3411,6 +3465,7 @@ class SnapshotsCompanion extends UpdateCompanion<SnapshotRow> {
       totalValue: totalValue ?? this.totalValue,
       totalCost: totalCost ?? this.totalCost,
       liabilities: liabilities ?? this.liabilities,
+      holdingValues: holdingValues ?? this.holdingValues,
       createdAt: createdAt ?? this.createdAt,
       rowid: rowid ?? this.rowid,
     );
@@ -3434,6 +3489,9 @@ class SnapshotsCompanion extends UpdateCompanion<SnapshotRow> {
     if (liabilities.present) {
       map['liabilities'] = Variable<double>(liabilities.value);
     }
+    if (holdingValues.present) {
+      map['holding_values'] = Variable<String>(holdingValues.value);
+    }
     if (createdAt.present) {
       map['created_at'] = Variable<DateTime>(createdAt.value);
     }
@@ -3451,6 +3509,7 @@ class SnapshotsCompanion extends UpdateCompanion<SnapshotRow> {
           ..write('totalValue: $totalValue, ')
           ..write('totalCost: $totalCost, ')
           ..write('liabilities: $liabilities, ')
+          ..write('holdingValues: $holdingValues, ')
           ..write('createdAt: $createdAt, ')
           ..write('rowid: $rowid')
           ..write(')'))
@@ -6859,6 +6918,7 @@ typedef $$SnapshotsTableCreateCompanionBuilder =
       required double totalValue,
       required double totalCost,
       Value<double> liabilities,
+      Value<String?> holdingValues,
       Value<DateTime> createdAt,
       Value<int> rowid,
     });
@@ -6869,6 +6929,7 @@ typedef $$SnapshotsTableUpdateCompanionBuilder =
       Value<double> totalValue,
       Value<double> totalCost,
       Value<double> liabilities,
+      Value<String?> holdingValues,
       Value<DateTime> createdAt,
       Value<int> rowid,
     });
@@ -6904,6 +6965,11 @@ class $$SnapshotsTableFilterComposer
 
   ColumnFilters<double> get liabilities => $composableBuilder(
     column: $table.liabilities,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get holdingValues => $composableBuilder(
+    column: $table.holdingValues,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -6947,6 +7013,11 @@ class $$SnapshotsTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<String> get holdingValues => $composableBuilder(
+    column: $table.holdingValues,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<DateTime> get createdAt => $composableBuilder(
     column: $table.createdAt,
     builder: (column) => ColumnOrderings(column),
@@ -6978,6 +7049,11 @@ class $$SnapshotsTableAnnotationComposer
 
   GeneratedColumn<double> get liabilities => $composableBuilder(
     column: $table.liabilities,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get holdingValues => $composableBuilder(
+    column: $table.holdingValues,
     builder: (column) => column,
   );
 
@@ -7021,6 +7097,7 @@ class $$SnapshotsTableTableManager
                 Value<double> totalValue = const Value.absent(),
                 Value<double> totalCost = const Value.absent(),
                 Value<double> liabilities = const Value.absent(),
+                Value<String?> holdingValues = const Value.absent(),
                 Value<DateTime> createdAt = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => SnapshotsCompanion(
@@ -7029,6 +7106,7 @@ class $$SnapshotsTableTableManager
                 totalValue: totalValue,
                 totalCost: totalCost,
                 liabilities: liabilities,
+                holdingValues: holdingValues,
                 createdAt: createdAt,
                 rowid: rowid,
               ),
@@ -7039,6 +7117,7 @@ class $$SnapshotsTableTableManager
                 required double totalValue,
                 required double totalCost,
                 Value<double> liabilities = const Value.absent(),
+                Value<String?> holdingValues = const Value.absent(),
                 Value<DateTime> createdAt = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => SnapshotsCompanion.insert(
@@ -7047,6 +7126,7 @@ class $$SnapshotsTableTableManager
                 totalValue: totalValue,
                 totalCost: totalCost,
                 liabilities: liabilities,
+                holdingValues: holdingValues,
                 createdAt: createdAt,
                 rowid: rowid,
               ),

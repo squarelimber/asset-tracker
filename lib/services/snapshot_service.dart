@@ -1,10 +1,13 @@
 import 'package:drift/drift.dart';
 
 import '../core/formats.dart';
+import '../core/enums.dart';
 import '../core/symbols.dart';
 import '../data/asset_dao.dart';
 import '../data/database.dart';
 import '../domain/portfolio_calculator.dart';
+import '../domain/holding_cost.dart';
+import '../domain/holding_valuation.dart';
 import 'market/market_service.dart';
 
 /// Records one net-worth snapshot per day (per currency).
@@ -17,11 +20,8 @@ import 'market/market_service.dart';
 /// backfill (web) and runs whose history fetch failed still get a row for
 /// today instead of an empty calendar cell.
 class SnapshotService {
-  SnapshotService(
-    this._dao, {
-    DateTime Function()? clock,
-    this._market,
-  }) : _clock = clock ?? DateTime.now;
+  SnapshotService(this._dao, {DateTime Function()? clock, this._market})
+    : _clock = clock ?? DateTime.now;
 
   final AssetDao _dao;
   final DateTime Function() _clock;
@@ -66,22 +66,48 @@ class SnapshotService {
     // the day instead: an empty cell is recoverable, a synchronised wrong
     // total is not. A later refresh with real rates fills it in.
     if (missingCnyRates(currencies, rates).isNotEmpty) return;
-    final summary =
-        const PortfolioCalculator().compute(holdings, cnyRates: rates);
+    final summary = const PortfolioCalculator().compute(
+      holdings,
+      cnyRates: rates,
+    );
 
-    await _dao.upsertSnapshot(SnapshotsCompanion.insert(
-      date: dateKey,
-      currency: const Value('CNY'),
-      totalValue: summary.netWorth,
-      totalCost: summary.totalCost,
-      liabilities: Value(summary.totalLiabilities),
-      // Written explicitly, even though the column has a DB default: the
-      // column doubles as the cross-device last-write-wins version (see
-      // SyncFormatter.snapshotToRow) and `insertOnConflictUpdate` only
-      // updates the columns a companion actually carries. Leaving it
-      // implicit froze the version at the day's first write, so a corrected
-      // rewrite could never win the merge on another device.
-      createdAt: Value(now),
-    ));
+    await _dao.upsertSnapshot(
+      SnapshotsCompanion.insert(
+        date: dateKey,
+        currency: const Value('CNY'),
+        totalValue: summary.netWorth,
+        totalCost: summary.totalCost,
+        liabilities: Value(summary.totalLiabilities),
+        holdingValues: Value(
+          encodeHoldingValues([
+            for (final h in holdings)
+              DayHoldingValue(
+                holdingId: h.id,
+                name: h.name,
+                type: AssetType.fromStorage(h.assetType),
+                value:
+                    (AssetType.fromStorage(h.assetType).isAmountBased
+                        ? h.quantity
+                        : h.quantity * h.latestPrice) *
+                    valueRateOf(h, rates),
+                cost: h.assetType == 'liability'
+                    ? 0
+                    : (AssetType.fromStorage(h.assetType).isAmountBased
+                              ? effectiveCostOf(h)
+                              : h.quantity * h.costPrice) *
+                          costRateOf(h, rates),
+                liability: h.assetType == 'liability',
+              ),
+          ]),
+        ),
+        // Written explicitly, even though the column has a DB default: the
+        // column doubles as the cross-device last-write-wins version (see
+        // SyncFormatter.snapshotToRow) and `insertOnConflictUpdate` only
+        // updates the columns a companion actually carries. Leaving it
+        // implicit froze the version at the day's first write, so a corrected
+        // rewrite could never win the merge on another device.
+        createdAt: Value(now),
+      ),
+    );
   }
 }

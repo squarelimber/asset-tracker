@@ -114,120 +114,133 @@ class BackupService {
         final ruleIds = _effectiveIdList(rules);
         for (var i = 0; i < accounts.length; i++) {
           final a = accounts[i];
-          await _dao.createAccount(AccountsCompanion.insert(
-            id: _idValue(accountIds, i),
-            name: a['name']?.toString() ?? '',
-            type: a['type']?.toString() ?? 'cash',
-            currency: Value(a['currency']?.toString() ?? 'CNY'),
-            note: a['note'] == null
-                ? const Value.absent()
-                : Value(a['note'].toString()),
-            createdAt: Value(_parseDate(a['createdAt']) ?? DateTime.now()),
-            updatedAt: Value(restoredAt),
-          ));
+          await _dao.createAccount(
+            AccountsCompanion.insert(
+              id: _idValue(accountIds, i),
+              name: a['name']?.toString() ?? '',
+              type: a['type']?.toString() ?? 'cash',
+              currency: Value(a['currency']?.toString() ?? 'CNY'),
+              note: a['note'] == null
+                  ? const Value.absent()
+                  : Value(a['note'].toString()),
+              createdAt: Value(_parseDate(a['createdAt']) ?? DateTime.now()),
+              updatedAt: Value(restoredAt),
+            ),
+          );
         }
         for (var i = 0; i < holdings.length; i++) {
           final h = holdings[i];
-          await _dao.createHolding(HoldingsCompanion.insert(
-            id: _idValue(holdingIds, i),
-            accountId: (h['accountId'] as num?)?.toInt() ?? 0,
-            name: h['name']?.toString() ?? '',
-            assetType: h['assetType']?.toString() ?? 'cash',
-            marketSource: Value(h['marketSource']?.toString() ?? 'manual'),
-            symbol: h['symbol'] == null
-                ? const Value.absent()
-                : Value(h['symbol'].toString()),
-            quantity: Value((h['quantity'] as num?)?.toDouble() ?? 0),
-            costPrice: Value((h['costPrice'] as num?)?.toDouble() ?? 0),
-            costRecorded: Value(h['costRecorded'] == null
-                // Backups written before the flag: every positive cost had
-                // been recorded explicitly and a 0 meant "unset". Mirrors the
-                // v11 -> v12 migration so a restore reads the same numbers.
-                ? ((h['costPrice'] as num?)?.toDouble() ?? 0) > 0
-                : h['costRecorded'] == true),
-            latestPrice: Value((h['latestPrice'] as num?)?.toDouble() ?? 0),
-            costFxRate: h['costFxRate'] == null
-                ? const Value.absent()
-                : Value((h['costFxRate'] as num).toDouble()),
-            purchaseDate: h['purchaseDate'] == null
-                ? const Value.absent()
-                : Value(_parseDate(h['purchaseDate']) ?? DateTime.now()),
-            riskLevel: h['riskLevel'] == null
-                ? const Value.absent()
-                : Value(h['riskLevel'].toString()),
-            categoryOverride: h['categoryOverride'] == null
-                ? const Value.absent()
-                : Value(h['categoryOverride'].toString()),
-            currency: Value(h['currency']?.toString() ?? 'CNY'),
-            note: h['note'] == null
-                ? const Value.absent()
-                : Value(h['note'].toString()),
-            createdAt: Value(_parseDate(h['createdAt']) ?? DateTime.now()),
-            updatedAt: Value(restoredAt),
-          ));
+          await _dao.createHolding(
+            HoldingsCompanion.insert(
+              id: _idValue(holdingIds, i),
+              accountId: (h['accountId'] as num?)?.toInt() ?? 0,
+              name: h['name']?.toString() ?? '',
+              assetType: h['assetType']?.toString() ?? 'cash',
+              marketSource: Value(h['marketSource']?.toString() ?? 'manual'),
+              symbol: h['symbol'] == null
+                  ? const Value.absent()
+                  : Value(h['symbol'].toString()),
+              quantity: Value((h['quantity'] as num?)?.toDouble() ?? 0),
+              costPrice: Value((h['costPrice'] as num?)?.toDouble() ?? 0),
+              costRecorded: Value(
+                h['costRecorded'] == null
+                    // Backups written before the flag: every positive cost had
+                    // been recorded explicitly and a 0 meant "unset". Mirrors the
+                    // v11 -> v12 migration so a restore reads the same numbers.
+                    ? ((h['costPrice'] as num?)?.toDouble() ?? 0) > 0
+                    : h['costRecorded'] == true,
+              ),
+              latestPrice: Value((h['latestPrice'] as num?)?.toDouble() ?? 0),
+              costFxRate: h['costFxRate'] == null
+                  ? const Value.absent()
+                  : Value((h['costFxRate'] as num).toDouble()),
+              purchaseDate: h['purchaseDate'] == null
+                  ? const Value.absent()
+                  : Value(_parseDate(h['purchaseDate']) ?? DateTime.now()),
+              riskLevel: h['riskLevel'] == null
+                  ? const Value.absent()
+                  : Value(h['riskLevel'].toString()),
+              categoryOverride: h['categoryOverride'] == null
+                  ? const Value.absent()
+                  : Value(h['categoryOverride'].toString()),
+              currency: Value(h['currency']?.toString() ?? 'CNY'),
+              note: h['note'] == null
+                  ? const Value.absent()
+                  : Value(h['note'].toString()),
+              createdAt: Value(_parseDate(h['createdAt']) ?? DateTime.now()),
+              updatedAt: Value(restoredAt),
+            ),
+          );
         }
         for (var i = 0; i < transactions.length; i++) {
           final t = transactions[i];
-          await _dao.createTransaction(TransactionsCompanion.insert(
-            id: _idValue(transactionIds, i),
-            accountId: (t['accountId'] as num?)?.toInt() ?? 0,
-            holdingId: t['holdingId'] == null
-                ? const Value.absent()
-                : Value((t['holdingId'] as num).toInt()),
-            cashSourceId: t['cashSourceId'] == null
-                ? const Value.absent()
-                : Value((t['cashSourceId'] as num).toInt()),
-            cashTargetId: t['cashTargetId'] == null
-                ? const Value.absent()
-                : Value((t['cashTargetId'] as num).toInt()),
-            type: t['type']?.toString() ?? 'transfer_in',
-            quantity: t['quantity'] == null
-                ? const Value.absent()
-                : Value((t['quantity'] as num).toDouble()),
-            price: t['price'] == null
-                ? const Value.absent()
-                : Value((t['price'] as num).toDouble()),
-            amount: (t['amount'] as num?)?.toDouble() ?? 0,
-            currency: Value(t['currency']?.toString() ?? 'CNY'),
-            occurredAt: _parseDate(t['occurredAt']) ?? DateTime.now(),
-            note: t['note'] == null
-                ? const Value.absent()
-                : Value(t['note'].toString()),
-            costMoved: t['costMoved'] == null
-                ? const Value.absent()
-                : Value(t['costMoved'] == true),
-            // Absent in backups taken before the column existed; the replay
-            // then falls back to the raw amount (the legacy behaviour).
-            costMovedAmount: t['costMovedAmount'] == null
-                ? const Value.absent()
-                : Value((t['costMovedAmount'] as num).toDouble()),
-            internalMove: t['internalMove'] == null
-                ? const Value.absent()
-                : Value(t['internalMove'] == true),
-            updatedAt: Value(restoredAt),
-          ));
+          await _dao.createTransaction(
+            TransactionsCompanion.insert(
+              id: _idValue(transactionIds, i),
+              accountId: (t['accountId'] as num?)?.toInt() ?? 0,
+              holdingId: t['holdingId'] == null
+                  ? const Value.absent()
+                  : Value((t['holdingId'] as num).toInt()),
+              cashSourceId: t['cashSourceId'] == null
+                  ? const Value.absent()
+                  : Value((t['cashSourceId'] as num).toInt()),
+              cashTargetId: t['cashTargetId'] == null
+                  ? const Value.absent()
+                  : Value((t['cashTargetId'] as num).toInt()),
+              type: t['type']?.toString() ?? 'transfer_in',
+              quantity: t['quantity'] == null
+                  ? const Value.absent()
+                  : Value((t['quantity'] as num).toDouble()),
+              price: t['price'] == null
+                  ? const Value.absent()
+                  : Value((t['price'] as num).toDouble()),
+              amount: (t['amount'] as num?)?.toDouble() ?? 0,
+              currency: Value(t['currency']?.toString() ?? 'CNY'),
+              occurredAt: _parseDate(t['occurredAt']) ?? DateTime.now(),
+              note: t['note'] == null
+                  ? const Value.absent()
+                  : Value(t['note'].toString()),
+              costMoved: t['costMoved'] == null
+                  ? const Value.absent()
+                  : Value(t['costMoved'] == true),
+              // Absent in backups taken before the column existed; the replay
+              // then falls back to the raw amount (the legacy behaviour).
+              costMovedAmount: t['costMovedAmount'] == null
+                  ? const Value.absent()
+                  : Value((t['costMovedAmount'] as num).toDouble()),
+              internalMove: t['internalMove'] == null
+                  ? const Value.absent()
+                  : Value(t['internalMove'] == true),
+              updatedAt: Value(restoredAt),
+            ),
+          );
         }
         for (final s in snapshots) {
-          await _dao.upsertSnapshot(SnapshotsCompanion.insert(
-            date: s['date']?.toString() ?? '',
-            currency: Value(s['currency']?.toString() ?? 'CNY'),
-            totalValue: (s['totalValue'] as num?)?.toDouble() ?? 0,
-            totalCost: (s['totalCost'] as num?)?.toDouble() ?? 0,
-            liabilities: Value((s['liabilities'] as num?)?.toDouble() ?? 0),
-            createdAt: Value(_parseDate(s['createdAt']) ?? DateTime.now()),
-          ));
+          await _dao.upsertSnapshot(
+            SnapshotsCompanion.insert(
+              date: s['date']?.toString() ?? '',
+              currency: Value(s['currency']?.toString() ?? 'CNY'),
+              totalValue: (s['totalValue'] as num?)?.toDouble() ?? 0,
+              totalCost: (s['totalCost'] as num?)?.toDouble() ?? 0,
+              liabilities: Value((s['liabilities'] as num?)?.toDouble() ?? 0),
+              holdingValues: Value(s['holdingValues'] as String?),
+              createdAt: Value(_parseDate(s['createdAt']) ?? DateTime.now()),
+            ),
+          );
         }
         for (var i = 0; i < rules.length; i++) {
           final r = rules[i];
-          await _dao.createAlertRule(AlertRulesCompanion.insert(
-            id: _idValue(ruleIds, i),
-            type: r['type']?.toString() ?? 'concentration',
-            name: r['name']?.toString() ?? '',
-            params: Value(r['params']?.toString() ?? '{}'),
-            enabled: Value(r['enabled'] == true),
-            createdAt: Value(_parseDate(r['createdAt']) ?? DateTime.now()),
-            updatedAt: Value(restoredAt),
-          ));
+          await _dao.createAlertRule(
+            AlertRulesCompanion.insert(
+              id: _idValue(ruleIds, i),
+              type: r['type']?.toString() ?? 'concentration',
+              name: r['name']?.toString() ?? '',
+              params: Value(r['params']?.toString() ?? '{}'),
+              enabled: Value(r['enabled'] == true),
+              createdAt: Value(_parseDate(r['createdAt']) ?? DateTime.now()),
+              updatedAt: Value(restoredAt),
+            ),
+          );
         }
         // Restore carried-over settings (target-allocation plan). Absent
         // in older backups: skip, keeping the device's own settings.
@@ -320,75 +333,75 @@ class BackupService {
   }
 
   static Map<String, dynamic> _accountToJson(AccountRow a) => {
-        'id': a.id,
-        'name': a.name,
-        'type': a.type,
-        'currency': a.currency,
-        'note': a.note,
-        'createdAt': a.createdAt.toIso8601String(),
-        'updatedAt': a.updatedAt.toIso8601String(),
-      };
+    'id': a.id,
+    'name': a.name,
+    'type': a.type,
+    'currency': a.currency,
+    'note': a.note,
+    'createdAt': a.createdAt.toIso8601String(),
+    'updatedAt': a.updatedAt.toIso8601String(),
+  };
 
   static Map<String, dynamic> _holdingToJson(HoldingRow h) => {
-        'id': h.id,
-        'accountId': h.accountId,
-        'name': h.name,
-        'assetType': h.assetType,
-        'marketSource': h.marketSource,
-        'symbol': h.symbol,
-        'quantity': h.quantity,
-        'costPrice': h.costPrice,
-        'costRecorded': h.costRecorded,
-        'latestPrice': h.latestPrice,
-        'costFxRate': h.costFxRate,
-        'purchaseDate': h.purchaseDate?.toIso8601String(),
-        'riskLevel': h.riskLevel,
-        'categoryOverride': h.categoryOverride,
-        'currency': h.currency,
-        'note': h.note,
-        'createdAt': h.createdAt.toIso8601String(),
-        'updatedAt': h.updatedAt.toIso8601String(),
-      };
+    'id': h.id,
+    'accountId': h.accountId,
+    'name': h.name,
+    'assetType': h.assetType,
+    'marketSource': h.marketSource,
+    'symbol': h.symbol,
+    'quantity': h.quantity,
+    'costPrice': h.costPrice,
+    'costRecorded': h.costRecorded,
+    'latestPrice': h.latestPrice,
+    'costFxRate': h.costFxRate,
+    'purchaseDate': h.purchaseDate?.toIso8601String(),
+    'riskLevel': h.riskLevel,
+    'categoryOverride': h.categoryOverride,
+    'currency': h.currency,
+    'note': h.note,
+    'createdAt': h.createdAt.toIso8601String(),
+    'updatedAt': h.updatedAt.toIso8601String(),
+  };
 
   static Map<String, dynamic> _transactionToJson(TransactionRow t) => {
-        'id': t.id,
-        'accountId': t.accountId,
-        'holdingId': t.holdingId,
-        'cashSourceId': t.cashSourceId,
-        'cashTargetId': t.cashTargetId,
-        'type': t.type,
-        'quantity': t.quantity,
-        'price': t.price,
-        'amount': t.amount,
-        'currency': t.currency,
-        'occurredAt': t.occurredAt.toIso8601String(),
-        'note': t.note,
-        'costMoved': t.costMoved,
-        'costMovedAmount': t.costMovedAmount,
-        'internalMove': t.internalMove,
-        'updatedAt': t.updatedAt.toIso8601String(),
-      };
+    'id': t.id,
+    'accountId': t.accountId,
+    'holdingId': t.holdingId,
+    'cashSourceId': t.cashSourceId,
+    'cashTargetId': t.cashTargetId,
+    'type': t.type,
+    'quantity': t.quantity,
+    'price': t.price,
+    'amount': t.amount,
+    'currency': t.currency,
+    'occurredAt': t.occurredAt.toIso8601String(),
+    'note': t.note,
+    'costMoved': t.costMoved,
+    'costMovedAmount': t.costMovedAmount,
+    'internalMove': t.internalMove,
+    'updatedAt': t.updatedAt.toIso8601String(),
+  };
 
   static Map<String, dynamic> _snapshotToJson(SnapshotRow s) => {
-        'date': s.date,
-        'currency': s.currency,
-        'totalValue': s.totalValue,
-        'totalCost': s.totalCost,
-        'liabilities': s.liabilities,
-        'createdAt': s.createdAt.toIso8601String(),
-      };
+    'date': s.date,
+    'currency': s.currency,
+    'totalValue': s.totalValue,
+    'totalCost': s.totalCost,
+    'liabilities': s.liabilities,
+    if (s.holdingValues != null) 'holdingValues': s.holdingValues,
+    'createdAt': s.createdAt.toIso8601String(),
+  };
 
   static Map<String, dynamic> _ruleToJson(AlertRuleRow r) => {
-        'id': r.id,
-        'type': r.type,
-        'name': r.name,
-        'params': r.params,
-        'enabled': r.enabled,
-        'createdAt': r.createdAt.toIso8601String(),
-        'updatedAt': r.updatedAt.toIso8601String(),
-      };
+    'id': r.id,
+    'type': r.type,
+    'name': r.name,
+    'params': r.params,
+    'enabled': r.enabled,
+    'createdAt': r.createdAt.toIso8601String(),
+    'updatedAt': r.updatedAt.toIso8601String(),
+  };
 }
 
 /// Suggested file name for exports, e.g. asset_tracker_2026-08-08.json.
-String backupFileName([DateTime? now]) =>
-    'asset_tracker_${todayKey(now)}.json';
+String backupFileName([DateTime? now]) => 'asset_tracker_${todayKey(now)}.json';

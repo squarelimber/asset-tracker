@@ -18,14 +18,11 @@ import 'purchase_date_field.dart';
 /// directly parseable by double.tryParse.
 ///
 /// Used by the type-switch conversion, which WRITES the numbers it produces
-/// (4 decimals is the conversion's own precision), so this stays separate
-/// from the display-only [Formats.plainNum].
-String _plainNum(double v) {
-  if (v == v.roundToDouble()) return v.toInt().toString();
-  var s = v.toStringAsFixed(4);
-  s = s.replaceFirst(RegExp(r'\.?0+$'), '');
-  return s;
-}
+/// (4 decimals is the conversion's own precision) — hence the explicit
+/// `decimals: 4` rather than the display default of 3. Same rule and same
+/// trailing-zero stripping as [Formats.plainNum]; kept as a thin alias only
+/// so the conversion's intent (write back) stays readable at the call sites.
+String _plainNum(double v) => Formats.plainNum(v, decimals: 4);
 
 /// Reads an edited numeric field, keeping the EXACT stored value when the
 /// text was never touched.
@@ -75,7 +72,11 @@ Value<double?> _editFxRateValue(
 /// Label for a funding-source option: available balance / market value.
 String _fundingSourceLabel(HoldingRow h) {
   final t = AssetType.fromStorage(h.assetType);
-  final unit = h.latestPrice > 0 ? h.latestPrice : h.costPrice;
+  // Mirror the save-time deduction check: latestPrice -> costPrice -> 1.0, so
+  // the label never shows "可用 0" while the save would move the balance.
+  final unit = h.latestPrice > 0
+      ? h.latestPrice
+      : (h.costPrice > 0 ? h.costPrice : 1.0);
   final available = t.isAmountBased ? h.quantity : h.quantity * unit;
   return '${h.name} (${t.label}) · 可用 ${Formats.amount(available)}';
 }

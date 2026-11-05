@@ -11,7 +11,16 @@ class SectionHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final children = <Widget>[
-      Expanded(child: Text(label, style: T.label(size: 12, color: T.text2))),
+      Expanded(
+        child: Text(
+          label,
+          style: const TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+            color: T.text1,
+          ),
+        ),
+      ),
     ];
     if (trailing != null) children.add(trailing!);
     return Padding(
@@ -34,8 +43,14 @@ class StickySectionHeader extends SliverPersistentHeaderDelegate {
   double get minExtent => 36;
 
   @override
-  Widget build(BuildContext context, double shrinkOffset, bool overlapsContent) =>
-      Container(color: T.bg, child: SectionHeader(label: label, trailing: trailing));
+  Widget build(
+    BuildContext context,
+    double shrinkOffset,
+    bool overlapsContent,
+  ) => Container(
+    color: T.bg,
+    child: SectionHeader(label: label, trailing: trailing),
+  );
 
   @override
   bool shouldRebuild(covariant StickySectionHeader old) =>

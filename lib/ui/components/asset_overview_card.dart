@@ -2,16 +2,8 @@ import 'package:flutter/material.dart';
 
 import '../../core/formats.dart';
 import '../tokens.dart';
-import 'delta_text.dart';
-import 'terminal_card.dart';
 
-/// One "资产总览" card holding the whole balance-sheet snapshot:
-/// 总资产 / 总负债 / 净资产 / 今日盈亏.
-///
-/// Desktop renders a single 4-column row with 1px hairlines between the
-/// cells. Phone renders a bank-card layout: a dark gradient card whose
-/// hero cell is 净资产 with 今日盈亏 right beside the main value, and a
-/// muted footer line carrying 总资产 / 总负债.
+/// Balance-sheet panel. Amounts share a baseline and never wrap across lines.
 class AssetOverviewCard extends StatelessWidget {
   const AssetOverviewCard({
     super.key,
@@ -22,248 +14,222 @@ class AssetOverviewCard extends StatelessWidget {
     this.todayPct,
     this.hidden = false,
     this.onToggleHidden,
+    this.onOpenEarnings,
   });
 
   final double totalAssets;
   final double totalLiabilities;
   final double netWorth;
-  final double todayProfit;
-
-  /// Day-over-day change of net worth, shown under 净资产.
+  final double? todayProfit;
   final double? todayPct;
-
-  /// Mask all amounts (hide-amounts toggle).
   final bool hidden;
-
-  /// Toggles amount visibility; when present the card renders an eye button
-  /// in its top-right corner (the phone bank-card layout only). Null keeps
-  /// the card non-interactive (the app-bar eye on wide screens).
   final VoidCallback? onToggleHidden;
+  final VoidCallback? onOpenEarnings;
 
-  String _amount(double v) => hidden ? Formats.masked() : Formats.amount(v);
-
-  Border? _borders(int index, bool desktop) {
-    final side = const BorderSide(color: T.border, width: 1);
-    if (desktop) {
-      return index > 0 ? Border(left: side) : null;
-    }
-    // 2x2: 0 总资产, 1 总负债, 2 净资产, 3 今日盈亏
-    return switch (index) {
-      1 => Border(left: side),
-      2 => Border(top: side),
-      3 => Border(top: side, left: side),
-      _ => null,
-    };
-  }
-
-  Widget _cell(String label, String text, {Color? color, bool hero = false}) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(label, style: T.label()),
-          const SizedBox(height: T.s1),
-          Text(
-            text,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: T.mono(
-              size: hero ? 24 : 20,
-              weight: hero ? FontWeight.w700 : FontWeight.w600,
-              color: color ?? T.text1,
-            ),
-          ),
-          if (hero && todayPct != null) ...[
-            const SizedBox(height: T.s1),
-            DeltaText(value: todayPct!),
-          ],
-        ],
-      ),
-    );
-  }
+  String _amount(double value) =>
+      hidden ? Formats.masked() : Formats.amount(value);
+  Color get _profitColor =>
+      todayProfit == null ? T.text3 : T.changeColor(todayProfit!);
+  String get _profit => todayProfit == null
+      ? '--'
+      : hidden
+      ? Formats.masked()
+      : '${todayProfit! >= 0 ? '+' : ''}${Formats.amount(todayProfit!)}';
+  String? get _percentage => todayPct == null
+      ? null
+      : '${todayPct! >= 0 ? '+' : ''}${Formats.pct(todayPct!)}';
 
   @override
   Widget build(BuildContext context) {
-    final width = MediaQuery.sizeOf(context).width;
-    final desktop = width >= 1100;
-    if (!desktop) {
-      return _buildBankCard(context);
-    }
-
-    const columns = 4;
-
-    final cells = <Widget>[
-      _cell('总资产', _amount(totalAssets)),
-      _cell('总负债', _amount(totalLiabilities), color: T.text2),
-      _cell('净资产', _amount(netWorth), hero: true),
-      _cell(
-        '今日盈亏',
-        '${todayProfit >= 0 ? '+' : ''}${_amount(todayProfit)}',
-        color: T.changeColor(todayProfit),
+    final wide = MediaQuery.sizeOf(context).width >= 1100;
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [Color(0xFF2A3C50), Color(0xFF27313F), Color(0xFF282B33)],
+          stops: [0, 0.55, 1],
+        ),
+        borderRadius: BorderRadius.circular(T.rCard),
+        border: Border.all(color: T.border),
       ),
-    ];
+      child: wide ? _desktop() : _compact(),
+    );
+  }
 
-    final rows = <List<Widget>>[];
-    for (var i = 0; i < cells.length; i += columns) {
-      rows.add(cells.sublist(
-        i,
-        i + columns > cells.length ? cells.length : i + columns,
-      ));
-    }
-
-    return TerminalCard(
-      padding: EdgeInsets.zero,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
+  Widget _desktop() => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Row(
         children: [
-          for (var r = 0; r < rows.length; r++)
-            IntrinsicHeight(
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  for (var c = 0; c < rows[r].length; c++)
-                    Expanded(
-                      child: Container(
-                        decoration: BoxDecoration(
-                          border: _borders(r * columns + c, desktop),
-                        ),
-                        child: rows[r][c],
-                      ),
-                    ),
-                ],
+          const Text(
+            '资产总览',
+            style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+          ),
+          const Spacer(),
+          if (onOpenEarnings != null) ...[
+            TextButton.icon(
+              onPressed: onOpenEarnings,
+              icon: const Icon(Icons.calendar_month_outlined, size: 16),
+              label: const Text('收益日历'),
+            ),
+            const SizedBox(width: 12),
+          ],
+          Text('折合人民币 / CNY', style: T.label(size: 11, color: T.text3)),
+        ],
+      ),
+      const SizedBox(height: 20),
+      IntrinsicHeight(
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Expanded(
+              flex: 3,
+              child: _metric('净资产', _amount(netWorth), size: 28),
+            ),
+            _divider(),
+            Expanded(
+              flex: 2,
+              child: _earningsAction(
+                _metric(
+                  '今日盈亏',
+                  _profit,
+                  color: _profitColor,
+                  detail: _percentage,
+                ),
               ),
+            ),
+            _divider(),
+            Expanded(flex: 2, child: _metric('总资产', _amount(totalAssets))),
+            _divider(),
+            Expanded(
+              flex: 2,
+              child: _metric('总负债', _amount(totalLiabilities), color: T.text2),
+            ),
+          ],
+        ),
+      ),
+    ],
+  );
+
+  Widget _compact() => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Row(
+        children: [
+          Text('净资产', style: T.label(size: 12)),
+          const SizedBox(width: 8),
+          Text('CNY', style: T.mono(size: 10, color: T.text2)),
+          const Spacer(),
+          if (onOpenEarnings != null)
+            IconButton(
+              tooltip: '收益日历',
+              onPressed: onOpenEarnings,
+              icon: const Icon(Icons.calendar_month_outlined, size: 18),
+            ),
+          if (onToggleHidden != null)
+            IconButton(
+              tooltip: hidden ? '显示金额' : '隐藏金额',
+              onPressed: onToggleHidden,
+              icon: Icon(
+                hidden
+                    ? Icons.visibility_off_outlined
+                    : Icons.visibility_outlined,
+                size: 18,
+              ),
+              visualDensity: VisualDensity.compact,
             ),
         ],
       ),
-    );
-  }
-
-  /// Phone: bank-card layout — 深色渐变 + 圆角大卡，净资产为主角。
-  Widget _buildBankCard(BuildContext context) {
-    // 深蓝 → 深紫的暗渐变，保持终端深色调；右上一团淡光晕模拟卡面反光。
-    const gradient = LinearGradient(
-      begin: Alignment.topLeft,
-      end: Alignment.bottomRight,
-      colors: [
-        Color(0xFF1C2740), // 深靛蓝
-        Color(0xFF25203E), // 深蓝紫
-        Color(0xFF26203A), // 暗紫
-      ],
-      stops: [0.0, 0.55, 1.0],
-    );
-
-    String pctText() {
-      final pct = todayPct;
-      if (pct == null) return '';
-      return '${pct >= 0 ? '+' : ''}${Formats.pct1(pct)}';
-    }
-
-    // 主数值右边的今日盈亏标：金额（掩码隐藏时只显示 pct）。
-    Widget profitBadge() {
-      final color = T.changeColor(todayProfit);
-      final text = hidden
-          ? (todayPct == null ? Formats.masked() : pctText())
-          : '${todayProfit >= 0 ? '+' : ''}${Formats.amount(todayProfit)}'
-              '${todayPct == null ? '' : '  ${pctText()}'}';
-      return Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-        decoration: BoxDecoration(
-          color: color.withValues(alpha: 0.16),
-          borderRadius: BorderRadius.circular(T.rPill),
-        ),
-        child: Text(
-          text,
-          maxLines: 1,
-          style: T.mono(size: 12, weight: FontWeight.w700, color: color),
-        ),
-      );
-    }
-
-    return Container(
-      // 与 TerminalCard 相同的圆角/边框语言，但外层自绘渐变。
-      decoration: BoxDecoration(
-        gradient: gradient,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: T.border),
-        boxShadow: const [
-          // 右上一团微光，模拟卡面高光且不破坏深色基调。
-          BoxShadow(
-            color: Color(0x2458A6FF), // accent 14% 上发光
-            offset: Offset(-24, -18),
-            blurRadius: 48,
-          ),
-          BoxShadow(
-            color: Color(0x143E2A66),
-            offset: Offset(20, 18),
-            blurRadius: 60,
-          ),
-        ],
-      ),
-      padding: const EdgeInsets.fromLTRB(20, 18, 20, 16),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Text('净资产', style: T.label(size: 12, color: T.text2)),
-              const Spacer(),
-              if (onToggleHidden != null)
-                IconButton(
-                  tooltip: hidden ? '显示金额' : '隐藏金额',
-                  visualDensity: VisualDensity.compact,
-                  onPressed: onToggleHidden,
-                  icon: Icon(
-                    hidden ? Icons.visibility_off_outlined : Icons.visibility_outlined,
-                    size: 18,
-                    color: T.text2,
-                  ),
-                ),
-            ],
-          ),
-          const SizedBox(height: 6),
-          // 主行：主数值 + 今日盈亏 pill。主数值放在固定高度容器里，
-          // FittedBox 只负责宽度方向等比缩小——隐藏（¥•••••）与显示长
-          // 金额时卡片高度恒定，不会“一会儿大一会儿小”。
-          Row(
-            children: [
-              Flexible(
-                child: SizedBox(
-                  height: 36,
-                  child: FittedBox(
-                    fit: BoxFit.scaleDown,
-                    alignment: Alignment.centerLeft,
-                    child: Text(
-                      _amount(netWorth),
-                      maxLines: 1,
-                      style: T.mono(
-                        size: 26,
-                        weight: FontWeight.w700,
-                        color: T.text1,
-                      ),
-                    ),
-                  ),
-                ),
+      _number(_amount(netWorth), size: 28),
+      const SizedBox(height: 14),
+      _earningsAction(
+        Row(
+          children: [
+            Text('今日盈亏', style: T.label()),
+            const SizedBox(width: 12),
+            Flexible(
+              child: Text(
+                _profit,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: T.mono(size: 14, color: _profitColor),
               ),
-              const SizedBox(width: 10),
-              profitBadge(),
+            ),
+            if (_percentage != null) ...[
+              const SizedBox(width: 8),
+              Text(_percentage!, style: T.mono(size: 11, color: _profitColor)),
             ],
-          ),
-          const SizedBox(height: 12),
-          Text(
-            '总资产 ${_compact(totalAssets)} · 负债 ${_compact(totalLiabilities)}',
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: T.mono(size: 12, color: T.text2),
+          ],
+        ),
+      ),
+      const Padding(
+        padding: EdgeInsets.symmetric(vertical: 16),
+        child: Divider(height: 1),
+      ),
+      Row(
+        children: [
+          Expanded(child: _metric('总资产', _amount(totalAssets), size: 16)),
+          const SizedBox(width: 20),
+          Expanded(
+            child: _metric(
+              '总负债',
+              _amount(totalLiabilities),
+              size: 16,
+              color: T.text2,
+            ),
           ),
         ],
       ),
-    );
-  }
+    ],
+  );
 
-  /// 底部小字用紧凑金额（太长会吃掉整行宽度）。
-  String _compact(double v) =>
-      hidden ? Formats.masked() : Formats.amountCompact(v);
+  Widget _divider() => const Padding(
+    padding: EdgeInsets.symmetric(horizontal: 20),
+    child: VerticalDivider(width: 1, color: T.borderSoft),
+  );
+
+  Widget _earningsAction(Widget child) => onOpenEarnings == null
+      ? child
+      : Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: onOpenEarnings,
+            borderRadius: BorderRadius.circular(T.rInput),
+            child: Tooltip(message: '查看当日收益明细', child: child),
+          ),
+        );
+
+  Widget _number(String text, {required double size, Color? color}) => SizedBox(
+    height: size + 8,
+    child: FittedBox(
+      fit: BoxFit.scaleDown,
+      alignment: Alignment.centerLeft,
+      child: Text(
+        text,
+        maxLines: 1,
+        style: T.mono(size: size, weight: FontWeight.w500, color: color),
+      ),
+    ),
+  );
+
+  Widget _metric(
+    String label,
+    String value, {
+    double size = 22,
+    Color? color,
+    String? detail,
+  }) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Text(label, style: T.label(size: 11)),
+      const SizedBox(height: 8),
+      _number(value, size: size, color: color),
+      if (detail != null) ...[
+        const SizedBox(height: 4),
+        Text(detail, style: T.mono(size: 11, color: color)),
+      ],
+    ],
+  );
 }

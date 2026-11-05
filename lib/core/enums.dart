@@ -4,10 +4,10 @@ import 'package:flutter/material.dart';
 /// A holding's effective risk = its manual riskLevel override, or the
 /// automatic mapping from its asset type.
 enum RiskLevel {
-  low('低风险', 'low', Color(0xFF26A69A)),
-  mediumLow('中低风险', 'medium_low', Color(0xFF4DB6AC)),
-  medium('中风险', 'medium', Color(0xFFFF9800)),
-  high('高风险', 'high', Color(0xFFE53935));
+  low('低风险', 'low', Color(0xFF88A79D)),
+  mediumLow('中低风险', 'medium_low', Color(0xFF9DB5AA)),
+  medium('中风险', 'medium', Color(0xFFC9AC6E)),
+  high('高风险', 'high', Color(0xFFC77D7D));
 
   const RiskLevel(this.label, this.storageName, this.color);
 
@@ -25,35 +25,49 @@ enum RiskLevel {
 
   /// Automatic risk mapping by asset type.
   static RiskLevel autoOf(AssetType type) => switch (type) {
-        AssetType.cash ||
-        AssetType.bankDeposit ||
-        AssetType.liquidWealth ||
-        AssetType.bankWealth =>
-          RiskLevel.low,
-        AssetType.gold => RiskLevel.mediumLow,
-        AssetType.bond => RiskLevel.mediumLow,
-        AssetType.futures => RiskLevel.high,
-        AssetType.mutualFund => RiskLevel.medium,
-        AssetType.stock || AssetType.etf || AssetType.crypto => RiskLevel.high,
-        AssetType.property || AssetType.liability => RiskLevel.mediumLow,
-      };
+    AssetType.cash ||
+    AssetType.bankDeposit ||
+    AssetType.liquidWealth ||
+    AssetType.bankWealth => RiskLevel.low,
+    AssetType.gold => RiskLevel.mediumLow,
+    AssetType.bond => RiskLevel.mediumLow,
+    AssetType.futures => RiskLevel.high,
+    AssetType.mutualFund => RiskLevel.medium,
+    AssetType.stock || AssetType.etf || AssetType.crypto => RiskLevel.high,
+    AssetType.property || AssetType.liability => RiskLevel.mediumLow,
+  };
 }
 
 /// Asset categories supported by the app.
 enum AssetType {
-  cash('现金', 'savings', Icons.payments_outlined, Color(0xFF42A5F5)),
-  bankDeposit('银行存款', 'bank_deposit', Icons.account_balance_outlined, Color(0xFF26A69A)),
-  liquidWealth('活期理财', 'liquid_wealth', Icons.savings_outlined, Color(0xFF29B6F6)),
-  bankWealth('银行理财', 'bank_wealth', Icons.handshake_outlined, Color(0xFFAB47BC)),
-  stock('股票', 'stock', Icons.show_chart, Color(0xFFEF5350)),
-  etf('场内基金', 'etf', Icons.candlestick_chart_outlined, Color(0xFFFFA726)),
-  mutualFund('场外基金', 'mutual_fund', Icons.pie_chart_outline, Color(0xFF5C6BC0)),
-  gold('积存金', 'gold', Icons.workspace_premium_outlined, Color(0xFFFFC107)),
-  bond('债券', 'bond', Icons.account_balance, Color(0xFF66BB6A)),
-  crypto('加密货币', 'crypto', Icons.currency_bitcoin, Color(0xFFEC407A)),
-  futures('期货', 'futures', Icons.trending_up, Color(0xFFFF7043)),
-  property('房产', 'property', Icons.home_outlined, Color(0xFF8D6E63)),
-  liability('负债', 'liability', Icons.credit_card, Color(0xFF757575));
+  cash('现金', 'savings', Icons.payments_outlined, Color(0xFF819EBA)),
+  bankDeposit(
+    '银行存款',
+    'bank_deposit',
+    Icons.account_balance_outlined,
+    Color(0xFF88A79D),
+  ),
+  liquidWealth(
+    '活期理财',
+    'liquid_wealth',
+    Icons.savings_outlined,
+    Color(0xFF89A3AC),
+  ),
+  bankWealth(
+    '银行理财',
+    'bank_wealth',
+    Icons.handshake_outlined,
+    Color(0xFFA79CBA),
+  ),
+  stock('股票', 'stock', Icons.show_chart, Color(0xFFC77D7D)),
+  etf('场内基金', 'etf', Icons.candlestick_chart_outlined, Color(0xFFBAA17B)),
+  mutualFund('场外基金', 'mutual_fund', Icons.pie_chart_outline, Color(0xFF8699B2)),
+  gold('积存金', 'gold', Icons.workspace_premium_outlined, Color(0xFFC9AC6E)),
+  bond('债券', 'bond', Icons.account_balance, Color(0xFF88A79D)),
+  crypto('加密货币', 'crypto', Icons.currency_bitcoin, Color(0xFFAF90A1)),
+  futures('期货', 'futures', Icons.trending_up, Color(0xFFB78E75)),
+  property('房产', 'property', Icons.home_outlined, Color(0xFFA09A91)),
+  liability('负债', 'liability', Icons.credit_card, Color(0xFF8B929B));
 
   const AssetType(this.label, this.storageName, this.icon, this.color);
 
@@ -75,24 +89,24 @@ enum AssetType {
 
   /// Whether this asset type is priced by market data.
   bool get isMarketLinked => switch (this) {
-        stock || etf || mutualFund || gold || crypto => true,
-        _ => false,
-      };
+    stock || etf || mutualFund || gold || crypto => true,
+    _ => false,
+  };
 
   /// Amount-based assets are tracked as a plain balance:
   /// quantity = current amount, costPrice = cumulative invested (optional).
   /// No price, no shares, no market code.
   bool get isAmountBased => switch (this) {
-        cash || bankDeposit || liquidWealth => true,
-        _ => false,
-      };
+    cash || bankDeposit || liquidWealth => true,
+    _ => false,
+  };
 
   /// Default market code for asset types with a standard quote symbol.
   /// Used when the user leaves the code empty (e.g. gold -> AU99.99).
   String? get defaultSymbol => switch (this) {
-        gold => 'AU99.99',
-        _ => null,
-      };
+    gold => 'AU99.99',
+    _ => null,
+  };
 
   /// High-level allocation category (债券/权益/黄金/商品/现金/房产/银行理财),
   /// grouping the finer asset types for the allocation view and the editable
@@ -100,27 +114,32 @@ enum AssetType {
   /// view (they are deducted from net worth); the mapping below only exists
   /// to keep the switch exhaustive.
   AssetCategory get category => switch (this) {
-        bond => AssetCategory.bond,
-        stock || etf || mutualFund => AssetCategory.equity,
-        gold => AssetCategory.gold,
-        crypto || futures => AssetCategory.commodity,
-        cash || bankDeposit || liquidWealth => AssetCategory.cash,
-        property => AssetCategory.property,
-        bankWealth => AssetCategory.bankWealth,
-        liability => AssetCategory.cash,
-      };
+    bond => AssetCategory.bond,
+    stock || etf || mutualFund => AssetCategory.equity,
+    gold => AssetCategory.gold,
+    crypto || futures => AssetCategory.commodity,
+    cash || bankDeposit || liquidWealth => AssetCategory.cash,
+    property => AssetCategory.property,
+    bankWealth => AssetCategory.bankWealth,
+    liability => AssetCategory.cash,
+  };
 }
 
 /// Top-level asset categories used by the allocation view and the editable
 /// target-allocation plan (债券/权益/黄金/商品/现金/房产/银行理财).
 enum AssetCategory {
-  bond('债券', 'bond', Icons.account_balance, Color(0xFF66BB6A)),
-  equity('权益', 'equity', Icons.show_chart, Color(0xFFEF5350)),
-  gold('黄金', 'gold', Icons.workspace_premium_outlined, Color(0xFFFFC107)),
-  commodity('商品', 'commodity', Icons.currency_bitcoin, Color(0xFFEC407A)),
-  cash('现金', 'cash', Icons.payments_outlined, Color(0xFF42A5F5)),
-  property('房产', 'property', Icons.home_outlined, Color(0xFF8D6E63)),
-  bankWealth('银行理财', 'bank_wealth', Icons.handshake_outlined, Color(0xFFAB47BC));
+  bond('债券', 'bond', Icons.account_balance, Color(0xFF88A79D)),
+  equity('权益', 'equity', Icons.show_chart, Color(0xFFC77D7D)),
+  gold('黄金', 'gold', Icons.workspace_premium_outlined, Color(0xFFC9AC6E)),
+  commodity('商品', 'commodity', Icons.currency_bitcoin, Color(0xFFAF90A1)),
+  cash('现金', 'cash', Icons.payments_outlined, Color(0xFF819EBA)),
+  property('房产', 'property', Icons.home_outlined, Color(0xFFA09A91)),
+  bankWealth(
+    '银行理财',
+    'bank_wealth',
+    Icons.handshake_outlined,
+    Color(0xFFA79CBA),
+  );
 
   const AssetCategory(this.label, this.storageName, this.icon, this.color);
 

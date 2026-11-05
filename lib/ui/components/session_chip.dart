@@ -26,8 +26,10 @@ class SessionChip extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
         decoration: BoxDecoration(
           color: color.withValues(alpha: active ? 0.14 : 0.06),
-          borderRadius: BorderRadius.circular(T.rPill),
-          border: Border.all(color: color.withValues(alpha: active ? 0.4 : 0.2)),
+          borderRadius: BorderRadius.circular(T.rInput),
+          border: Border.all(
+            color: color.withValues(alpha: active ? 0.4 : 0.2),
+          ),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,

@@ -22,7 +22,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase([QueryExecutor? executor]) : super(executor ?? _openConnection());
 
   @override
-  int get schemaVersion => 12;
+  int get schemaVersion => 13;
 
   static QueryExecutor _openConnection() {
     // Web requires explicit web options: sqlite3.wasm and drift_worker.js
@@ -42,109 +42,110 @@ class AppDatabase extends _$AppDatabase {
   // ---------------------------------------------------------------------------
   @override
   MigrationStrategy get migration => MigrationStrategy(
-        onCreate: (m) async {
-          await m.createAll();
-        },
-        onUpgrade: (m, from, to) async {
-          // v1 -> v2: add purchase_date to holdings.
-          if (from < 2) {
-            final db = m.database as AppDatabase;
-            await m.addColumn(db.holdings, db.holdings.purchaseDate);
-          }
-          // v2 -> v3: add settings table.
-          if (from < 3) {
-            final db = m.database as AppDatabase;
-            await m.createTable(db.settings);
-          }
-          // v3 -> v4: add cash linkage columns to transactions.
-          if (from < 4) {
-            final db = m.database as AppDatabase;
-            await m.addColumn(db.transactions, db.transactions.cashSourceId);
-            await m.addColumn(db.transactions, db.transactions.cashTargetId);
-          }
-          // v4 -> v5: (data-only migrations handled by DataMigrationService).
-          // v5 -> v6: add risk_level to holdings.
-          if (from < 6) {
-            final db = m.database as AppDatabase;
-            await m.addColumn(db.holdings, db.holdings.riskLevel);
-          }
-          // v6 -> v7: multi-device sync support — updatedAt on every synced
-          // table (backfilled from createdAt) and the tombstone table.
-          //
-          // NOTE: drift's addColumn() emits `DEFAULT CAST(strftime(...))`
-          // for dateTime().withDefault(currentDateAndTime) columns, which
-          // SQLite rejects for ALTER TABLE ADD COLUMN (non-constant
-          // default). Add the column manually with a constant default and
-          // backfill real timestamps.
-          if (from < 7) {
-            final db = m.database as AppDatabase;
-            await customStatement(
-              'ALTER TABLE accounts ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0;',
-            );
-            await customStatement(
-              'ALTER TABLE transactions ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0;',
-            );
-            await customStatement(
-              'ALTER TABLE alert_rules ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0;',
-            );
-            await customStatement(
-              'UPDATE accounts SET updated_at = created_at;',
-            );
-            await customStatement(
-              'UPDATE transactions SET updated_at = occurred_at;',
-            );
-            await customStatement(
-              'UPDATE alert_rules SET updated_at = created_at;',
-            );
-            await m.createTable(db.syncTombstones);
-          }
-          // v7 -> v8: add archived flag to holdings (sold-out products can be
-          // archived instead of deleted, keeping their earnings-calendar
-          // history). Constant default, so drift's addColumn is safe here.
-          if (from < 8) {
-            final db = m.database as AppDatabase;
-            await m.addColumn(db.holdings, db.holdings.archived);
-          }
-          // v8 -> v9: allocation-category override on holdings, so a holding
-          // can be categorised by its underlying exposure rather than its
-          // product type (a 黄金ETF is an 场内基金 whose exposure is gold).
-          // Nullable without a default, so drift's addColumn is safe.
-          if (from < 9) {
-            final db = m.database as AppDatabase;
-            await m.addColumn(db.holdings, db.holdings.categoryOverride);
-          }
-          // v9 -> v10: record the invested amount a flow actually moved, so
-          // the history replay stops guessing it from the raw amount (which
-          // disagrees with the proportional write whenever the account has
-          // unrealized gain). Nullable without a default, so drift's
-          // addColumn is safe; existing rows stay NULL and the replay keeps
-          // its legacy behaviour for them.
-          if (from < 10) {
-            final db = m.database as AppDatabase;
-            await m.addColumn(db.transactions, db.transactions.costMovedAmount);
-          }
-          // v10 -> v11: mark the sell rows of internal redemptions whose
-          // proceeds fund another holding. Constant default, so drift's
-          // addColumn is safe; legacy rows stay false and keep behaving as
-          // ordinary sells (their realized contribution is already baked
-          // into the stored data).
-          if (from < 11) {
-            final db = m.database as AppDatabase;
-            await m.addColumn(db.transactions, db.transactions.internalMove);
-          }
-          // v11 -> v12: remember whether a holding's principal was ever
-          // explicitly recorded, so a genuine 0 stops doubling as "unset"
-          // (and stops hiding the holding's full gain). Constant default, so
-          // drift's addColumn is safe. Existing rows were all written under
-          // the "0 means unset" rule, so backfill the flag from exactly that:
-          // a positive cost was recorded, a 0 was not.
-          if (from < 12) {
-            final db = m.database as AppDatabase;
-            await m.addColumn(db.holdings, db.holdings.costRecorded);
-            await customStatement(
-              'UPDATE holdings SET cost_recorded = 1 WHERE cost_price > 0;',
-            );
-          }
-        },
-      );
+    onCreate: (m) async {
+      await m.createAll();
+    },
+    onUpgrade: (m, from, to) async {
+      // v1 -> v2: add purchase_date to holdings.
+      if (from < 2) {
+        final db = m.database as AppDatabase;
+        await m.addColumn(db.holdings, db.holdings.purchaseDate);
+      }
+      // v2 -> v3: add settings table.
+      if (from < 3) {
+        final db = m.database as AppDatabase;
+        await m.createTable(db.settings);
+      }
+      // v3 -> v4: add cash linkage columns to transactions.
+      if (from < 4) {
+        final db = m.database as AppDatabase;
+        await m.addColumn(db.transactions, db.transactions.cashSourceId);
+        await m.addColumn(db.transactions, db.transactions.cashTargetId);
+      }
+      // v4 -> v5: (data-only migrations handled by DataMigrationService).
+      // v5 -> v6: add risk_level to holdings.
+      if (from < 6) {
+        final db = m.database as AppDatabase;
+        await m.addColumn(db.holdings, db.holdings.riskLevel);
+      }
+      // v6 -> v7: multi-device sync support — updatedAt on every synced
+      // table (backfilled from createdAt) and the tombstone table.
+      //
+      // NOTE: drift's addColumn() emits `DEFAULT CAST(strftime(...))`
+      // for dateTime().withDefault(currentDateAndTime) columns, which
+      // SQLite rejects for ALTER TABLE ADD COLUMN (non-constant
+      // default). Add the column manually with a constant default and
+      // backfill real timestamps.
+      if (from < 7) {
+        final db = m.database as AppDatabase;
+        await customStatement(
+          'ALTER TABLE accounts ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0;',
+        );
+        await customStatement(
+          'ALTER TABLE transactions ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0;',
+        );
+        await customStatement(
+          'ALTER TABLE alert_rules ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0;',
+        );
+        await customStatement('UPDATE accounts SET updated_at = created_at;');
+        await customStatement(
+          'UPDATE transactions SET updated_at = occurred_at;',
+        );
+        await customStatement(
+          'UPDATE alert_rules SET updated_at = created_at;',
+        );
+        await m.createTable(db.syncTombstones);
+      }
+      // v7 -> v8: add archived flag to holdings (sold-out products can be
+      // archived instead of deleted, keeping their earnings-calendar
+      // history). Constant default, so drift's addColumn is safe here.
+      if (from < 8) {
+        final db = m.database as AppDatabase;
+        await m.addColumn(db.holdings, db.holdings.archived);
+      }
+      // v8 -> v9: allocation-category override on holdings, so a holding
+      // can be categorised by its underlying exposure rather than its
+      // product type (a 黄金ETF is an 场内基金 whose exposure is gold).
+      // Nullable without a default, so drift's addColumn is safe.
+      if (from < 9) {
+        final db = m.database as AppDatabase;
+        await m.addColumn(db.holdings, db.holdings.categoryOverride);
+      }
+      // v9 -> v10: record the invested amount a flow actually moved, so
+      // the history replay stops guessing it from the raw amount (which
+      // disagrees with the proportional write whenever the account has
+      // unrealized gain). Nullable without a default, so drift's
+      // addColumn is safe; existing rows stay NULL and the replay keeps
+      // its legacy behaviour for them.
+      if (from < 10) {
+        final db = m.database as AppDatabase;
+        await m.addColumn(db.transactions, db.transactions.costMovedAmount);
+      }
+      // v10 -> v11: mark the sell rows of internal redemptions whose
+      // proceeds fund another holding. Constant default, so drift's
+      // addColumn is safe; legacy rows stay false and keep behaving as
+      // ordinary sells (their realized contribution is already baked
+      // into the stored data).
+      if (from < 11) {
+        final db = m.database as AppDatabase;
+        await m.addColumn(db.transactions, db.transactions.internalMove);
+      }
+      // v11 -> v12: remember whether a holding's principal was ever
+      // explicitly recorded, so a genuine 0 stops doubling as "unset"
+      // (and stops hiding the holding's full gain). Constant default, so
+      // drift's addColumn is safe. Existing rows were all written under
+      // the "0 means unset" rule, so backfill the flag from exactly that:
+      // a positive cost was recorded, a 0 was not.
+      if (from < 12) {
+        final db = m.database as AppDatabase;
+        await m.addColumn(db.holdings, db.holdings.costRecorded);
+        await customStatement(
+          'UPDATE holdings SET cost_recorded = 1 WHERE cost_price > 0;',
+        );
+      }
+      if (from < 13) {
+        await m.addColumn(snapshots, snapshots.holdingValues);
+      }
+    },
+  );
 }

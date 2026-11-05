@@ -119,7 +119,7 @@ class SettingsPage extends ConsumerWidget {
               ),
               const SizedBox(height: T.s4),
               const SectionHeader(label: '显示'),
-              Text('总览页滚动卡的展示节奏。', style: T.label()),
+              Text('移动端收益焦点的轮播节奏，桌面端并列展示。', style: T.label()),
               const SizedBox(height: T.s3),
               const TerminalCard(child: _SpotlightHoldRow()),
               const SizedBox(height: T.s4),
@@ -354,7 +354,7 @@ class _SpotlightHoldRow extends ConsumerWidget {
     return DataRow(
       leading: const Icon(Icons.slow_motion_video_outlined),
       title: '滚动卡停留时间',
-      subtitle: const Text('总览页焦点卡每面停留多久再翻转'),
+      subtitle: const Text('移动端每项停留时间；减少动态效果时可手动切换'),
       trailing: Text(
         spotlightHoldLabel(ms),
         style: T.mono(size: 13, color: T.text2),

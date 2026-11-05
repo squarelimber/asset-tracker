@@ -18,21 +18,22 @@ class TerminalCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final card = Container(
-      margin: margin,
-      padding: padding,
-      decoration: BoxDecoration(
+    return Padding(
+      padding: margin,
+      child: Material(
         color: T.surface,
-        borderRadius: BorderRadius.circular(T.rCard),
-        border: Border.all(color: T.border),
+        clipBehavior: Clip.antiAlias,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(T.rCard),
+          side: const BorderSide(color: T.border),
+        ),
+        child: onTap == null
+            ? Padding(padding: padding, child: child)
+            : InkWell(
+                onTap: onTap,
+                child: Padding(padding: padding, child: child),
+              ),
       ),
-      child: child,
-    );
-    if (onTap == null) return card;
-    return InkWell(
-      borderRadius: BorderRadius.circular(T.rCard),
-      onTap: onTap,
-      child: card,
     );
   }
 }

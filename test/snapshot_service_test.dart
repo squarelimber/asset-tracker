@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:asset_tracker/core/enums.dart';
 import 'package:asset_tracker/data/asset_dao.dart';
 import 'package:asset_tracker/data/database.dart';
+import 'package:asset_tracker/domain/holding_valuation.dart';
 import 'package:asset_tracker/services/market/market_service.dart';
 import 'package:asset_tracker/services/snapshot_service.dart';
 import 'package:asset_tracker/sync/sync_format.dart';
@@ -23,21 +24,22 @@ void main() {
   });
 
   Future<void> seedFundHolding() async {
-    final accountId = await dao.createAccount(AccountsCompanion.insert(
-      name: '测试账户',
-      type: 'general',
-    ));
-    await dao.createHolding(HoldingsCompanion.insert(
-      accountId: accountId,
-      name: '测试基金',
-      assetType: AssetType.mutualFund.storageName,
-      marketSource: Value(MarketSource.eastmoney.storageName),
-      symbol: const Value('110022'),
-      quantity: const Value(100),
-      costPrice: const Value(2.5),
-      latestPrice: const Value(2.9),
-      purchaseDate: Value(DateTime(2026, 6, 29)),
-    ));
+    final accountId = await dao.createAccount(
+      AccountsCompanion.insert(name: '测试账户', type: 'general'),
+    );
+    await dao.createHolding(
+      HoldingsCompanion.insert(
+        accountId: accountId,
+        name: '测试基金',
+        assetType: AssetType.mutualFund.storageName,
+        marketSource: Value(MarketSource.eastmoney.storageName),
+        symbol: const Value('110022'),
+        quantity: const Value(100),
+        costPrice: const Value(2.5),
+        latestPrice: const Value(2.9),
+        purchaseDate: Value(DateTime(2026, 6, 29)),
+      ),
+    );
   }
 
   test('does not record a snapshot when there are no holdings', () async {
@@ -62,6 +64,10 @@ void main() {
     expect(snapshots.single.totalValue, closeTo(290, 1e-6));
     expect(snapshots.single.totalCost, closeTo(250, 1e-6));
     expect(snapshots.single.date, '2026-09-04');
+    expect(
+      snapshotHoldingValues(snapshots.single)!.single.value,
+      closeTo(290, 1e-6),
+    );
   });
 
   test('is idempotent for the same day', () async {
@@ -128,19 +134,22 @@ void main() {
     // USD rate to convert.
     Future<int> seedUsdHolding() async {
       final accountId = await dao.createAccount(
-          AccountsCompanion.insert(name: '境外账户', type: 'general'));
-      return dao.createHolding(HoldingsCompanion.insert(
-        accountId: accountId,
-        name: '美元理财',
-        assetType: AssetType.bankWealth.storageName,
-        marketSource: Value(MarketSource.forex.storageName),
-        symbol: const Value('Y05A9W10006A'),
-        quantity: const Value(1000),
-        costPrice: const Value(6.9),
-        latestPrice: const Value(7.0),
-        currency: const Value('USD'),
-        purchaseDate: Value(DateTime(2026, 1, 1)),
-      ));
+        AccountsCompanion.insert(name: '境外账户', type: 'general'),
+      );
+      return dao.createHolding(
+        HoldingsCompanion.insert(
+          accountId: accountId,
+          name: '美元理财',
+          assetType: AssetType.bankWealth.storageName,
+          marketSource: Value(MarketSource.forex.storageName),
+          symbol: const Value('Y05A9W10006A'),
+          quantity: const Value(1000),
+          costPrice: const Value(6.9),
+          latestPrice: const Value(7.0),
+          currency: const Value('USD'),
+          purchaseDate: Value(DateTime(2026, 1, 1)),
+        ),
+      );
     }
 
     test('没有汇率时整天跳过，而不是按 1 折算', () async {
@@ -160,14 +169,16 @@ void main() {
       // and the live re-fetch that follows is exactly the network
       // dependency this test must not have.
       final now = DateTime.now();
-      await dao.upsertPriceCache(PriceCacheCompanion(
-        symbol: const Value('USD'),
-        source: const Value('forex'),
-        name: const Value('美元'),
-        price: const Value(7.15),
-        currency: const Value('USD'),
-        fetchedAt: Value(now),
-      ));
+      await dao.upsertPriceCache(
+        PriceCacheCompanion(
+          symbol: const Value('USD'),
+          source: const Value('forex'),
+          name: const Value('美元'),
+          price: const Value(7.15),
+          currency: const Value('USD'),
+          fetchedAt: Value(now),
+        ),
+      );
 
       final service = SnapshotService(
         dao,
@@ -183,21 +194,24 @@ void main() {
 
     test('汇率联动持仓（代码即货币）不需要汇率表', () async {
       final accountId = await dao.createAccount(
-          AccountsCompanion.insert(name: '境外账户', type: 'general'));
-      await dao.createHolding(HoldingsCompanion.insert(
-        accountId: accountId,
-        name: '美元存款',
-        assetType: AssetType.bankWealth.storageName,
-        marketSource: Value(MarketSource.forex.storageName),
-        // Code *is* the currency: latestPrice already carries the rate, so
-        // no second conversion may be applied and no rate is needed.
-        symbol: const Value('USD'),
-        quantity: const Value(10000),
-        costPrice: const Value(10000),
-        latestPrice: const Value(7.1),
-        currency: const Value('USD'),
-        purchaseDate: Value(DateTime(2026, 1, 1)),
-      ));
+        AccountsCompanion.insert(name: '境外账户', type: 'general'),
+      );
+      await dao.createHolding(
+        HoldingsCompanion.insert(
+          accountId: accountId,
+          name: '美元存款',
+          assetType: AssetType.bankWealth.storageName,
+          marketSource: Value(MarketSource.forex.storageName),
+          // Code *is* the currency: latestPrice already carries the rate, so
+          // no second conversion may be applied and no rate is needed.
+          symbol: const Value('USD'),
+          quantity: const Value(10000),
+          costPrice: const Value(10000),
+          latestPrice: const Value(7.1),
+          currency: const Value('USD'),
+          purchaseDate: Value(DateTime(2026, 1, 1)),
+        ),
+      );
 
       final service = SnapshotService(dao, clock: () => DateTime(2026, 9, 4));
       await service.ensureTodaySnapshot();

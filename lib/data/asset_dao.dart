@@ -372,7 +372,17 @@ class AssetDao {
   }
 
   Future<void> upsertSnapshot(SnapshotsCompanion entry) {
-    return _db.into(_db.snapshots).insertOnConflictUpdate(entry);
+    // Legacy writers/sync peers must clear a previous explanation rather
+    // than attaching old holdings to a new aggregate with the same key.
+    return _db
+        .into(_db.snapshots)
+        .insertOnConflictUpdate(
+          entry.copyWith(
+            holdingValues: entry.holdingValues.present
+                ? entry.holdingValues
+                : const Value(null),
+          ),
+        );
   }
 
   /// Deletes snapshots strictly before [date] (yyyy-MM-dd), recording a
@@ -410,12 +420,11 @@ class AssetDao {
     final keys = replacedKeys.toList();
     for (var i = 0; i < keys.length; i += 500) {
       final end = i + 500 < keys.length ? i + 500 : keys.length;
-      await (_db.delete(_db.syncTombstones)
-            ..where(
-              (t) =>
-                  t.table.equals('snapshots') &
-                  t.rowKey.isIn(keys.sublist(i, end)),
-            ))
+      await (_db.delete(_db.syncTombstones)..where(
+            (t) =>
+                t.table.equals('snapshots') &
+                t.rowKey.isIn(keys.sublist(i, end)),
+          ))
           .go();
     }
   }

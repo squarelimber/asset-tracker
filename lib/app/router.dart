@@ -20,7 +20,11 @@ final routerProvider = Provider<GoRouter>((ref) {
     routes: [
       GoRoute(
         path: '/earnings-calendar',
-        builder: (context, state) => const EarningsCalendarPage(),
+        builder: (context, state) => EarningsCalendarPage(
+          initialDate: DateTime.tryParse(
+            state.uri.queryParameters['date'] ?? '',
+          ),
+        ),
       ),
       GoRoute(
         path: '/product-earnings',
@@ -35,9 +39,8 @@ final routerProvider = Provider<GoRouter>((ref) {
           ),
           GoRoute(
             path: '/holdings',
-            builder: (context, state) => HoldingsPage(
-              initialQuery: state.extra as String?,
-            ),
+            builder: (context, state) =>
+                HoldingsPage(initialQuery: state.extra as String?),
           ),
           GoRoute(
             path: '/accounts',

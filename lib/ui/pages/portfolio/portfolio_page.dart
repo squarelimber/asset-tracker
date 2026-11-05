@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../../app/providers.dart';
 import '../../../core/enums.dart';
@@ -15,13 +16,13 @@ import '../../../services/history_backfill_service.dart';
 import '../../../services/market/market_service.dart';
 import '../../components/app_bar_actions.dart';
 import '../../components/asset_overview_card.dart';
-import '../../components/empty_state.dart';
 import '../../components/error_state.dart';
 import '../../components/key_shortcuts.dart';
 import '../../components/rotating_spotlight_card.dart';
 import '../../components/session_chip.dart';
 import '../../tokens.dart';
 import 'portfolio_widgets.dart';
+import 'portfolio_welcome.dart';
 
 final summaryProvider = FutureProvider<PortfolioSummary>((ref) async {
   final dao = ref.watch(daoProvider);
@@ -191,7 +192,11 @@ class _PortfolioPageState extends ConsumerState<PortfolioPage> {
         body: holdings.when(
           data: (list) {
             if (list.isEmpty) {
-              return const EmptyState(message: '还没有持仓数据\n去"持仓"页添加你的第一笔资产吧');
+              return PortfolioWelcome(
+                hasAccounts:
+                    ref.watch(accountsProvider).valueOrNull?.isNotEmpty ??
+                    false,
+              );
             }
             // 保留上一次成功的汇总值：行情/汇率后台刷新会 invalidate
             // summaryProvider 使其短暂进入 loading —— 此时若用 when 的
@@ -239,7 +244,7 @@ class _PortfolioPageState extends ConsumerState<PortfolioPage> {
       onRefresh: () => _refreshPrices(showSnack: true),
       child: ListView(
         physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.all(T.s3),
+        padding: EdgeInsets.all(Responsive.isPhone(context) ? T.s3 : T.s5),
         children: [
           Row(
             children: [
@@ -259,22 +264,28 @@ class _PortfolioPageState extends ConsumerState<PortfolioPage> {
           // 轮动焦点卡：今日最佳 / 今日最差 / 本月最佳（自动切换）。
           const RotatingSpotlightCard(),
           const SizedBox(height: T.s3),
-          if (Responsive.isPhone(context)) ...[
-            // 趋势面板与上方净资产卡左右对齐（等宽），横向完整拉伸。
-            NetWorthChart(),
-            const SizedBox(height: T.s3),
-            AllocationCard(summary: s),
-          ] else ...[
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(flex: 3, child: NetWorthChart()),
-                const SizedBox(width: T.s3),
-                Expanded(flex: 2, child: AllocationCard(summary: s)),
-              ],
-            ),
-            const SizedBox(height: T.s3),
-          ],
+          LayoutBuilder(
+            builder: (context, constraints) {
+              // Use the content width: the desktop sidebar consumes space too.
+              if (constraints.maxWidth < 1000) {
+                return Column(
+                  children: [
+                    NetWorthChart(),
+                    const SizedBox(height: T.s3),
+                    AllocationCard(summary: s),
+                  ],
+                );
+              }
+              return Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(flex: 3, child: NetWorthChart()),
+                  const SizedBox(width: T.s3),
+                  Expanded(flex: 2, child: AllocationCard(summary: s)),
+                ],
+              );
+            },
+          ),
         ],
       ),
     );
@@ -302,8 +313,11 @@ class _KpiRow extends ConsumerWidget {
       totalAssets: summary.totalAssets,
       totalLiabilities: summary.totalLiabilities,
       netWorth: summary.netWorth,
-      todayProfit: todayEarning?.profit ?? summary.todayChange,
-      todayPct: todayEarning?.pct ?? summary.todayChangePct,
+      todayProfit: todayEarning?.profit,
+      todayPct: todayEarning?.pct,
+      onOpenEarnings: () => context.push(
+        '/earnings-calendar?date=${Formats.date(DateTime.now())}',
+      ),
       hidden: hidden,
       onToggleHidden: () {
         final now = ref.read(hideAmountsProvider);

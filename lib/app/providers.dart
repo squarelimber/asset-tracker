@@ -2,11 +2,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
 import '../core/history_sync.dart';
+import '../core/formats.dart';
 import '../core/symbols.dart';
 import '../core/ui_prefs.dart';
 import '../data/asset_dao.dart';
 import '../data/database.dart';
 import '../domain/daily_earnings.dart';
+import '../domain/earnings_breakdown.dart';
+import '../domain/holding_valuation.dart';
 import '../domain/holding_details.dart';
 import '../domain/product_monthly_earnings.dart';
 import '../domain/transaction_service.dart';
@@ -32,14 +35,10 @@ final hideAmountsProvider = StateProvider<bool>((ref) => true);
 /// 非临时开关，重启后应当记住。脏值（0 / 负数 / 非数字）一律回退默认 ——
 /// 0 会让卡片每帧都排一次翻转，疯狂打转。
 final spotlightHoldMsProvider = StreamProvider<int>((ref) {
-  return ref
-      .watch(daoProvider)
-      .watchSetting(spotlightHoldMsKey)
-      .map((raw) {
-        final ms = int.tryParse(raw ?? '');
-        return (ms != null && ms > 0) ? ms : defaultSpotlightHoldMs;
-      })
-      .distinct();
+  return ref.watch(daoProvider).watchSetting(spotlightHoldMsKey).map((raw) {
+    final ms = int.tryParse(raw ?? '');
+    return (ms != null && ms > 0) ? ms : defaultSpotlightHoldMs;
+  }).distinct();
 });
 
 /// Identity of the installed build, e.g. `0.9.9+35`; `未知` when the platform
@@ -141,13 +140,27 @@ final historyBackfillServiceProvider = Provider<HistoryBackfillService>(
   ),
 );
 
-/// Per-holding (value, cost) on a given day, using the exact same snapshot
-/// replay rules — the earnings-calendar day panel uses this so its per-product
-/// sum equals the calendar cell (previously drifted via a separate
-/// ProductEarningsService path).
+/// Per-holding values recorded with the day's aggregate snapshot. Missing or
+/// invalid historical detail stays unavailable instead of being revalued.
 final dayHoldingsBreakdownProvider = FutureProvider.autoDispose
     .family<List<DayHoldingValue>, DateTime>((ref, day) async {
-      return ref.read(historyBackfillServiceProvider).dayHoldingsBreakdown(day);
+      final snapshots = await ref.watch(snapshotsProvider.future);
+      final snapshot = snapshots
+          .where((s) => s.date == todayKey(day))
+          .firstOrNull;
+      if (snapshot == null) return const [];
+      return snapshotHoldingValues(snapshot) ?? const [];
+    });
+
+final dailyEarningsProvider = FutureProvider<List<DailyEarning>>((ref) async {
+  final snapshots = await ref.watch(snapshotsProvider.future);
+  return const DailyEarningsCalculator().compute(snapshots);
+});
+
+final earningsBreakdownProvider = FutureProvider.autoDispose
+    .family<EarningsBreakdown, DateTime>((ref, day) async {
+      final snapshots = await ref.watch(snapshotsProvider.future);
+      return earningsBreakdownOf(snapshots, todayKey(day));
     });
 
 /// Records one net-worth snapshot per day.
@@ -241,21 +254,18 @@ final productEarningsServiceProvider = Provider<ProductEarningsService>(
   ),
 );
 
-/// Per-product earnings for [year]: window from the first day of the
-/// previous month of (year-1) to the end of [year] (or today for the
-/// current year), so every month of [year] has a baseline day. Month and
-/// year navigation on the page is client-side over this result.
+/// Per-product earnings through [year], using the same recorded states as
+/// the calendar and retaining the full preceding baseline for Jan 1.
 final productEarningsProvider = FutureProvider.autoDispose
     .family<List<ProductEarnings>, int>((ref, year) async {
       ref.watch(historySyncProvider);
-      final now = DateTime.now();
-      final from = DateTime(year - 1, 12, 1);
-      final to = year < now.year
-          ? DateTime(year, 12, 31)
-          : DateTime(now.year, now.month, now.day);
-      return ref
-          .watch(productEarningsServiceProvider)
-          .compute(from: from, to: to);
+      final snapshots = await ref.watch(snapshotsProvider.future);
+      final end = '$year-12-31';
+      // Keep the complete baseline: filtering the series first loses the
+      // gain on Jan 1 and creates another month/year-boundary discrepancy.
+      return productsFromSnapshots(
+        snapshots.where((s) => s.date.compareTo(end) <= 0).toList(),
+      );
     });
 
 // ---------------------------------------------------------------------------

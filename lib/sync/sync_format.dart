@@ -43,80 +43,81 @@ class SyncFormatter {
   }
 
   Map<String, dynamic> accountToRow(AccountRow a) => {
-        'id': a.id,
-        'name': a.name,
-        'type': a.type,
-        'currency': a.currency,
-        'note': a.note,
-        'createdAt': a.createdAt.toIso8601String(),
-        'updatedAt': a.updatedAt.toIso8601String(),
-      };
+    'id': a.id,
+    'name': a.name,
+    'type': a.type,
+    'currency': a.currency,
+    'note': a.note,
+    'createdAt': a.createdAt.toIso8601String(),
+    'updatedAt': a.updatedAt.toIso8601String(),
+  };
 
   Map<String, dynamic> holdingToRow(HoldingRow h) => {
-        'id': h.id,
-        'accountId': h.accountId,
-        'name': h.name,
-        'assetType': h.assetType,
-        'marketSource': h.marketSource,
-        'symbol': h.symbol,
-        'quantity': h.quantity,
-        'costPrice': h.costPrice,
-        'costRecorded': h.costRecorded,
-        'latestPrice': h.latestPrice,
-        'costFxRate': h.costFxRate,
-        'purchaseDate': h.purchaseDate?.toIso8601String(),
-        'riskLevel': h.riskLevel,
-        'categoryOverride': h.categoryOverride,
-        'currency': h.currency,
-        'note': h.note,
-        'archived': h.archived,
-        'createdAt': h.createdAt.toIso8601String(),
-        'updatedAt': h.updatedAt.toIso8601String(),
-      };
+    'id': h.id,
+    'accountId': h.accountId,
+    'name': h.name,
+    'assetType': h.assetType,
+    'marketSource': h.marketSource,
+    'symbol': h.symbol,
+    'quantity': h.quantity,
+    'costPrice': h.costPrice,
+    'costRecorded': h.costRecorded,
+    'latestPrice': h.latestPrice,
+    'costFxRate': h.costFxRate,
+    'purchaseDate': h.purchaseDate?.toIso8601String(),
+    'riskLevel': h.riskLevel,
+    'categoryOverride': h.categoryOverride,
+    'currency': h.currency,
+    'note': h.note,
+    'archived': h.archived,
+    'createdAt': h.createdAt.toIso8601String(),
+    'updatedAt': h.updatedAt.toIso8601String(),
+  };
 
   Map<String, dynamic> transactionToRow(TransactionRow t) => {
-        'id': t.id,
-        'accountId': t.accountId,
-        'holdingId': t.holdingId,
-        'cashSourceId': t.cashSourceId,
-        'cashTargetId': t.cashTargetId,
-        'type': t.type,
-        'quantity': t.quantity,
-        'price': t.price,
-        'amount': t.amount,
-        'currency': t.currency,
-        'occurredAt': t.occurredAt.toIso8601String(),
-        'note': t.note,
-        'costMoved': t.costMoved,
-        'costMovedAmount': t.costMovedAmount,
-        'internalMove': t.internalMove,
-        'updatedAt': t.updatedAt.toIso8601String(),
-      };
+    'id': t.id,
+    'accountId': t.accountId,
+    'holdingId': t.holdingId,
+    'cashSourceId': t.cashSourceId,
+    'cashTargetId': t.cashTargetId,
+    'type': t.type,
+    'quantity': t.quantity,
+    'price': t.price,
+    'amount': t.amount,
+    'currency': t.currency,
+    'occurredAt': t.occurredAt.toIso8601String(),
+    'note': t.note,
+    'costMoved': t.costMoved,
+    'costMovedAmount': t.costMovedAmount,
+    'internalMove': t.internalMove,
+    'updatedAt': t.updatedAt.toIso8601String(),
+  };
 
   Map<String, dynamic> snapshotToRow(SnapshotRow s) => {
-        'date': s.date,
-        'currency': s.currency,
-        'totalValue': s.totalValue,
-        'totalCost': s.totalCost,
-        'liabilities': s.liabilities,
-        'createdAt': s.createdAt.toIso8601String(),
-        // Snapshots have no separate updatedAt column; `createdAt` is
-        // rewritten on every recompute (see the Snapshots table) and is
-        // therefore the merge version. Writers must set it explicitly —
-        // a missing value would leave a corrected day unable to displace
-        // the stale row it was meant to fix.
-        'updatedAt': s.createdAt.toIso8601String(),
-      };
+    'date': s.date,
+    'currency': s.currency,
+    'totalValue': s.totalValue,
+    'totalCost': s.totalCost,
+    'liabilities': s.liabilities,
+    if (s.holdingValues != null) 'holdingValues': s.holdingValues,
+    'createdAt': s.createdAt.toIso8601String(),
+    // Snapshots have no separate updatedAt column; `createdAt` is
+    // rewritten on every recompute (see the Snapshots table) and is
+    // therefore the merge version. Writers must set it explicitly —
+    // a missing value would leave a corrected day unable to displace
+    // the stale row it was meant to fix.
+    'updatedAt': s.createdAt.toIso8601String(),
+  };
 
   Map<String, dynamic> ruleToRow(AlertRuleRow r) => {
-        'id': r.id,
-        'type': r.type,
-        'name': r.name,
-        'params': r.params,
-        'enabled': r.enabled,
-        'createdAt': r.createdAt.toIso8601String(),
-        'updatedAt': r.updatedAt.toIso8601String(),
-      };
+    'id': r.id,
+    'type': r.type,
+    'name': r.name,
+    'params': r.params,
+    'enabled': r.enabled,
+    'createdAt': r.createdAt.toIso8601String(),
+    'updatedAt': r.updatedAt.toIso8601String(),
+  };
 }
 
 DateTime? parseIso(Object? value) {

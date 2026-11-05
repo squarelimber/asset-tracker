@@ -52,9 +52,9 @@ class _ProductEarningsCalendarPageState
   }
 
   void _openMonth(int month) => setState(() {
-        _month = month;
-        _view = _PEView.month;
-      });
+    _month = month;
+    _view = _PEView.month;
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -82,8 +82,11 @@ class _ProductEarningsCalendarPageState
         ),
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, _) => ErrorState(
-          message: '产品收益数据加载失败，请重试',
-          onRetry: () => ref.invalidate(productEarningsProvider(_year)),
+          message: e is StateError ? e.message.toString() : '产品收益数据加载失败，请重试',
+          onRetry: () {
+            ref.invalidate(historySyncProvider);
+            ref.invalidate(productEarningsProvider(_year));
+          },
         ),
       ),
     );
@@ -131,32 +134,34 @@ class _PEBody extends StatelessWidget {
     final isYearView = view == _PEView.year;
     final calc = const ProductEarningsCalculator();
 
-    final rows = _filtered
-        .map((p) => (p: p, months: calc.yearOf(p, year)))
-        .toList()
-      ..sort((a, b) {
-        final ra = calc.yearlyRate(a.months, a.p, year);
-        final rb = calc.yearlyRate(b.months, b.p, year);
-        if (ra == null && rb == null) {
-          return calc.yearlyProfit(b.months).compareTo(calc.yearlyProfit(a.months));
-        }
-        if (ra == null) return 1;
-        if (rb == null) return -1;
-        return rb.compareTo(ra);
-      });
+    final rows =
+        _filtered.map((p) => (p: p, months: calc.yearOf(p, year))).toList()
+          ..sort((a, b) {
+            final ra = calc.yearlyRate(a.months, a.p, year);
+            final rb = calc.yearlyRate(b.months, b.p, year);
+            if (ra == null && rb == null) {
+              return calc
+                  .yearlyProfit(b.months)
+                  .compareTo(calc.yearlyProfit(a.months));
+            }
+            if (ra == null) return 1;
+            if (rb == null) return -1;
+            return rb.compareTo(ra);
+          });
 
-    final monthRows = _filtered
-        .map((p) => (p: p, m: calc.monthOf(p, year, month)))
-        .where((r) => r.m.days > 0)
-        .toList()
-      ..sort((a, b) {
-        if (a.m.rate == null && b.m.rate == null) {
-          return b.m.profit.compareTo(a.m.profit);
-        }
-        if (a.m.rate == null) return 1;
-        if (b.m.rate == null) return -1;
-        return b.m.rate!.compareTo(a.m.rate!);
-      });
+    final monthRows =
+        _filtered
+            .map((p) => (p: p, m: calc.monthOf(p, year, month)))
+            .where((r) => r.m.days > 0)
+            .toList()
+          ..sort((a, b) {
+            if (a.m.rate == null && b.m.rate == null) {
+              return b.m.profit.compareTo(a.m.profit);
+            }
+            if (a.m.rate == null) return 1;
+            if (b.m.rate == null) return -1;
+            return b.m.rate!.compareTo(a.m.rate!);
+          });
 
     return ResponsiveShell(
       child: Column(
@@ -183,7 +188,9 @@ class _PEBody extends StatelessWidget {
               IconButton(
                 tooltip: isYearView ? '上一年' : '上一月',
                 icon: const Icon(Icons.chevron_left),
-                onPressed: isYearView ? () => onShiftYear(-1) : () => onShiftMonth(-1),
+                onPressed: isYearView
+                    ? () => onShiftYear(-1)
+                    : () => onShiftMonth(-1),
               ),
               Expanded(
                 child: Center(
@@ -196,7 +203,9 @@ class _PEBody extends StatelessWidget {
               IconButton(
                 tooltip: isYearView ? '下一年' : '下一月',
                 icon: const Icon(Icons.chevron_right),
-                onPressed: isYearView ? () => onShiftYear(1) : () => onShiftMonth(1),
+                onPressed: isYearView
+                    ? () => onShiftYear(1)
+                    : () => onShiftMonth(1),
               ),
             ],
           ),
@@ -251,7 +260,11 @@ class _PEBody extends StatelessWidget {
                     onRefresh: () async => onRefresh(),
                     child: SingleChildScrollView(
                       physics: const AlwaysScrollableScrollPhysics(),
-                      child: _MonthList(rows: monthRows, year: year, month: month),
+                      child: _MonthList(
+                        rows: monthRows,
+                        year: year,
+                        month: month,
+                      ),
                     ),
                   ),
           ),
@@ -306,8 +319,8 @@ class _YearMatrixState extends State<_YearMatrix> {
         final count = isPhone
             ? widget.requestedMonths
             : (isTablet
-                ? ((contentWidth - nameWidth) / 12 >= 52 ? 12 : 6)
-                : 12);
+                  ? ((contentWidth - nameWidth) / 12 >= 52 ? 12 : 6)
+                  : 12);
         final months = _monthsWindow(widget.year, count);
         final colWidth = isPhone
             ? 52.0
@@ -343,7 +356,10 @@ class _YearMatrixState extends State<_YearMatrix> {
                 child: AnimatedBuilder(
                   animation: _hCtrl,
                   builder: (context, _) => Transform.translate(
-                    offset: Offset(-(_hCtrl.hasClients ? _hCtrl.offset : 0.0), 0),
+                    offset: Offset(
+                      -(_hCtrl.hasClients ? _hCtrl.offset : 0.0),
+                      0,
+                    ),
                     child: SizedBox(
                       height: _headerHeight,
                       width: (months.length + 1) * colWidth,
@@ -401,7 +417,10 @@ class _YearMatrixState extends State<_YearMatrix> {
                             row.p.name,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(fontSize: 13, color: T.text1),
+                            style: const TextStyle(
+                              fontSize: 13,
+                              color: T.text1,
+                            ),
                           ),
                         ),
                         if (row.p.closed) const _ClosedBadge(),
@@ -441,21 +460,31 @@ class _YearMatrixState extends State<_YearMatrix> {
               ),
             ),
           );
-          gridRows.add(SizedBox(height: _rowHeight, child: Row(children: cells)));
+          gridRows.add(
+            SizedBox(
+              height: _rowHeight,
+              child: Row(children: cells),
+            ),
+          );
         }
 
         return CustomScrollView(
           slivers: [
             SliverPersistentHeader(
               pinned: true,
-              delegate: _HeaderDelegate(height: _headerHeight, child: headerChild),
+              delegate: _HeaderDelegate(
+                height: _headerHeight,
+                child: headerChild,
+              ),
             ),
             SliverToBoxAdapter(
               child: SizedBox(height: 1, child: Container(color: T.border)),
             ),
             SliverToBoxAdapter(
               child: SizedBox(
-                height: widget.rows.isEmpty ? 0 : widget.rows.length * _rowHeight,
+                height: widget.rows.isEmpty
+                    ? 0
+                    : widget.rows.length * _rowHeight,
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
@@ -490,7 +519,9 @@ class _YearMatrixState extends State<_YearMatrix> {
   }
 
   ProductMonthEarning? _aggOf(
-      ({ProductEarnings p, List<ProductMonthEarning> months}) row, int month) {
+    ({ProductEarnings p, List<ProductMonthEarning> months}) row,
+    int month,
+  ) {
     for (final m in row.months) {
       if (m.month == month) return m;
     }
@@ -516,8 +547,10 @@ class _HeaderDelegate extends SliverPersistentHeaderDelegate {
 
   @override
   Widget build(
-      BuildContext context, double shrinkOffset, bool overlapsContent) =>
-      child;
+    BuildContext context,
+    double shrinkOffset,
+    bool overlapsContent,
+  ) => child;
 }
 
 class _MatrixCell extends StatelessWidget {
@@ -563,8 +596,8 @@ class _MatrixCell extends StatelessWidget {
                         !hasData
                             ? '--'
                             : hasProfit
-                                ? '${profit >= 0 ? '+' : ''}${Formats.amountCompact(profit)}'
-                                : '0',
+                            ? '${profit >= 0 ? '+' : ''}${Formats.amountCompact(profit)}'
+                            : '0',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: T.mono(
@@ -577,13 +610,19 @@ class _MatrixCell extends StatelessWidget {
                         width: 8,
                         height: 8,
                         decoration: BoxDecoration(
-                          color: hasRate ? (rate >= 0 ? T.up : T.down) : T.text3,
+                          color: hasRate
+                              ? (rate >= 0 ? T.up : T.down)
+                              : T.text3,
                           shape: BoxShape.circle,
                         ),
                       ),
               ),
               if (agg?.closed == true)
-                const Positioned(top: 0, right: 0, child: _ClosedBadge(compact: true)),
+                const Positioned(
+                  top: 0,
+                  right: 0,
+                  child: _ClosedBadge(compact: true),
+                ),
             ],
           ),
         ),
@@ -612,9 +651,7 @@ class _YearlyCell extends StatelessWidget {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Text(
-              hasRate
-                  ? '${rate! >= 0 ? '+' : ''}${Formats.pct1(rate!)}'
-                  : '--',
+              hasRate ? '${rate! >= 0 ? '+' : ''}${Formats.pct1(rate!)}' : '--',
               maxLines: 1,
               style: T.mono(
                 size: 11,
@@ -662,7 +699,11 @@ class _ClosedBadge extends StatelessWidget {
 }
 
 class _MonthList extends StatelessWidget {
-  const _MonthList({required this.rows, required this.year, required this.month});
+  const _MonthList({
+    required this.rows,
+    required this.year,
+    required this.month,
+  });
 
   final List<({ProductEarnings p, ProductMonthEarning m})> rows;
   final int year;
@@ -685,7 +726,10 @@ class _MonthList extends StatelessWidget {
         for (final row in rows)
           TerminalCard(
             margin: const EdgeInsets.only(bottom: T.s2),
-            padding: const EdgeInsets.symmetric(horizontal: T.s3, vertical: T.s2),
+            padding: const EdgeInsets.symmetric(
+              horizontal: T.s3,
+              vertical: T.s2,
+            ),
             child: Row(
               children: [
                 Expanded(
@@ -699,7 +743,10 @@ class _MonthList extends StatelessWidget {
                               row.p.name,
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(fontSize: 14, color: T.text1),
+                              style: const TextStyle(
+                                fontSize: 14,
+                                color: T.text1,
+                              ),
                             ),
                           ),
                           if (row.p.closed) const _ClosedBadge(),

@@ -591,7 +591,13 @@ String counterpartyLabel(TransactionType t, bool isShare) {
 /// share-based holdings show their current market value.
 String _sourceItemLabel(HoldingRow h) {
   final t = AssetType.fromStorage(h.assetType);
-  final unit = h.latestPrice > 0 ? h.latestPrice : h.costPrice;
+  // Same fallback chain as the save-time deduction check
+  // (transaction_service: latestPrice -> costPrice -> 1.0), so a share-based
+  // holding with both prices at 0 cannot show "可用 0" while the save still
+  // lets the whole balance move.
+  final unit = h.latestPrice > 0
+      ? h.latestPrice
+      : (h.costPrice > 0 ? h.costPrice : 1.0);
   final available = t.isAmountBased ? h.quantity : h.quantity * unit;
   return '${h.name} (${t.label}) · 可用 ${Formats.amount(available)}';
 }

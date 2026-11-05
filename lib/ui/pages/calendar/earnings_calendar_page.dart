@@ -4,24 +4,22 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../app/providers.dart';
-import '../../../core/enums.dart';
 import '../../../core/formats.dart';
 import '../../../core/responsive.dart';
 import '../../../domain/daily_earnings.dart';
-import '../../../services/history_backfill_service.dart';
 import '../../components/app_bar_actions.dart';
 import '../../components/error_state.dart';
+import '../../components/day_earnings_panel.dart';
 import '../../components/heat_cell.dart';
 import '../../components/terminal_card.dart';
 import '../../tokens.dart';
 
-final earningsProvider = FutureProvider<List<DailyEarning>>((ref) async {
-  final snapshots = ref.watch(snapshotsProvider).value ?? const [];
-  return const DailyEarningsCalculator().compute(snapshots);
-});
+final earningsProvider = dailyEarningsProvider;
 
 class EarningsCalendarPage extends ConsumerStatefulWidget {
-  const EarningsCalendarPage({super.key});
+  const EarningsCalendarPage({super.key, this.initialDate});
+
+  final DateTime? initialDate;
 
   @override
   ConsumerState<EarningsCalendarPage> createState() =>
@@ -40,9 +38,10 @@ class _EarningsCalendarPageState extends ConsumerState<EarningsCalendarPage> {
   @override
   void initState() {
     super.initState();
-    final now = DateTime.now();
+    final now = widget.initialDate ?? DateTime.now();
     _year = now.year;
     _month = now.month;
+    _selectedDate = widget.initialDate == null ? null : DateUtils.dateOnly(now);
   }
 
   @override
@@ -79,13 +78,21 @@ class _EarningsCalendarPageState extends ConsumerState<EarningsCalendarPage> {
               }
             });
           },
-          onRefresh: () => ref.invalidate(earningsProvider),
+          onRefresh: () async {
+            final result = await ref.refresh(historySyncProvider.future);
+            if (context.mounted && result?.message != null) {
+              ScaffoldMessenger.of(
+                context,
+              ).showSnackBar(SnackBar(content: Text(result!.message!)));
+            }
+          },
           onPrev: () => _shift(-1),
           onNext: () => _shift(1),
           onOpenMonth: (m) {
             setState(() {
               _month = m;
               _view = _CalView.month;
+              _selectedDate = null;
             });
           },
           onViewChanged: (v) => setState(() => _view = v),
@@ -96,6 +103,7 @@ class _EarningsCalendarPageState extends ConsumerState<EarningsCalendarPage> {
 
   void _shift(int delta) {
     setState(() {
+      _selectedDate = null;
       if (_view == _CalView.month) {
         _month += delta;
         if (_month < 1) {
@@ -133,7 +141,7 @@ class _CalendarBody extends StatelessWidget {
   final int month;
   final _CalView view;
   final DailyEarningsCalculator calc;
-  final VoidCallback onRefresh;
+  final Future<void> Function() onRefresh;
   final VoidCallback onPrev;
   final VoidCallback onNext;
   final ValueChanged<int> onOpenMonth;
@@ -164,7 +172,7 @@ class _CalendarBody extends StatelessWidget {
 
     return ResponsiveShell(
       child: RefreshIndicator(
-        onRefresh: () async => onRefresh(),
+        onRefresh: onRefresh,
         child: ListView(
           physics: const AlwaysScrollableScrollPhysics(),
           padding: const EdgeInsets.all(T.s3),
@@ -214,14 +222,11 @@ class _CalendarBody extends StatelessWidget {
               ),
               if (selectedDate != null) ...[
                 const SizedBox(height: T.s3),
-                _DayEarningsPanel(date: selectedDate!),
+                DayEarningsPanel(date: selectedDate!),
               ],
             ],
             const SizedBox(height: T.s3),
-            Text(
-              '盈亏 = 当日净资产 − 前日净资产；负债变动不计入当日盈亏；点击日期查看当日各产品收益',
-              style: T.label(),
-            ),
+            Text('收益按相邻快照的资产与成本变化计算，剔除资金进出；点击日期查看同批快照的持仓明细', style: T.label()),
           ],
         ),
       ),
@@ -297,7 +302,7 @@ class _CalendarBody extends StatelessWidget {
   }
 }
 
-class _DayCell extends StatelessWidget {
+class _DayCell extends ConsumerWidget {
   const _DayCell({
     required this.day,
     required this.earning,
@@ -317,7 +322,8 @@ class _DayCell extends StatelessWidget {
   final VoidCallback? onTap;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final hidden = ref.watch(hideAmountsProvider);
     final isToday = _isToday(date);
     final hasEarning = earning != null && earning!.profit != 0;
     final profit = earning?.profit ?? 0;
@@ -343,6 +349,8 @@ class _DayCell extends StatelessWidget {
           Text(
             earning == null
                 ? ''
+                : hidden
+                ? Formats.masked()
                 : hasEarning
                 ? '${profit >= 0 ? '+' : ''}${Formats.amountCompact(profit)}'
                 : '0',
@@ -364,13 +372,14 @@ class _DayCell extends StatelessWidget {
   }
 }
 
-class _MonthSummary extends StatelessWidget {
+class _MonthSummary extends ConsumerWidget {
   const _MonthSummary({required this.month});
 
   final MonthlyEarnings month;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final hidden = ref.watch(hideAmountsProvider);
     final rate = month.rate;
     final hasEarning = month.total != 0;
     return TerminalCard(
@@ -383,7 +392,9 @@ class _MonthSummary extends StatelessWidget {
                 Text('本月收益', style: T.label()),
                 const SizedBox(height: T.s1),
                 Text(
-                  '${month.total >= 0 ? '+' : ''}${Formats.amount(month.total)}',
+                  hidden
+                      ? Formats.masked()
+                      : '${month.total >= 0 ? '+' : ''}${Formats.amount(month.total)}',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: T.mono(
@@ -416,13 +427,14 @@ class _MonthSummary extends StatelessWidget {
   }
 }
 
-class _YearSummary extends StatelessWidget {
+class _YearSummary extends ConsumerWidget {
   const _YearSummary({required this.year});
 
   final YearlyEarnings year;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final hidden = ref.watch(hideAmountsProvider);
     final rate = year.rate;
     final hasEarning = year.total != 0;
     return TerminalCard(
@@ -435,7 +447,9 @@ class _YearSummary extends StatelessWidget {
                 Text('本年收益', style: T.label()),
                 const SizedBox(height: T.s1),
                 Text(
-                  '${year.total >= 0 ? '+' : ''}${Formats.amount(year.total)}',
+                  hidden
+                      ? Formats.masked()
+                      : '${year.total >= 0 ? '+' : ''}${Formats.amount(year.total)}',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: T.mono(
@@ -526,7 +540,7 @@ class _YearGrid extends StatelessWidget {
   }
 }
 
-class _MonthTile extends StatelessWidget {
+class _MonthTile extends ConsumerWidget {
   const _MonthTile({
     required this.label,
     required this.month,
@@ -540,7 +554,8 @@ class _MonthTile extends StatelessWidget {
   final VoidCallback? onTap;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final hidden = ref.watch(hideAmountsProvider);
     final hasData = month.days > 0;
     final hasEarning = hasData && month.total != 0;
     final frac = maxAbs == 0
@@ -558,6 +573,8 @@ class _MonthTile extends StatelessWidget {
           Text(
             !hasData
                 ? '--'
+                : hidden
+                ? Formats.masked()
                 : hasEarning
                 ? '${month.total >= 0 ? '+' : ''}${Formats.amountCompact(month.total)}'
                 : '0',
@@ -585,166 +602,5 @@ class _MonthTile extends StatelessWidget {
       ),
     );
     return tile;
-  }
-}
-
-/// Inline panel under the calendar showing each product's **day** earnings
-/// on the selected date (same cost-basis convention as the calendar:
-/// Δ(value − cost), CNY-converted, one row per product). Products that lost
-/// money that day render negative and red, so the source of a negative
-/// calendar day is directly visible.
-class _DayEarningsPanel extends ConsumerWidget {
-  const _DayEarningsPanel({required this.date});
-
-  final DateTime date;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final hideAmounts = ref.watch(hideAmountsProvider);
-    // 当天与前一天的逐持仓 (value, cost) —— 与快照回放同一口径，因此
-    // 合计严格等于收益日历格子数字（不再用 productEarnings 的独立路径，
-    // 两条路径曾彼此漂移）。
-    final todayAsync = ref.watch(dayHoldingsBreakdownProvider(date));
-    final prevDay = DateTime(date.year, date.month, date.day - 1);
-    final prevAsync = ref.watch(dayHoldingsBreakdownProvider(prevDay));
-
-    String money(double v) => hideAmounts ? Formats.masked() : Formats.money(v);
-
-    final loading = todayAsync.isLoading || prevAsync.isLoading;
-    final error = todayAsync.hasError || prevAsync.hasError
-        ? (todayAsync.error ?? prevAsync.error)
-        : null;
-    if (loading) {
-      return TerminalCard(
-        padding: const EdgeInsets.fromLTRB(T.s3, T.s3, T.s3, T.s2),
-        child: const SizedBox(
-          height: 80,
-          child: Center(child: CircularProgressIndicator()),
-        ),
-      );
-    }
-    if (error != null) {
-      return TerminalCard(
-        padding: const EdgeInsets.fromLTRB(T.s3, T.s3, T.s3, T.s2),
-        child: Row(
-          children: [
-            const Text('明细加载失败', style: TextStyle(color: T.text2)),
-            const SizedBox(width: 8),
-            TextButton(
-              onPressed: () {
-                ref.invalidate(dayHoldingsBreakdownProvider(date));
-                ref.invalidate(dayHoldingsBreakdownProvider(prevDay));
-              },
-              child: const Text('重试'),
-            ),
-          ],
-        ),
-      );
-    }
-
-    final today = todayAsync.value ?? const <DayHoldingValue>[];
-    final prev = prevAsync.value ?? const <DayHoldingValue>[];
-    // 按持仓 id 合并：当日 vs 前日的 (value − cost)。
-    final prevByHolding = {for (final p in prev) p.holdingId: p};
-    final rows = <_DayRow>[];
-    for (final t in today) {
-      if (t.liability) continue; // 负债不进入产品收益行
-      final p = prevByHolding[t.holdingId];
-      final profit = p == null ? 0.0 : (t.value - t.cost) - (p.value - p.cost);
-      rows.add(
-        _DayRow(name: t.name, type: t.type, value: t.value, profit: profit),
-      );
-    }
-    rows.sort((a, b) => b.profit.compareTo(a.profit));
-    final totalProfit = rows.fold(0.0, (s, r) => s + r.profit);
-    if (rows.isEmpty) {
-      return TerminalCard(
-        padding: const EdgeInsets.fromLTRB(T.s3, T.s3, T.s3, T.s2),
-        child: const SizedBox(
-          height: 60,
-          child: Center(
-            child: Text('当日无产品数据', style: TextStyle(color: T.text3)),
-          ),
-        ),
-      );
-    }
-    return TerminalCard(
-      padding: const EdgeInsets.fromLTRB(T.s3, T.s3, T.s3, T.s2),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            '${Formats.date(date)} 产品收益（当日）',
-            style: const TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.w600,
-              color: T.text1,
-            ),
-          ),
-          const SizedBox(height: 2),
-          Text(
-            '合计 ${totalProfit >= 0 ? '+' : ''}${money(totalProfit)}'
-            ' · 与本日历当日一致',
-            style: T.mono(size: 11, color: T.text3),
-          ),
-          const SizedBox(height: T.s2),
-          for (final r in rows) _DayRowTile(row: r, money: money),
-        ],
-      ),
-    );
-  }
-}
-
-class _DayRow {
-  const _DayRow({
-    required this.name,
-    required this.type,
-    required this.value,
-    required this.profit,
-  });
-
-  final String name;
-  final AssetType type;
-  final double value;
-  final double profit;
-}
-
-class _DayRowTile extends StatelessWidget {
-  const _DayRowTile({required this.row, required this.money});
-
-  final _DayRow row;
-  final String Function(double) money;
-
-  @override
-  Widget build(BuildContext context) {
-    final hasProfit = row.profit != 0;
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 5),
-      child: Row(
-        children: [
-          Icon(row.type.icon, size: 16, color: row.type.color),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              row.name,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 13, color: T.text1),
-            ),
-          ),
-          const SizedBox(width: 8),
-          Text(
-            hasProfit
-                ? '${row.profit >= 0 ? '+' : ''}${money(row.profit)}'
-                : '--',
-            style: T.mono(
-              size: 13,
-              weight: FontWeight.w600,
-              color: hasProfit ? T.changeColor(row.profit) : T.text3,
-            ),
-          ),
-        ],
-      ),
-    );
   }
 }

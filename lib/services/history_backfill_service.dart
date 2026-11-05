@@ -7,12 +7,15 @@ import '../core/symbols.dart';
 import '../data/asset_dao.dart';
 import '../data/database.dart';
 import '../domain/holding_cost.dart';
+import '../domain/holding_valuation.dart';
 import '../domain/product_monthly_earnings.dart';
 import '../domain/smooth_history.dart';
 import 'market/history_lookup.dart';
 import 'market/history_source.dart';
 import 'market/market_service.dart';
 import 'market/tencent_history_source.dart';
+
+export '../domain/holding_valuation.dart' show DayHoldingValue;
 
 /// Result of a history backfill run.
 class BackfillResult {
@@ -142,7 +145,8 @@ class HistoryBackfillService {
   /// and an empty series now aborts, but the days written while it was broken
   /// are still flat and a light run never revisits them, so every device
   /// rebuilds the whole window once.
-  static const _sinaHistoryEndpointMarker = 'backfill_v10_sina_history_endpoint';
+  static const _sinaHistoryEndpointMarker =
+      'backfill_v10_sina_history_endpoint';
 
   /// Marker for the v11 one-time full rebuild: the Tencent history gateway
   /// moved again. The v10 fix pointed [TencentHistorySource] at the bare
@@ -154,6 +158,7 @@ class HistoryBackfillService {
   /// written while both hosts were blocked is missing or flat and a light run
   /// never revisits it, so every device rebuilds the whole window once.
   static const _tencentGatewayMarker = 'backfill_v11_tencent_history_gateway';
+  static const _valuationMarker = 'backfill_v12_recorded_holding_values';
 
   /// Date (yyyy-MM-dd) of the previous successful run. A light run re-derives
   /// every day from this date through today, because any of them may have
@@ -381,6 +386,7 @@ class HistoryBackfillService {
         flows,
         from: windowStart,
         to: current,
+        today: current,
         soldPrincipalById: soldPrincipalById,
       );
     }
@@ -408,7 +414,8 @@ class HistoryBackfillService {
         await _dao.getSetting(_shareReplayMarker) == null ||
         await _dao.getSetting(_smoothShareReplayMarker) == null ||
         await _dao.getSetting(_sinaHistoryEndpointMarker) == null ||
-        await _dao.getSetting(_tencentGatewayMarker) == null;
+        await _dao.getSetting(_tencentGatewayMarker) == null ||
+        await _dao.getSetting(_valuationMarker) == null;
     // A type switch that crossed the amount-based boundary changes the
     // *meaning* of the stored numbers (see holding_type_conversion.dart); the
     // days written under the old semantics must not survive a light run (a
@@ -465,6 +472,7 @@ class HistoryBackfillService {
       var liabilities = 0.0;
       var cost = 0.0;
       var hasPrice = false;
+      final holdingValues = <DayHoldingValue>[];
       for (final h in holdings) {
         final buy = h.purchaseDate ?? h.createdAt;
         final buyDay = DateTime(buy.year, buy.month, buy.day);
@@ -492,11 +500,20 @@ class HistoryBackfillService {
           // pre-transfer invested amount — the value/cost pair then changes
           // together and transfers never leak into the daily return.
           final principal = type.isAmountBased
-              ? (smoothPrincipals[h.id]?[key] ??
-                    effectiveCostOf(h))
+              ? (smoothPrincipals[h.id]?[key] ?? effectiveCostOf(h))
               // Replayed total cost for share-based smoothed holdings too.
               : (replays[h.id]?[key]?.$2 ?? h.quantity * h.costPrice);
           cost += principal * costRateOf(h, cnyRates);
+          holdingValues.add(
+            DayHoldingValue(
+              holdingId: h.id,
+              name: h.name,
+              type: type,
+              value: value * valueRateOf(h, cnyRates),
+              cost: principal * costRateOf(h, cnyRates),
+              liability: false,
+            ),
+          );
           continue;
         }
         final filler = fillers[h.id];
@@ -527,6 +544,21 @@ class HistoryBackfillService {
         final replayed = replays[h.id]?[key];
         final shares = replayed?.$1 ?? h.quantity;
         final value = shares * price * valueRateOf(h, cnyRates);
+        final holdingCost =
+            (type.isAmountBased
+                ? effectiveCostOf(h)
+                : replayed?.$2 ?? shares * h.costPrice) *
+            costRateOf(h, cnyRates);
+        holdingValues.add(
+          DayHoldingValue(
+            holdingId: h.id,
+            name: h.name,
+            type: type,
+            value: value,
+            cost: type == AssetType.liability ? 0 : holdingCost,
+            liability: type == AssetType.liability,
+          ),
+        );
         if (type == AssetType.liability) {
           liabilities += value;
         } else {
@@ -549,6 +581,7 @@ class HistoryBackfillService {
             totalValue: assets - liabilities,
             totalCost: cost,
             liabilities: liabilities,
+            holdingValues: encodeHoldingValues(holdingValues),
             createdAt: current,
           ),
         );
@@ -596,6 +629,10 @@ class HistoryBackfillService {
       );
       await _dao.setSetting(
         _tencentGatewayMarker,
+        '${current.millisecondsSinceEpoch}',
+      );
+      await _dao.setSetting(
+        _valuationMarker,
         '${current.millisecondsSinceEpoch}',
       );
     }
@@ -649,7 +686,10 @@ class HistoryBackfillService {
   /// calendar cell (they previously drifted via a separate
   /// ProductEarningsService path). Returns one entry per holding owned on
   /// [day]; liabilities carry [DayHoldingValue.liability] == true.
-  Future<List<DayHoldingValue>> dayHoldingsBreakdown(DateTime day) async {
+  Future<List<DayHoldingValue>> dayHoldingsBreakdown(
+    DateTime day, {
+    DateTime? now,
+  }) async {
     final holdings = await _dao.getHoldings();
     if (holdings.isEmpty) return const [];
     final target = DateTime(day.year, day.month, day.day);
@@ -667,7 +707,10 @@ class HistoryBackfillService {
       if (earliest == null || d.isBefore(earliest)) earliest = d;
     }
     final windowStart = earliest ?? target;
-    final current = DateTime.now();
+    // One clock reading for the whole computation: the smoothed pricing
+    // window and the "is [target] today?" test below must agree, or a run
+    // that crosses midnight would price against two different days.
+    final current = now ?? DateTime.now();
 
     final currencies = holdings
         .where((h) => h.currency != 'CNY' && !isFxLinked(h))
@@ -748,6 +791,7 @@ class HistoryBackfillService {
         flows,
         from: windowStart,
         to: current,
+        today: current,
         soldPrincipalById: soldPrincipalById,
       );
     }
@@ -773,8 +817,7 @@ class HistoryBackfillService {
         }
         value = v * valueRateOf(h, cnyRates);
         final principal = type.isAmountBased
-            ? (smoothPrincipals[h.id]?[key] ??
-                  effectiveCostOf(h))
+            ? (smoothPrincipals[h.id]?[key] ?? effectiveCostOf(h))
             : (replays[h.id]?[key]?.$2 ?? h.quantity * h.costPrice);
         cost = principal * costRateOf(h, cnyRates);
       } else {
@@ -786,7 +829,7 @@ class HistoryBackfillService {
         // current quote; it forward-fills from the series and, when the
         // series does not reach that far back, falls back to its earliest
         // row — the same rule [backfill] applies.
-        final price = _isSameDay(target, DateTime.now())
+        final price = _isSameDay(target, current)
             ? h.latestPrice
             : (hist ?? filler?.firstPrice ?? h.latestPrice);
         final replayed = replays[h.id]?[key];
@@ -811,25 +854,4 @@ class HistoryBackfillService {
     }
     return out;
   }
-}
-
-/// One holding's (market value, cost) on a specific day, in CNY — computed
-/// with the EXACT same pricing/replay rules as the net-worth snapshots, so a
-/// per-holding breakdown sums to the day's snapshot totals.
-class DayHoldingValue {
-  const DayHoldingValue({
-    required this.holdingId,
-    required this.name,
-    required this.type,
-    required this.value,
-    required this.cost,
-    required this.liability,
-  });
-
-  final int holdingId;
-  final String name;
-  final AssetType type;
-  final double value;
-  final double cost;
-  final bool liability;
 }

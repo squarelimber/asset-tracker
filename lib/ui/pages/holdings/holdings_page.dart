@@ -198,12 +198,19 @@ class _HoldingsPageState extends ConsumerState<HoldingsPage> {
   /// fund-type holding — etf + 场外基金). The category match uses the
   /// holding's *effective* category, so a 黄金ETF filed under 黄金 is found
   /// by tapping 黄金 as well as by its own 场内基金 label.
+  ///
+  /// Liabilities are excluded from the category arm: [AssetType.category]
+  /// maps a liability to 现金, and the allocation breakdown skips liabilities
+  /// outright (portfolio_calculator), so without this guard a "现金" search
+  /// would pull in every liability the category views never count.
   bool _matchesQuery(HoldingRow h, String q) {
     final type = AssetType.fromStorage(h.assetType);
     final cat = AssetCategory.values
         .where((c) => c.label == q || c.storageName == q)
         .firstOrNull;
-    if (cat != null && effectiveCategoryOf(h) == cat) return true;
+    if (cat != null && type != AssetType.liability && effectiveCategoryOf(h) == cat) {
+      return true;
+    }
     return h.name.toLowerCase().contains(q) ||
         (h.symbol ?? '').toLowerCase().contains(q) ||
         type.label.toLowerCase().contains(q) ||

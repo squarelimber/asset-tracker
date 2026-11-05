@@ -12,7 +12,12 @@ void main() {
   test('top5WithOther merges tail into 其他', () {
     final entries = List.generate(
       7,
-      (i) => AllocationEntry(label: 'P$i', color: T.accent, value: (i + 1) * 100, pct: (i + 1) / 28),
+      (i) => AllocationEntry(
+        label: 'P$i',
+        color: T.accent,
+        value: (i + 1) * 100,
+        pct: (i + 1) / 28,
+      ),
     );
     final segs = AllocationBars.top5WithOther(entries);
     expect(segs, hasLength(6));
@@ -24,14 +29,39 @@ void main() {
   testWidgets('HeatCell colors by sign and intensity', (tester) async {
     BoxDecoration deco() =>
         tester
-            .widget<Container>(
-                find.descendant(of: find.byType(HeatCell), matching: find.byType(Container)).first)
-            .decoration! as BoxDecoration;
-    await tester.pumpWidget(const MaterialApp(home: SingleChildScrollView(child: HeatCell(value: 100, min: -50, max: 50))));
+                .widget<Container>(
+                  find
+                      .descendant(
+                        of: find.byType(HeatCell),
+                        matching: find.byType(Container),
+                      )
+                      .first,
+                )
+                .decoration!
+            as BoxDecoration;
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: SingleChildScrollView(
+          child: HeatCell(value: 100, min: -50, max: 50),
+        ),
+      ),
+    );
     expect(deco().color!.a, greaterThan(0));
-    await tester.pumpWidget(const MaterialApp(home: SingleChildScrollView(child: HeatCell(value: -100, min: -50, max: 50))));
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: SingleChildScrollView(
+          child: HeatCell(value: -100, min: -50, max: 50),
+        ),
+      ),
+    );
     expect(deco().color!.a, greaterThan(0));
-    await tester.pumpWidget(const MaterialApp(home: SingleChildScrollView(child: HeatCell(value: 0, min: -50, max: 50))));
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: SingleChildScrollView(
+          child: HeatCell(value: 0, min: -50, max: 50),
+        ),
+      ),
+    );
     expect(deco().color!.a, 0);
   });
 
@@ -43,24 +73,36 @@ void main() {
   });
 
   testWidgets('TerminalCard renders bordered surface', (tester) async {
-    await tester.pumpWidget(const MaterialApp(home: TerminalCard(child: Text('x'))));
-    final container = tester.widget<Container>(
-      find.descendant(of: find.byType(TerminalCard), matching: find.byType(Container)).first,
+    await tester.pumpWidget(
+      const MaterialApp(home: TerminalCard(child: Text('x'))),
     );
-    final deco = container.decoration! as BoxDecoration;
-    expect(deco.color, T.surface);
-    expect(deco.border!.top.color, T.border);
+    final material = tester.widget<Material>(
+      find
+          .descendant(
+            of: find.byType(TerminalCard),
+            matching: find.byType(Material),
+          )
+          .first,
+    );
+    expect(material.color, T.surface);
+    expect((material.shape! as RoundedRectangleBorder).side.color, T.border);
   });
 
   testWidgets('TerminalFab is flat accent button with label', (tester) async {
-    await tester.pumpWidget(const MaterialApp(
-      home: Scaffold(
-        floatingActionButton: TerminalFab(onPressed: null, icon: Icons.add, label: '添加'),
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: Scaffold(
+          floatingActionButton: TerminalFab(
+            onPressed: null,
+            icon: Icons.add,
+            label: '添加',
+          ),
+        ),
       ),
-    ));
-    final button = tester.widget<ElevatedButton>(find.byType(ElevatedButton));
+    );
+    final button = tester.widget<FilledButton>(find.byType(FilledButton));
     expect(button.style!.backgroundColor!.resolve(const {}), T.accent);
-    expect(button.style!.elevation!.resolve(const {}), 0);
+    expect(button.style!.elevation?.resolve(const {}) ?? 0, 0);
     expect(find.text('添加'), findsOneWidget);
     expect(find.byIcon(Icons.add), findsOneWidget);
   });

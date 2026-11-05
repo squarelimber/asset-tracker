@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../app/providers.dart';
+import '../../core/responsive.dart';
 import '../tokens.dart';
 
 /// Receipt (history) + bell (alerts, with 24h unread badge) + gear
@@ -12,10 +13,11 @@ class TerminalAppBarActions extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    // Desktop secondary destinations already live in the persistent sidebar.
+    if (Responsive.isDesktop(context)) return const SizedBox.shrink();
     final events = ref.watch(alertEventsProvider).value ?? const [];
     final cutoff = DateTime.now().subtract(const Duration(hours: 24));
-    final unread =
-        events.where((e) => e.triggeredAt.isAfter(cutoff)).length;
+    final unread = events.where((e) => e.triggeredAt.isAfter(cutoff)).length;
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [

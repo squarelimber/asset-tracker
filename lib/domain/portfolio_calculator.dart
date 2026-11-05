@@ -219,6 +219,14 @@ class PortfolioCalculator {
     final typeByHolding = <int, AssetType>{
       for (final h in holdings) h.id: AssetType.fromStorage(h.assetType),
     };
+    // Rate-linked holdings (symbol is the currency code) are already priced
+    // in CNY — their unit price embeds the FX leg — so their realized profit
+    // must NOT be multiplied by a rate again. Mirror valueRateOf/costRateOf,
+    // which apply the same carve-out to market value and cost; skipping it
+    // here double-converts a foreign-listed bank-wealth sell.
+    final fxLinkedByHolding = <int, bool>{
+      for (final h in holdings) h.id: isFxLinked(h),
+    };
     double rateOf(String currency) {
       final rate = cnyRates[currency.toUpperCase()];
       return (rate == null || rate <= 0) ? 1 : rate;
@@ -244,7 +252,10 @@ class PortfolioCalculator {
       final unitCost = costByHolding[holdingId] ?? 0;
       final qty = t.quantity ?? 0;
       final price = t.price ?? 0;
-      total += (price - unitCost) * qty * rateOf(t.currency);
+      final rate = (fxLinkedByHolding[holdingId] ?? false)
+          ? 1.0
+          : rateOf(t.currency);
+      total += (price - unitCost) * qty * rate;
     }
     return total;
   }

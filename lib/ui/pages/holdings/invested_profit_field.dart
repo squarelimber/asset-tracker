@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import '../../../core/formats.dart';
 import '../../components/form_fields.dart';
 
 /// Linked entry for amount-based assets with two modes:
@@ -66,12 +67,9 @@ class _InvestedProfitFieldState extends State<InvestedProfitField> {
 
   /// Plain number without thousands separators, so the text stays
   /// directly parseable by double.tryParse (Formats.smartNum adds commas).
-  static String _plainNum(double v) {
-    if (v == v.roundToDouble()) return v.toInt().toString();
-    var s = v.toStringAsFixed(4);
-    s = s.replaceFirst(RegExp(r'\.?0+$'), '');
-    return s;
-  }
+  /// Thin alias for [Formats.plainNum] — the amounts here are user-entered
+  /// money, so the 4-decimal write precision is what the fields expect.
+  static String _plainNum(double v) => Formats.plainNum(v, decimals: 4);
 
   String _profitText(double invested) {
     if (_amount <= 0) return '';

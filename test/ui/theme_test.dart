@@ -12,10 +12,10 @@ import 'package:go_router/go_router.dart';
 void main() {
   test('dark theme uses terminal tokens', () {
     final t = AppTheme.dark();
-    expect(t.scaffoldBackgroundColor, const Color(0xFF0A0C0F));
-    expect(t.appBarTheme.backgroundColor, const Color(0xFF0A0C0F));
-    expect(t.colorScheme.primary, const Color(0xFF58A6FF));
-    expect(t.cardTheme.color, const Color(0xFF12151A));
+    expect(t.scaffoldBackgroundColor, const Color(0xFF131517));
+    expect(t.appBarTheme.backgroundColor, const Color(0xFF1B1E22));
+    expect(t.colorScheme.primary, const Color(0xFFD5B276));
+    expect(t.cardTheme.color, const Color(0xFF1B1E22));
   });
 
   Future<void> pumpShell(WidgetTester tester, Size size) async {
@@ -30,13 +30,34 @@ void main() {
         ShellRoute(
           builder: (context, state, child) => ShellPage(child: child),
           routes: [
-            GoRoute(path: '/portfolio', builder: (_, _) => const Scaffold(body: Text('组合'))),
-            GoRoute(path: '/holdings', builder: (_, _) => const Scaffold(body: Text('持仓'))),
-            GoRoute(path: '/accounts', builder: (_, _) => const Scaffold(body: Text('账户'))),
-            GoRoute(path: '/markets', builder: (_, _) => const Scaffold(body: Text('行情'))),
-            GoRoute(path: '/stats', builder: (_, _) => const Scaffold(body: Text('统计'))),
-            GoRoute(path: '/alerts', builder: (_, _) => const Scaffold(body: Text('提醒'))),
-            GoRoute(path: '/settings', builder: (_, _) => const Scaffold(body: Text('设置'))),
+            GoRoute(
+              path: '/portfolio',
+              builder: (_, _) => const Scaffold(body: Text('组合')),
+            ),
+            GoRoute(
+              path: '/holdings',
+              builder: (_, _) => const Scaffold(body: Text('持仓')),
+            ),
+            GoRoute(
+              path: '/accounts',
+              builder: (_, _) => const Scaffold(body: Text('账户')),
+            ),
+            GoRoute(
+              path: '/markets',
+              builder: (_, _) => const Scaffold(body: Text('行情')),
+            ),
+            GoRoute(
+              path: '/stats',
+              builder: (_, _) => const Scaffold(body: Text('统计')),
+            ),
+            GoRoute(
+              path: '/alerts',
+              builder: (_, _) => const Scaffold(body: Text('提醒')),
+            ),
+            GoRoute(
+              path: '/settings',
+              builder: (_, _) => const Scaffold(body: Text('设置')),
+            ),
           ],
         ),
       ],
@@ -59,9 +80,14 @@ void main() {
     }
   });
 
-  testWidgets('desktop shell shows 5 rail destinations', (tester) async {
+  testWidgets('desktop sidebar exposes primary and secondary destinations', (
+    tester,
+  ) async {
     await pumpShell(tester, const Size(1400, 900));
-    expect(find.byType(NavigationRail), findsOneWidget);
+    expect(find.byType(NavigationBar), findsNothing);
+    for (final label in ['交易流水', '提醒', '设置']) {
+      expect(find.text(label), findsWidgets);
+    }
     for (final name in ['总览', '持仓', '账户', '行情', '统计']) {
       expect(find.text(name), findsWidgets, reason: 'missing $name');
     }
@@ -73,7 +99,10 @@ void main() {
         overrides: [
           alertEventsProvider.overrideWith((ref) => Stream.value(const [])),
         ],
-        child: MaterialApp(theme: AppTheme.dark(), home: const TerminalAppBarActions()),
+        child: MaterialApp(
+          theme: AppTheme.dark(),
+          home: const TerminalAppBarActions(),
+        ),
       ),
     );
     await tester.pump();

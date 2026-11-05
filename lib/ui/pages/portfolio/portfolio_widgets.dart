@@ -19,6 +19,7 @@ import '../../../services/market/history_source.dart';
 import '../../../services/market/tencent_history_source.dart';
 import '../../components/section_header.dart';
 import '../../components/terminal_card.dart';
+import '../../components/terminal_choice.dart';
 import '../../tokens.dart';
 import 'day_detail_sheet.dart';
 
@@ -51,14 +52,13 @@ class AllocationCard extends ConsumerWidget {
       for (final entry in byCat.entries) (cat: entry.key, value: entry.value),
     ]..sort((a, b) => b.value.compareTo(a.value));
 
-    String amount(double v) => hidden ? Formats.masked() : Formats.money(v);
     // 偏离以「百分点」表述（42% − 40% = +2pp）。偏离由两个百分比相减
     // 得出，不涉及具体金额，因此不受「隐藏金额」开关影响——masked 后
     // 只剩红绿 '--' 反而比数字更暴露结构且无意义。
     String pp(double dev) {
-      final v = dev * 100;
-      final s = v >= 0 ? '+${v.toStringAsFixed(0)}' : v.toStringAsFixed(0);
-      return '$s pp';
+      final rounded = (dev * 100).round();
+      if (rounded == 0) return '0 pp';
+      return '${rounded > 0 ? '+' : ''}$rounded pp';
     }
 
     final hasPlan = catEntries.any((e) => (plan[e.cat] ?? 0) > 0);
@@ -104,7 +104,7 @@ class AllocationCard extends ConsumerWidget {
                             PieChartSectionData(
                               value: e.value,
                               color: e.cat.color,
-                              radius: 22,
+                              radius: 14,
                               showTitle: false,
                             ),
                         ],
@@ -113,10 +113,10 @@ class AllocationCard extends ConsumerWidget {
                     Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Text('总资产', style: T.label(color: T.text3)),
+                        Text('资产类别', style: T.label(color: T.text3)),
                         const SizedBox(height: 2),
                         Text(
-                          narrow ? amountCompact(total) : amount(total),
+                          '${catEntries.length} 类',
                           style: T.mono(
                             size: narrow ? 13 : 15,
                             weight: FontWeight.w700,
@@ -494,85 +494,34 @@ class _NetWorthChartState extends ConsumerState<NetWorthChart> {
     });
   }
 
-  /// Compact view toggle (收益率 / 净值) with a subtle animated indicator.
-  Widget _viewToggle() {
-    return Container(
-      decoration: BoxDecoration(
-        color: T.surface2.withValues(alpha: 0.6),
-        borderRadius: BorderRadius.circular(T.rPill),
-        border: Border.all(color: T.borderSoft),
-      ),
-      padding: const EdgeInsets.all(2),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          for (final v in _TrendView.values)
-            Padding(
-              padding: const EdgeInsets.all(1),
-              child: GestureDetector(
-                onTap: () => setState(() => _view = v),
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 180),
-                  curve: Curves.easeOut,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 3,
-                  ),
-                  decoration: BoxDecoration(
-                    color: _view == v ? T.surface : Colors.transparent,
-                    borderRadius: BorderRadius.circular(T.rPill),
-                  ),
-                  child: Text(
-                    v == _TrendView.returnRate ? '收益率' : '净值',
-                    style: T.label(
-                      size: 11,
-                      color: _view == v ? T.text1 : T.text2,
-                    ),
-                  ),
-                ),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
+  Widget _viewToggle() => Row(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      for (final view in _TrendView.values)
+        TerminalChoice(
+          label: view == _TrendView.returnRate ? '收益率' : '净值',
+          selected: _view == view,
+          onPressed: () => setState(() => _view = view),
+        ),
+    ],
+  );
 
-  /// Compact range chip (近1月 / 近3月 / … / 自定义) matching the borderless
-  /// look. When [custom] is set the chip acts as the「自定义」entry that
-  /// opens the range picker, highlighted when a custom range is active.
   Widget _rangeChip(
     RangeOption opt, {
     bool custom = false,
     VoidCallback? onCustomTap,
   }) {
     final selected = custom ? _range == RangeOption.custom : _range == opt;
-    final isCustom = custom && _range == RangeOption.custom;
-    return GestureDetector(
-      onTap: custom
+    return TerminalChoice(
+      label: custom
+          ? (selected
+                ? '自定义: ${Formats.date(_customFrom ?? DateTime.now()).substring(5)}'
+                : '自定义')
+          : opt.label,
+      selected: selected,
+      onPressed: custom
           ? (onCustomTap ?? _showRangeMenu)
           : () => setState(() => _range = opt),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 180),
-        curve: Curves.easeOut,
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-        decoration: BoxDecoration(
-          color: selected
-              ? T.accent.withValues(alpha: 0.14)
-              : Colors.transparent,
-          borderRadius: BorderRadius.circular(T.rPill),
-          border: Border.all(
-            color: selected ? T.accent.withValues(alpha: 0.5) : T.borderSoft,
-          ),
-        ),
-        child: Text(
-          custom
-              ? (isCustom
-                    ? '自定义: ${Formats.date(_customFrom ?? DateTime.now()).substring(5)}'
-                    : '自定义')
-              : opt.label,
-          style: T.label(size: 11, color: selected ? T.accent : T.text2),
-        ),
-      ),
     );
   }
 
@@ -935,24 +884,15 @@ class _TrendChart extends StatefulWidget {
   /// Called with the tapped snapshot date (yyyy-MM-dd).
   final ValueChanged<String>? onDayTap;
 
-  /// Point count beyond which the series is downsampled for phone screens.
-  static const _denseThreshold = 240;
-
   @override
   State<_TrendChart> createState() => _TrendChartState();
 }
 
-class _TrendChartState extends State<_TrendChart>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _pulse = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 1600),
-  )..repeat();
+class _TrendChartState extends State<_TrendChart> {
   final _hoverIndex = ValueNotifier<int?>(null);
 
   @override
   void dispose() {
-    _pulse.dispose();
     _hoverIndex.dispose();
     super.dispose();
   }
@@ -964,8 +904,7 @@ class _TrendChartState extends State<_TrendChart>
     final rates = widget.rates;
     final hideAmounts = widget.hideAmounts;
 
-    // 曲线用青→紫横向渐变（跨整幅绘图区：gradientArea 见 lineBarsData），
-    // 不随涨跌变色；涨跌由统计数字与末端脉冲点表达。
+    // Keep measurements neutral; P&L readouts carry red/green semantics.
     final isRate = view == _TrendView.returnRate;
     // Normalize the asset series to start at 0% at the range start, so it
     // shares the same baseline as the normalized index benchmarks: both
@@ -1019,7 +958,6 @@ class _TrendChartState extends State<_TrendChart>
     final axisMin = ticks.ticks.first;
     final axisMax = ticks.ticks.last;
     final longRange = list.length > 250;
-    final dense = list.length > _TrendChart._denseThreshold;
     // Axis labels use the step's precision; the tooltip keeps 2 decimals.
     String pctLabel(double pctPoints, int decimals) {
       final rounded = double.parse(pctPoints.toStringAsFixed(decimals));
@@ -1266,26 +1204,9 @@ class _TrendChartState extends State<_TrendChart>
                     lineBarsData: [
                       LineChartBarData(
                         spots: points,
-                        isCurved: !dense,
-                        curveSmoothness: 0.25,
-                        gradient: T.trendGlowGradient,
-                        gradientArea: LineChartGradientArea.wholeChart,
-                        barWidth: 6,
-                        dotData: const FlDotData(show: false),
-                      ),
-                      LineChartBarData(
-                        spots: points,
-                        // Dense series (downsampled) are drawn as straight segments;
-                        // smoothing hundreds of points into a narrow plot creates
-                        // loops and false detail. Short ranges keep the smooth curve.
-                        isCurved: !dense,
-                        curveSmoothness: 0.25,
-                        // 渐变横向铺满整幅绘图区，两端色才分别落在左右边缘；
-                        // 留 rectAroundTheLine 会让渐变被曲线包围盒（左右两端
-                        // 的取整）压缩，紫端提前出现。
-                        gradient: T.trendGradient,
-                        gradientArea: LineChartGradientArea.wholeChart,
-                        barWidth: dense ? 2 : 2.5,
+                        isCurved: false,
+                        color: T.trendFrom,
+                        barWidth: 1.6,
                         dotData: const FlDotData(show: false),
                         belowBarData: BarAreaData(
                           show: true,
@@ -1295,7 +1216,7 @@ class _TrendChartState extends State<_TrendChart>
                       for (final entry in benchSeries.entries)
                         LineChartBarData(
                           spots: entry.value,
-                          isCurved: !dense,
+                          isCurved: false,
                           curveSmoothness: 0.25,
                           color: entry.key.color.withValues(alpha: 0.8),
                           barWidth: 1.5,
@@ -1312,12 +1233,11 @@ class _TrendChartState extends State<_TrendChart>
                     height: plotSize.height,
                     child: IgnorePointer(
                       child: AnimatedBuilder(
-                        animation: Listenable.merge([_pulse, _hoverIndex]),
+                        animation: _hoverIndex,
                         builder: (context, _) => CustomPaint(
                           size: plotSize,
                           painter: _TrendOverlayPainter(
                             hoverIndex: _hoverIndex.value,
-                            pulse: _pulse.value,
                             list: list,
                             view: view,
                             rates: rates,
@@ -1387,7 +1307,6 @@ List<String> trendHoverLabelLines({
 class _TrendOverlayPainter extends CustomPainter {
   const _TrendOverlayPainter({
     required this.hoverIndex,
-    required this.pulse,
     required this.list,
     required this.view,
     required this.rates,
@@ -1401,7 +1320,6 @@ class _TrendOverlayPainter extends CustomPainter {
   });
 
   final int? hoverIndex;
-  final double pulse;
   final List<SnapshotRow> list;
   final _TrendView view;
   final List<double> rates;
@@ -1423,19 +1341,12 @@ class _TrendOverlayPainter extends CustomPainter {
         (1 - (value - axisMin) / ySpan).clamp(0.0, 1.0) * size.height;
 
     final lastPoint = Offset(xOf(lastX), yOf(lastValue));
-    // 末端点取渐变末色（曲线右端在渐变末尾）：曲线是渐变的，这一笔若还用
-    // 起点青，末端就会出现「紫线顶着青点」的断裂感。
+    // Static last observation; crosshairs appear only on interaction.
     canvas.drawCircle(
       lastPoint,
       3,
       Paint()..color = T.trendTo.withValues(alpha: 0.9),
     );
-    canvas.drawCircle(
-      lastPoint,
-      5 + 4 * pulse,
-      Paint()..color = T.trendTo.withValues(alpha: 0.35 * (1 - pulse)),
-    );
-
     final idx = hoverIndex;
     if (idx == null || idx < 0 || idx >= list.length) return;
     final isRate = view == _TrendView.returnRate;
@@ -1546,7 +1457,6 @@ class _TrendOverlayPainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant _TrendOverlayPainter old) =>
       old.hoverIndex != hoverIndex ||
-      old.pulse != pulse ||
       old.list != list ||
       old.view != view ||
       old.rates != rates ||
@@ -1555,7 +1465,8 @@ class _TrendOverlayPainter extends CustomPainter {
       old.firstX != firstX ||
       old.xSpan != xSpan ||
       old.lastX != lastX ||
-      old.lastValue != lastValue;
+      old.lastValue != lastValue ||
+      old.hideAmounts != hideAmounts;
 }
 
 class _LegendDot extends StatelessWidget {
@@ -1606,83 +1517,19 @@ class _LinePainter extends CustomPainter {
       oldDelegate.color != color || oldDelegate.gradient != gradient;
 }
 
-/// 内凹嵌入式面板（趋势板块用）：面板底色为 surface，四边内侧用渐变
-/// 暗边模拟「嵌进页面里的凹槽」——上边缘压暗、中心渐亮，底部微透光，
-/// 视觉上是凹陷（inset）而不是浮起的卡片。配合细 borderSoft 边框。
+/// Chart panel shares the same surface and border as the other data panels.
 class _InsetPanel extends StatelessWidget {
   const _InsetPanel({required this.child});
-
   final Widget child;
 
   @override
-  Widget build(BuildContext context) {
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: T.surface,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: T.borderSoft),
-      ),
-      child: CustomPaint(
-        painter: const _InsetShadowPainter(),
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(12, 4, 12, 6),
-          child: child,
-        ),
-      ),
-    );
-  }
-}
-
-/// 在面板内缘画一圈渐变暗边：上/下边缘黑晕 → 中心透明，制造凹陷光影。
-class _InsetShadowPainter extends CustomPainter {
-  const _InsetShadowPainter();
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    const inset = 1.5;
-
-    // 1) 顶部内侧：黑色渐变向下扩散（坑壁上沿最暗）。
-    final top = Paint()
-      ..shader = const LinearGradient(
-        begin: Alignment.topCenter,
-        end: Alignment.bottomCenter,
-        colors: [Color(0x99000000), Color(0x00000000)],
-      ).createShader(Rect.fromLTWH(0, 0, size.width, 26));
-    canvas.drawRect(
-      Rect.fromLTWH(inset, inset, size.width - 2 * inset, 26),
-      top,
-    );
-
-    // 2) 底部内侧：轻微黑晕（坑壁下沿）。
-    final bottom = Paint()
-      ..shader = const LinearGradient(
-        begin: Alignment.bottomCenter,
-        end: Alignment.topCenter,
-        colors: [Color(0x66000000), Color(0x00000000)],
-      ).createShader(Rect.fromLTWH(0, size.height - 26, size.width, 26));
-    canvas.drawRect(
-      Rect.fromLTWH(
-        inset,
-        size.height - 26 - inset,
-        size.width - 2 * inset,
-        26,
-      ),
-      bottom,
-    );
-
-    // 3) 左右两侧极淡暗边，收一下板面。
-    final side = Paint()
-      ..shader = const LinearGradient(
-        begin: Alignment.centerLeft,
-        end: Alignment.centerRight,
-        colors: [Color(0x33000000), Color(0x00000000)],
-      ).createShader(Rect.fromLTWH(0, 0, 22, size.height));
-    canvas.drawRect(
-      Rect.fromLTWH(inset, inset, 22, size.height - 2 * inset),
-      side,
-    );
-  }
-
-  @override
-  bool shouldRepaint(covariant _InsetShadowPainter oldDelegate) => false;
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+    decoration: BoxDecoration(
+      color: T.surface,
+      borderRadius: BorderRadius.circular(T.rCard),
+      border: Border.all(color: T.border),
+    ),
+    child: child,
+  );
 }

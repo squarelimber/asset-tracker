@@ -16,10 +16,10 @@ class StatusChip extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
       decoration: BoxDecoration(
         color: T.surface2,
-        borderRadius: BorderRadius.circular(4),
+        borderRadius: BorderRadius.circular(2),
         border: Border.all(color: T.border),
       ),
-      child: Text(label, style: T.mono(size: 10, color: T.text2)),
+      child: Text(label, style: T.label(size: 10, color: T.text2)),
     );
   }
 }
