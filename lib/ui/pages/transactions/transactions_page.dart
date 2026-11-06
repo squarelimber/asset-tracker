@@ -17,6 +17,7 @@ import '../../../services/file_export.dart';
 import '../../components/app_bar_actions.dart';
 import '../../components/error_state.dart';
 import '../../components/form_fields.dart';
+import '../../components/secondary_page_back_button.dart';
 import '../../components/terminal_card.dart';
 import '../../components/transaction_tile.dart';
 import '../../tokens.dart';
@@ -234,6 +235,7 @@ class _TransactionsPageState extends ConsumerState<TransactionsPage> {
 
     return Scaffold(
       appBar: AppBar(
+        leading: Responsive.isDesktop(context) ? null : const SecondaryPageBackButton(),
         title: const Text('交易流水'),
         actions: [
           IconButton(

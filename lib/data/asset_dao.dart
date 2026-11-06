@@ -550,6 +550,15 @@ class AssetDao {
         .getSingleOrNull();
   }
 
+  Future<List<AlertEventRow>> getAlertEventsForDay(
+      int ruleId, DateTime dayStart, DateTime dayEnd) {
+    return (_db.select(_db.alertEvents)
+          ..where((t) => t.ruleId.equals(ruleId) &
+              t.triggeredAt.isBiggerOrEqualValue(dayStart) &
+              t.triggeredAt.isSmallerThanValue(dayEnd)))
+        .get();
+  }
+
   Stream<List<AlertEventRow>> watchRecentAlertEvents({int limit = 20}) {
     return (_db.select(_db.alertEvents)
           ..orderBy([(t) => OrderingTerm.desc(t.triggeredAt)])

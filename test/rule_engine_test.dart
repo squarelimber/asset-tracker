@@ -189,6 +189,23 @@ void main() {
   });
 
   group('CashflowEvaluator', () {
+    test('short month and cross-month advance are explicit opt-ins', () {
+      final rule = _rule(id: 7, type: AlertRuleType.cashflow, params: {
+        'dayOfMonth': 31, 'label': '到期', 'advanceDays': 2,
+        'shortMonthLastDay': true,
+      });
+      final evaluator = const CashflowEvaluator();
+      expect(evaluator.evaluate(rule, _ctx(holdings: [], now: DateTime(2027, 2, 26))), hasLength(1));
+      expect(evaluator.evaluate(rule, _ctx(holdings: [], now: DateTime(2027, 2, 28))), hasLength(1));
+      expect(evaluator.evaluate(rule, _ctx(holdings: [], now: DateTime(2027, 2, 27))), isEmpty);
+      final crossMonth = _rule(id: 8, type: AlertRuleType.cashflow, params: {
+        'dayOfMonth': 1, 'label': '月初', 'advanceDays': 2,
+      });
+      final events = evaluator.evaluate(crossMonth, _ctx(holdings: [], now: DateTime(2026, 12, 30)));
+      expect(events.single.message, contains('1 月 1 日'));
+      final legacy = _rule(id: 9, type: AlertRuleType.cashflow, params: {'dayOfMonth': 31});
+      expect(evaluator.evaluate(legacy, _ctx(holdings: [], now: DateTime(2027, 2, 28))), isEmpty);
+    });
     test('alerts on the configured day', () {
       final results = const CashflowEvaluator().evaluate(
         _rule(id: 1, type: AlertRuleType.cashflow, params: {'dayOfMonth': 8, 'label': '鎴胯捶杩樻'}),

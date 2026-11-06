@@ -39,8 +39,9 @@ Map<AssetCategory, double> parseTargetAllocation(String? raw) {
   try {
     final decoded = jsonDecode(raw);
     if (decoded is! Map) return {...defaultTargetAllocation};
-    final hasLegacy =
-        decoded.keys.any((k) => _legacyCategoryKeys.containsKey(k.toString()));
+    final hasLegacy = decoded.keys.any(
+      (k) => _legacyCategoryKeys.containsKey(k.toString()),
+    );
     // A legacy plan is migrated wholesale (defaults are not mixed in);
     // a current-format plan overlays the defaults as before.
     final result = hasLegacy
@@ -118,15 +119,15 @@ Map<AssetCategory, double> normalizeTargetAllocation(
 String encodeTargetAllocation(Map<AssetCategory, double> plan) {
   final map = {
     for (final entry in plan.entries)
-      entry.key.storageName:
-          double.parse(entry.value.toStringAsFixed(1)),
+      entry.key.storageName: double.parse(entry.value.toStringAsFixed(1)),
   };
   return jsonEncode(map);
 }
 
 /// Reactive read of the user's target allocation plan.
-final targetAllocationProvider =
-    FutureProvider<Map<AssetCategory, double>>((ref) async {
+final targetAllocationProvider = FutureProvider<Map<AssetCategory, double>>((
+  ref,
+) async {
   final dao = ref.watch(daoProvider);
   final raw = await dao.getSetting(targetAllocationKey);
   return parseTargetAllocation(raw);
@@ -142,5 +143,24 @@ Future<void> saveTargetAllocation(
   await dao.setSetting(
     targetAllocationKey,
     encodeTargetAllocation(normalizeTargetAllocation(plan)),
+  );
+}
+
+/// Saves already validated targets without rounding existing values.
+Future<void> saveExactTargetAllocation(
+  AssetDao dao,
+  Map<AssetCategory, double> plan,
+) async {
+  final values = plan.values;
+  if (values.any((value) => !value.isFinite || value < 0 || value > 100) ||
+      values.fold<double>(0, (sum, value) => sum + value) > 100.000000001) {
+    throw ArgumentError('目标配置必须在 0–100% 范围内且总和不超过 100%');
+  }
+  await dao.setSetting(
+    targetAllocationKey,
+    jsonEncode({
+      for (final category in AssetCategory.values)
+        category.storageName: plan[category] ?? 0,
+    }),
   );
 }

@@ -44,7 +44,7 @@ class NotificationService {
     if (defaultTargetPlatform == TargetPlatform.android) {
       await _plugin.initialize(
         settings: const InitializationSettings(
-          android: AndroidInitializationSettings('@mipmap/ic_launcher'),
+          android: AndroidInitializationSettings('ic_stat_tracker'),
         ),
       );
       final android = _plugin.resolvePlatformSpecificImplementation<

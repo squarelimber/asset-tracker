@@ -1,4 +1,5 @@
 import 'package:asset_tracker/ui/shell/shell_page.dart';
+import 'package:asset_tracker/ui/components/secondary_page_back_button.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
@@ -77,4 +78,74 @@ void main() {
     );
     expect(tester.widget<PopScope>(pops).canPop, isTrue);
   });
+
+  testWidgets('phone secondary page returns to originating tab', (tester) async {
+    tester.view.physicalSize = const Size(390, 850);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final router = GoRouter(
+      initialLocation: '/holdings',
+      routes: [ShellRoute(
+        builder: (context, state, child) => ShellPage(child: child),
+        routes: [
+          GoRoute(path: '/portfolio', builder: (_, _) => const Scaffold(body: Text('overview'))),
+          GoRoute(path: '/holdings', builder: (context, _) => Scaffold(
+            body: TextButton(onPressed: () => context.push('/settings'), child: const Text('open settings')),
+          )),
+          GoRoute(path: '/settings', builder: (_, _) => const Scaffold(
+            appBar: _SecondaryAppBar(),
+          )),
+        ],
+      )],
+    );
+    addTearDown(router.dispose);
+    await tester.pumpWidget(app(router));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('open settings'));
+    await tester.pumpAndSettle();
+    expect(router.state.uri.path, '/settings');
+    expect(find.byType(NavigationBar), findsNothing);
+    await tester.tap(find.byTooltip('返回'));
+    await tester.pumpAndSettle();
+    expect(router.state.uri.path, '/holdings');
+    expect(find.byType(NavigationBar), findsOneWidget);
+    await tester.tap(find.text('open settings'));
+    await tester.pumpAndSettle();
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    expect(router.state.uri.path, '/holdings');
+  });
+
+  testWidgets('direct secondary link has a fallback back action', (tester) async {
+    tester.view.physicalSize = const Size(390, 850);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final router = GoRouter(initialLocation: '/settings', routes: [ShellRoute(
+      builder: (context, state, child) => ShellPage(child: child),
+      routes: [
+        GoRoute(path: '/portfolio', builder: (_, _) => const Scaffold(body: Text('overview'))),
+        GoRoute(path: '/settings', builder: (_, _) => const Scaffold(appBar: _SecondaryAppBar())),
+      ],
+    )]);
+    addTearDown(router.dispose);
+    await tester.pumpWidget(app(router));
+    await tester.pumpAndSettle();
+    expect(find.byType(NavigationBar), findsNothing);
+    await tester.tap(find.byTooltip('返回'));
+    await tester.pumpAndSettle();
+    expect(router.state.uri.path, '/portfolio');
+  });
+}
+
+class _SecondaryAppBar extends StatelessWidget implements PreferredSizeWidget {
+  const _SecondaryAppBar();
+
+  @override
+  Size get preferredSize => const Size.fromHeight(kToolbarHeight);
+
+  @override
+  Widget build(BuildContext context) => AppBar(
+    leading: const SecondaryPageBackButton(),
+    title: const Text('Settings'),
+  );
 }

@@ -14,12 +14,17 @@ class AlertResult {
     required this.level,
     required this.title,
     required this.message,
+    this.dedupPrefix,
   });
 
   final int ruleId;
   final AlertLevel level;
   final String title;
   final String message;
+
+  /// Stable message prefix for separate subjects under one rule, such as
+  /// holdings that happen to have the same display name.
+  final String? dedupPrefix;
 }
 
 /// Everything a rule needs to evaluate.
@@ -29,6 +34,7 @@ class RuleContext {
     required this.holdings,
     this.priceCache = const {},
     this.cnyRates = const {},
+    this.targetAllocation = const {},
     DateTime? now,
   }) : now = now ?? DateTime.now();
 
@@ -41,6 +47,9 @@ class RuleContext {
   /// currency -> CNY rate, so foreign-currency holdings are measured
   /// against the CNY total instead of mixing raw foreign amounts in.
   final Map<String, double> cnyRates;
+
+  /// Target percentages, in the same 0–100 units as the allocation editor.
+  final Map<AssetCategory, double> targetAllocation;
   final DateTime now;
 }
 
@@ -83,17 +92,25 @@ class ConcentrationEvaluator extends RuleEvaluator {
     final results = <AlertResult>[];
     for (final h in ctx.holdings) {
       if (AssetType.fromStorage(h.assetType) == AssetType.liability) continue;
+      final type = AssetType.fromStorage(h.assetType);
       final marketValue =
-          h.quantity * h.latestPrice * valueRateOf(h, ctx.cnyRates);
+          (type.isAmountBased ? h.quantity : h.quantity * h.latestPrice) *
+          valueRateOf(h, ctx.cnyRates);
       final ratio = marketValue / total;
       if (ratio > threshold) {
-        results.add(AlertResult(
-          ruleId: rule.id,
-          level: ratio > threshold * 1.2 ? AlertLevel.danger : AlertLevel.warning,
-          title: '集中度风险',
-          message: '「${h.name}」市值 ${_money(marketValue)} 占总资产 ${_pct(ratio)}，'
-              '超过阈值 ${_pct(threshold)}',
-        ));
+        results.add(
+          AlertResult(
+            ruleId: rule.id,
+            level: ratio > threshold * 1.2
+                ? AlertLevel.danger
+                : AlertLevel.warning,
+            title: '集中度风险',
+            dedupPrefix: '持仓 #${h.id} ',
+            message:
+                '持仓 #${h.id} 「${h.name}」市值 ${_money(marketValue)} 占总资产 ${_pct(ratio)}，'
+                '超过阈值 ${_pct(threshold)}',
+          ),
+        );
       }
     }
     return results;
@@ -113,7 +130,10 @@ class AssetRatioEvaluator extends RuleEvaluator {
   @override
   List<AlertResult> evaluate(AlertRuleRow rule, RuleContext ctx) {
     final params = paramsOf(rule);
-    final target = (params['target'] as num?)?.toDouble() ?? 0.6;
+    // Existing rules omit followTarget and retain their original custom value.
+    final target = params['followTarget'] == true
+        ? (ctx.targetAllocation[AssetCategory.equity] ?? 40) / 100
+        : (params['target'] as num?)?.toDouble() ?? 0.6;
     final tolerance = (params['tolerance'] as num?)?.toDouble() ?? 0.15;
     final total = ctx.summary.totalAssets;
     if (total <= 0) return const [];
@@ -139,7 +159,8 @@ class AssetRatioEvaluator extends RuleEvaluator {
           ruleId: rule.id,
           level: AlertLevel.warning,
           title: '配置比例偏离',
-          message: '权益类资产占比 ${_pct(ratio)}，目标 ${_pct(target)}'
+          message:
+              '权益类资产占比 ${_pct(ratio)}，目标 ${_pct(target)}'
               '（允许 ${_pct(lower)}~${_pct(upper)}），当前$direction',
         ),
       ];
@@ -192,19 +213,57 @@ class CashflowEvaluator extends RuleEvaluator {
   @override
   List<AlertResult> evaluate(AlertRuleRow rule, RuleContext ctx) {
     final params = paramsOf(rule);
-    final day = (params['dayOfMonth'] as num?)?.toInt() ?? 1;
+    final day = ((params['dayOfMonth'] as num?)?.toInt() ?? 1).clamp(1, 31);
     final label = params['label']?.toString() ?? '现金流事项';
-    if (ctx.now.day == day) {
-      return [
+    final advance = ((params['advanceDays'] as num?)?.toInt() ?? 0).clamp(
+      0,
+      30,
+    );
+    final useLastDay = params['shortMonthLastDay'] == true;
+    final today = DateTime(ctx.now.year, ctx.now.month, ctx.now.day);
+    DateTime? dueIn(int year, int month) {
+      final first = DateTime(year, month);
+      final lastDay = DateTime(first.year, first.month + 1, 0).day;
+      if (day > lastDay && !useLastDay) return null;
+      return DateTime(first.year, first.month, day.clamp(1, lastDay));
+    }
+
+    // A 30-day lead time can reach two calendar months ahead (e.g. Jan 30
+    // to Mar 1 in a non-leap year). Keep every matching occurrence, since
+    // today's due date and next month's advance date can coincide.
+    final results = <AlertResult>[];
+    for (final due in [
+      dueIn(today.year, today.month),
+      dueIn(today.year, today.month + 1),
+      dueIn(today.year, today.month + 2),
+    ]) {
+      if (due == null) continue;
+      final daysUntil = DateTime.utc(
+        due.year,
+        due.month,
+        due.day,
+      ).difference(DateTime.utc(today.year, today.month, today.day)).inDays;
+      if (daysUntil != 0 && (advance == 0 || daysUntil != advance)) continue;
+      final dateKey =
+          '${due.year.toString().padLeft(4, '0')}-'
+          '${due.month.toString().padLeft(2, '0')}-'
+          '${due.day.toString().padLeft(2, '0')}';
+      // A rule without advance reminders keeps its original message and
+      // dedup behavior, including compatibility with existing event records.
+      final prefix = advance > 0 ? '到期 $dateKey · ' : '';
+      results.add(
         AlertResult(
           ruleId: rule.id,
           level: AlertLevel.info,
           title: '现金流提醒',
-          message: '今天是 $label 日（每月 $day 号），请留意资金安排',
+          dedupPrefix: advance > 0 ? prefix : null,
+          message: daysUntil == 0
+              ? '$prefix今天是 $label 日（每月 $day 号），请留意资金安排'
+              : '$prefix$label 将于 ${due.month} 月 ${due.day} 日到期（提前 $daysUntil 天），请留意资金安排',
         ),
-      ];
+      );
     }
-    return const [];
+    return results;
   }
 }
 

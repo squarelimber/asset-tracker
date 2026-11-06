@@ -95,7 +95,7 @@ server/         # optional self-hosted sync server (Dart/shelf, Docker)
 
 ## Releases
 
-Latest: **v0.11.1** — see [CHANGELOG.md](CHANGELOG.md) for per-version notes. Releases ship Android APKs, Windows zip and the web build via GitHub Actions.
+Latest: **v0.11.2** — see [CHANGELOG.md](CHANGELOG.md) for per-version notes. Releases ship Android APKs, Windows zip and the web build via GitHub Actions.
 
 ## Disclaimer
 

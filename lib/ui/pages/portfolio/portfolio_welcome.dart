@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../domain/portfolio_calculator.dart';
 import '../../tokens.dart';
+import 'target_allocation_dialog.dart';
 
 /// Setup belongs to the workspace, with the same row vocabulary as data views.
 class PortfolioWelcome extends StatelessWidget {
@@ -40,9 +42,26 @@ class PortfolioWelcome extends StatelessWidget {
                   label: Text(hasAccounts ? '添加第一笔持仓' : '创建第一个账户'),
                 ),
                 OutlinedButton.icon(
-                  onPressed: () => context.go('/settings'),
+                  onPressed: () => context.push('/settings'),
                   icon: const Icon(Icons.file_upload_outlined, size: 17),
                   label: const Text('导入已有备份'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: () => showDialog<void>(
+                    context: context,
+                    builder: (_) => const TargetAllocationDialog(
+                      summary: PortfolioSummary(
+                        totalAssets: 0,
+                        totalLiabilities: 0,
+                        totalCost: 0,
+                        todayChange: 0,
+                        todayChangePct: null,
+                        breakdown: [],
+                      ),
+                    ),
+                  ),
+                  icon: const Icon(Icons.tune, size: 17),
+                  label: const Text('设置资产配置目标'),
                 ),
               ],
             ),
@@ -96,7 +115,8 @@ class PortfolioWelcome extends StatelessWidget {
   ) => Material(
     color: Colors.transparent,
     child: InkWell(
-      onTap: () => context.go(path),
+      onTap: () =>
+          path == '/transactions' ? context.push(path) : context.go(path),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 18),
         child: Row(

@@ -15,18 +15,21 @@ class TerminalAppBarActions extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     // Desktop secondary destinations already live in the persistent sidebar.
     if (Responsive.isDesktop(context)) return const SizedBox.shrink();
+    final currentPath = GoRouter.maybeOf(context) == null
+        ? null
+        : GoRouterState.of(context).uri.path;
     final events = ref.watch(alertEventsProvider).value ?? const [];
     final cutoff = DateTime.now().subtract(const Duration(hours: 24));
     final unread = events.where((e) => e.triggeredAt.isAfter(cutoff)).length;
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        IconButton(
+        if (currentPath != '/transactions') IconButton(
           tooltip: '交易流水',
           icon: const Icon(Icons.receipt_long_outlined, color: T.text2),
-          onPressed: () => context.go('/transactions'),
+          onPressed: () => context.push('/transactions'),
         ),
-        IconButton(
+        if (currentPath != '/alerts') IconButton(
           tooltip: '提醒',
           icon: Badge(
             isLabelVisible: unread > 0,
@@ -34,12 +37,12 @@ class TerminalAppBarActions extends ConsumerWidget {
             backgroundColor: T.up,
             child: const Icon(Icons.notifications_outlined, color: T.text2),
           ),
-          onPressed: () => context.go('/alerts'),
+          onPressed: () => context.push('/alerts'),
         ),
-        IconButton(
+        if (currentPath != '/settings') IconButton(
           tooltip: '设置',
           icon: const Icon(Icons.settings_outlined, color: T.text2),
-          onPressed: () => context.go('/settings'),
+          onPressed: () => context.push('/settings'),
         ),
       ],
     );

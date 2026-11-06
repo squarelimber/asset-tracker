@@ -22,6 +22,7 @@ import '../../components/terminal_card.dart';
 import '../../components/terminal_choice.dart';
 import '../../tokens.dart';
 import 'day_detail_sheet.dart';
+import 'target_allocation_dialog.dart';
 
 /// Asset allocation: donut + table (实际/目标/偏离), reference-mock layout.
 class AllocationCard extends ConsumerWidget {
@@ -35,8 +36,23 @@ class AllocationCard extends ConsumerWidget {
     final breakdown = summary.breakdown.where((b) => b.marketValue > 0).toList()
       ..sort((a, b) => b.marketValue.compareTo(a.marketValue));
     if (breakdown.isEmpty) {
-      return const TerminalCard(
-        child: Text('暂无资产配置数据', style: TextStyle(color: T.text3)),
+      return TerminalCard(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(children: [
+              const Expanded(child: SectionHeader(label: '资产配置')),
+              TextButton(
+                onPressed: () => showDialog<void>(
+                  context: context,
+                  builder: (_) => TargetAllocationDialog(summary: summary),
+                ),
+                child: const Text('调整目标'),
+              ),
+            ]),
+            const Text('暂无资产配置数据', style: TextStyle(color: T.text3)),
+          ],
+        ),
       );
     }
     final total = summary.totalAssets;
@@ -81,7 +97,16 @@ class AllocationCard extends ConsumerWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const SectionHeader(label: '资产配置'),
+          Row(children: [
+            const Expanded(child: SectionHeader(label: '资产配置')),
+            TextButton(
+              onPressed: () => showDialog<void>(
+                context: context,
+                builder: (_) => TargetAllocationDialog(summary: summary),
+              ),
+              child: const Text('调整目标'),
+            ),
+          ]),
           const SizedBox(height: T.s2),
           Row(
             crossAxisAlignment: CrossAxisAlignment.center,

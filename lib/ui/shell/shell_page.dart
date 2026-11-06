@@ -59,6 +59,8 @@ class ShellPage extends StatelessWidget {
     '/settings',
   };
 
+  static const _secondaryPaths = {'/transactions', '/alerts', '/settings'};
+
   @override
   Widget build(BuildContext context) {
     // Exact match (not prefix): a shell-level page has no stack to pop (back
@@ -66,8 +68,9 @@ class ShellPage extends StatelessWidget {
     // routes must pop normally. /portfolio itself is allowed to pop so the
     // system back gesture / edge swipe can exit the app from the root page.
     final currentPath = GoRouterState.of(context).uri.path;
-    final canPop =
-        currentPath == '/portfolio' || !_shellPaths.contains(currentPath);
+    final canPop = currentPath == '/portfolio' ||
+        !_shellPaths.contains(currentPath) ||
+        (_secondaryPaths.contains(currentPath) && context.canPop());
 
     Widget child = _shellBody(context);
     child = PopScope(
@@ -114,9 +117,10 @@ class _PhoneShell extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final path = GoRouterState.of(context).uri.path;
     return Scaffold(
       body: child,
-      bottomNavigationBar: NavigationBar(
+      bottomNavigationBar: ShellPage._secondaryPaths.contains(path) ? null : NavigationBar(
         selectedIndex: _selectedIndex(context),
         onDestinationSelected: (i) =>
             context.go(ShellPage._destinations[i].path),
@@ -166,10 +170,11 @@ class _DesktopShell extends StatelessWidget {
                     padding: const EdgeInsets.fromLTRB(16, 22, 12, 24),
                     child: Row(
                       children: [
-                        const Icon(
-                          Icons.stacked_line_chart,
-                          color: T.text2,
-                          size: 24,
+                        Image.asset(
+                          'assets/branding/logo.png',
+                          width: 28,
+                          height: 28,
+                          semanticLabel: 'Asset Tracker',
                         ),
                         const SizedBox(width: 10),
                         const Expanded(

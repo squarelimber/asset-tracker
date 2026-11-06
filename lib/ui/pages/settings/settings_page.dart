@@ -18,6 +18,7 @@ import '../../../services/file_export.dart';
 import '../../../services/history_backfill_service.dart';
 import '../../components/app_bar_actions.dart';
 import '../../components/data_row.dart';
+import '../../components/secondary_page_back_button.dart';
 import '../../components/section_header.dart';
 import '../../components/terminal_card.dart';
 import '../../tokens.dart';
@@ -34,6 +35,7 @@ class SettingsPage extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     return Scaffold(
       appBar: AppBar(
+        leading: Responsive.isDesktop(context) ? null : const SecondaryPageBackButton(),
         title: const Text('设置'),
         actions: const [TerminalAppBarActions()],
       ),
