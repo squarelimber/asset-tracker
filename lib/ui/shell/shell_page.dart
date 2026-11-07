@@ -68,7 +68,8 @@ class ShellPage extends StatelessWidget {
     // routes must pop normally. /portfolio itself is allowed to pop so the
     // system back gesture / edge swipe can exit the app from the root page.
     final currentPath = GoRouterState.of(context).uri.path;
-    final canPop = currentPath == '/portfolio' ||
+    final canPop =
+        currentPath == '/portfolio' ||
         !_shellPaths.contains(currentPath) ||
         (_secondaryPaths.contains(currentPath) && context.canPop());
 
@@ -120,19 +121,31 @@ class _PhoneShell extends StatelessWidget {
     final path = GoRouterState.of(context).uri.path;
     return Scaffold(
       body: child,
-      bottomNavigationBar: ShellPage._secondaryPaths.contains(path) ? null : NavigationBar(
-        selectedIndex: _selectedIndex(context),
-        onDestinationSelected: (i) =>
-            context.go(ShellPage._destinations[i].path),
-        destinations: [
-          for (final d in ShellPage._destinations)
-            NavigationDestination(
-              icon: Icon(d.icon),
-              selectedIcon: Icon(d.activeIcon),
-              label: d.label,
+      bottomNavigationBar: ShellPage._secondaryPaths.contains(path)
+          ? null
+          : DecoratedBox(
+              decoration: const BoxDecoration(
+                border: Border(top: BorderSide(color: T.borderSoft)),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.only(top: 1),
+                child: NavigationBar(
+                  selectedIndex: _selectedIndex(context),
+                  onDestinationSelected: (i) {
+                    final destination = ShellPage._destinations[i].path;
+                    if (destination != path) context.go(destination);
+                  },
+                  destinations: [
+                    for (final d in ShellPage._destinations)
+                      NavigationDestination(
+                        icon: Icon(d.icon),
+                        selectedIcon: Icon(d.activeIcon),
+                        label: d.label,
+                      ),
+                  ],
+                ),
+              ),
             ),
-        ],
-      ),
     );
   }
 
@@ -178,22 +191,13 @@ class _DesktopShell extends StatelessWidget {
                         ),
                         const SizedBox(width: 10),
                         const Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'Asset Tracker',
-                                style: TextStyle(
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                              SizedBox(height: 3),
-                              Text(
-                                '资产管理',
-                                style: TextStyle(fontSize: 11, color: T.text3),
-                              ),
-                            ],
+                          child: Text(
+                            'Asset Tracker',
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                            ),
                           ),
                         ),
                       ],
@@ -241,16 +245,12 @@ class _DesktopShell extends StatelessWidget {
                       ],
                     ),
                   ),
-                  Container(
-                    margin: const EdgeInsets.all(12),
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      border: Border.all(color: T.borderSoft),
-                      borderRadius: BorderRadius.circular(T.rInput),
-                    ),
-                    child: const Row(
+                  const Divider(height: 1, color: T.borderSoft),
+                  const Padding(
+                    padding: EdgeInsets.fromLTRB(20, 12, 12, 12),
+                    child: Row(
                       children: [
-                        Icon(Icons.storage_outlined, size: 18, color: T.text3),
+                        Icon(Icons.storage_outlined, size: 15, color: T.text3),
                         SizedBox(width: 10),
                         Expanded(
                           child: Text(
@@ -307,37 +307,64 @@ class _SidebarItem extends StatelessWidget {
           child: InkWell(
             borderRadius: BorderRadius.circular(T.rInput),
             onTap: onTap,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-              child: Row(
-                children: [
-                  Icon(
-                    selected ? activeIcon : icon,
-                    color: selected ? T.accent : T.text3,
-                    size: 18,
+            overlayColor: Theme.of(context).textButtonTheme.style?.overlayColor,
+            child: Stack(
+              alignment: Alignment.centerLeft,
+              children: [
+                if (selected)
+                  const SizedBox(
+                    width: 2,
+                    height: 16,
+                    child: ColoredBox(color: T.accent),
                   ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Text(
-                      label,
-                      style: TextStyle(
-                        color: color,
-                        fontSize: 13,
-                        fontWeight: selected
-                            ? FontWeight.w600
-                            : FontWeight.w400,
-                      ),
-                    ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 11,
                   ),
-                  if (shortcut != null)
-                    ExcludeSemantics(
-                      child: Text(
-                        shortcut!,
-                        style: T.mono(size: 10, color: T.text3),
+                  child: Row(
+                    children: [
+                      Icon(
+                        selected ? activeIcon : icon,
+                        color: selected ? T.accent : T.text3,
+                        size: 18,
                       ),
-                    ),
-                ],
-              ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          label,
+                          style: TextStyle(
+                            color: color,
+                            fontSize: 13,
+                            fontWeight: selected
+                                ? FontWeight.w600
+                                : FontWeight.w400,
+                          ),
+                        ),
+                      ),
+                      if (shortcut != null)
+                        ExcludeSemantics(
+                          child: DecoratedBox(
+                            decoration: BoxDecoration(
+                              border: Border.all(color: T.border),
+                              borderRadius: BorderRadius.circular(T.rInput),
+                            ),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 4,
+                                vertical: 1,
+                              ),
+                              child: Text(
+                                shortcut!,
+                                style: T.mono(size: 10, color: T.text3),
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ],
             ),
           ),
         ),

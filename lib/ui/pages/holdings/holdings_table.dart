@@ -9,9 +9,9 @@ import '../../../domain/closed_holding.dart';
 import '../../../domain/holding_cost.dart';
 import '../../../domain/trade_stats.dart';
 import '../../components/delta_text.dart';
-import '../../components/empty_state.dart';
 import '../../components/status_chip.dart';
 import '../../tokens.dart';
+import 'holding_menu.dart';
 import 'holdings_page.dart';
 
 enum HoldingSection { assets, liabilities }
@@ -29,8 +29,7 @@ class HoldingsTable extends ConsumerWidget {
   const HoldingsTable({
     super.key,
     required this.section,
-    required this.assets,
-    required this.liabilities,
+    required this.rows,
     required this.onHoldingTap,
     this.sort = HoldingSort.defaultOrder,
     this.onSortChanged,
@@ -38,8 +37,7 @@ class HoldingsTable extends ConsumerWidget {
   });
 
   final HoldingSection section;
-  final List<HoldingRow> assets;
-  final List<HoldingRow> liabilities;
+  final List<HoldingRow> rows;
   final void Function(HoldingRow) onHoldingTap;
 
   /// Current sort mode (drives the header arrows).
@@ -48,9 +46,8 @@ class HoldingsTable extends ConsumerWidget {
   /// Called when a header cell is clicked.
   final ValueChanged<HoldingSort>? onSortChanged;
 
-  /// Row context menu (right-click / long-press). [at] is the global
-  /// anchor position, or null to anchor below the row.
-  final void Function(HoldingRow, Offset?)? onHoldingMenu;
+  /// Row actions, anchored at the pointer or overflow button.
+  final void Function(HoldingRow, Offset)? onHoldingMenu;
 
   /// Header columns: label, width flex, alignment and the (default, other)
   /// sort pair toggled by clicking the header.
@@ -80,7 +77,7 @@ class HoldingsTable extends ConsumerWidget {
       pair: (HoldingSort.costDesc, HoldingSort.costAsc),
     ),
     (
-      label: '最新',
+      label: '最新价',
       flex: 2,
       align: Alignment.centerRight,
       pair: (HoldingSort.priceDesc, HoldingSort.priceAsc),
@@ -101,30 +98,24 @@ class HoldingsTable extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final list = section == HoldingSection.assets ? assets : liabilities;
-    if (list.isEmpty) {
-      return const EmptyState(message: '暂无数据');
-    }
     return CustomScrollView(
       slivers: [
         SliverPersistentHeader(
           pinned: true,
           delegate: _TableHeaderDelegate(
+            liabilities: section == HoldingSection.liabilities,
+            showActions: onHoldingMenu != null,
             sort: sort,
             onSortChanged: onSortChanged,
           ),
         ),
-        SliverToBoxAdapter(
-          child: Column(
-            children: [
-              for (final (index, h) in list.indexed)
-                _TableRow(
-                  h: h,
-                  alternate: index.isOdd,
-                  onHoldingTap: onHoldingTap,
-                  onHoldingMenu: onHoldingMenu,
-                ),
-            ],
+        SliverList.builder(
+          itemCount: rows.length,
+          itemBuilder: (context, index) => _TableRow(
+            h: rows[index],
+            alternate: index.isOdd,
+            onHoldingTap: onHoldingTap,
+            onHoldingMenu: onHoldingMenu,
           ),
         ),
       ],
@@ -133,8 +124,15 @@ class HoldingsTable extends ConsumerWidget {
 }
 
 class _TableHeaderDelegate extends SliverPersistentHeaderDelegate {
-  const _TableHeaderDelegate({required this.sort, required this.onSortChanged});
+  const _TableHeaderDelegate({
+    required this.liabilities,
+    required this.showActions,
+    required this.sort,
+    required this.onSortChanged,
+  });
 
+  final bool liabilities;
+  final bool showActions;
   final HoldingSort sort;
   final ValueChanged<HoldingSort>? onSortChanged;
 
@@ -149,16 +147,19 @@ class _TableHeaderDelegate extends SliverPersistentHeaderDelegate {
     double shrinkOffset,
     bool overlapsContent,
   ) {
+    final columns = liabilities
+        ? [HoldingsTable._cols.first, HoldingsTable._cols[5]]
+        : HoldingsTable._cols;
     return Container(
       color: T.surface2,
       padding: const EdgeInsets.symmetric(horizontal: T.s3),
       child: Row(
         children: [
-          for (final c in HoldingsTable._cols)
+          for (final c in columns)
             Expanded(
               flex: c.flex,
               child: _HeaderCell(
-                label: c.label,
+                label: liabilities && c.label == '市值' ? '余额' : c.label,
                 align: c.align,
                 active: sort == c.pair.$1 || sort == c.pair.$2,
                 ascending: sort.name.endsWith('Asc'),
@@ -169,13 +170,18 @@ class _TableHeaderDelegate extends SliverPersistentHeaderDelegate {
                       ),
               ),
             ),
+          if (showActions) const SizedBox(width: T.s2 + 36),
         ],
       ),
     );
   }
 
   @override
-  bool shouldRebuild(covariant _TableHeaderDelegate old) => old.sort != sort;
+  bool shouldRebuild(covariant _TableHeaderDelegate old) =>
+      old.sort != sort ||
+      old.liabilities != liabilities ||
+      old.showActions != showActions ||
+      old.onSortChanged != onSortChanged;
 }
 
 class _HeaderCell extends StatelessWidget {
@@ -197,11 +203,13 @@ class _HeaderCell extends StatelessWidget {
   Widget build(BuildContext context) {
     final isLeft = align == Alignment.centerLeft;
     final arrow = Icon(
-      ascending ? Icons.arrow_drop_up : Icons.arrow_drop_down,
-      size: 16,
+      active
+          ? (ascending ? Icons.arrow_upward : Icons.arrow_downward)
+          : Icons.unfold_more,
+      size: 12,
       color: active ? T.accent : T.text3,
     );
-    return Material(
+    final cell = Material(
       color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
@@ -210,16 +218,24 @@ class _HeaderCell extends StatelessWidget {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              if (!isLeft && active) arrow,
-              Text(
-                label,
-                style: T.label(size: 11, color: active ? T.text1 : T.text2),
+              if (!isLeft && onTap != null) arrow,
+              Flexible(
+                child: Text(
+                  label,
+                  overflow: TextOverflow.ellipsis,
+                  style: T.label(size: 11, color: active ? T.text1 : T.text2),
+                ),
               ),
-              if (isLeft && active) arrow,
+              if (isLeft && onTap != null) arrow,
             ],
           ),
         ),
       ),
+    );
+    if (onTap == null) return cell;
+    return Tooltip(
+      message: active ? '$label（${ascending ? '升序' : '降序'}）' : '$label（点击排序）',
+      child: cell,
     );
   }
 }
@@ -235,7 +251,7 @@ class _TableRow extends ConsumerWidget {
   final HoldingRow h;
   final bool alternate;
   final void Function(HoldingRow) onHoldingTap;
-  final void Function(HoldingRow, Offset?)? onHoldingMenu;
+  final void Function(HoldingRow, Offset)? onHoldingMenu;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -272,10 +288,14 @@ class _TableRow extends ConsumerWidget {
         : null;
     final hide = ref.watch(hideAmountsProvider);
     final dash = Text('--', style: T.mono(size: 13, color: T.text3));
+    final menu = onHoldingMenu;
     final row = Material(
       color: alternate ? T.surface : T.bg,
       child: InkWell(
         onTap: () => onHoldingTap(h),
+        onSecondaryTapUp: menu == null
+            ? null
+            : (details) => menu(h, details.globalPosition),
         child: Container(
           height: 48,
           decoration: const BoxDecoration(
@@ -306,54 +326,56 @@ class _TableRow extends ConsumerWidget {
                   ],
                 ),
               ),
-              Expanded(
-                flex: 2,
-                child: Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text(
-                    h.symbol ?? '--',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: T.mono(size: 12, color: T.text3),
+              if (!isLiability) ...[
+                Expanded(
+                  flex: 2,
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      h.symbol ?? '--',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: T.mono(size: 12, color: T.text3),
+                    ),
                   ),
                 ),
-              ),
-              Expanded(
-                flex: 2,
-                child: Align(
-                  alignment: Alignment.centerRight,
-                  child: isAmount
-                      ? dash
-                      : Text(
-                          Formats.smartNum(h.quantity),
-                          style: T.mono(size: 13, color: T.text1),
-                        ),
+                Expanded(
+                  flex: 2,
+                  child: Align(
+                    alignment: Alignment.centerRight,
+                    child: isAmount
+                        ? dash
+                        : Text(
+                            Formats.smartNum(h.quantity),
+                            style: T.mono(size: 13, color: T.text1),
+                          ),
+                  ),
                 ),
-              ),
-              Expanded(
-                flex: 2,
-                child: Align(
-                  alignment: Alignment.centerRight,
-                  child: isAmount
-                      ? dash
-                      : Text(
-                          Formats.smartNum(h.costPrice),
-                          style: T.mono(size: 13, color: T.text1),
-                        ),
+                Expanded(
+                  flex: 2,
+                  child: Align(
+                    alignment: Alignment.centerRight,
+                    child: isAmount
+                        ? dash
+                        : Text(
+                            Formats.smartNum(h.costPrice),
+                            style: T.mono(size: 13, color: T.text1),
+                          ),
+                  ),
                 ),
-              ),
-              Expanded(
-                flex: 2,
-                child: Align(
-                  alignment: Alignment.centerRight,
-                  child: isAmount || closed
-                      ? dash
-                      : Text(
-                          Formats.smartNum(h.latestPrice),
-                          style: T.mono(size: 13, color: T.text1),
-                        ),
+                Expanded(
+                  flex: 2,
+                  child: Align(
+                    alignment: Alignment.centerRight,
+                    child: isAmount || closed
+                        ? dash
+                        : Text(
+                            Formats.smartNum(h.latestPrice),
+                            style: T.mono(size: 13, color: T.text1),
+                          ),
+                  ),
                 ),
-              ),
+              ],
               Expanded(
                 flex: 3,
                 child: Align(
@@ -366,73 +388,80 @@ class _TableRow extends ConsumerWidget {
                   ),
                 ),
               ),
-              Expanded(
-                flex: 4,
-                child: Align(
-                  alignment: Alignment.centerRight,
-                  child: isLiability
-                      ? dash
-                      : closed && isAmount
-                      ? Text('已结清', style: T.mono(size: 12, color: T.text3))
-                      : closed
-                      ? Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            DeltaText(
-                              value: realizedPct ?? 0,
-                              text: hide
-                                  ? '****'
-                                  : '${realized >= 0 ? '+' : ''}${Formats.money(realized, h.currency)}',
-                            ),
-                            if (realizedPct != null) ...[
-                              const SizedBox(width: 6),
-                              Text(
-                                '(${Formats.pct(realizedPct)})',
-                                style: T.mono(
-                                  size: 12,
-                                  color: T.changeColor(realized),
+              if (!isLiability)
+                Expanded(
+                  flex: 4,
+                  child: Align(
+                    alignment: Alignment.centerRight,
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: closed && isAmount
+                          ? Text('已结清', style: T.mono(size: 12, color: T.text3))
+                          : closed
+                          ? Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                DeltaText(
+                                  value: realizedPct ?? 0,
+                                  text: hide
+                                      ? '****'
+                                      : '${realized >= 0 ? '+' : ''}${Formats.money(realized, h.currency)}',
                                 ),
-                              ),
-                            ],
-                            const SizedBox(width: 8),
-                            Text(
-                              '已实现',
-                              style: T.mono(size: 10, color: T.text3),
+                                if (realizedPct != null) ...[
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    '(${Formats.pct(realizedPct)})',
+                                    style: T.mono(
+                                      size: 12,
+                                      color: T.changeColor(realized),
+                                    ),
+                                  ),
+                                ],
+                                const SizedBox(width: 8),
+                                Text(
+                                  '已实现',
+                                  style: T.mono(size: 10, color: T.text3),
+                                ),
+                              ],
+                            )
+                          : Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                DeltaText(
+                                  value: profitPct,
+                                  text: hide
+                                      ? '****'
+                                      : '${profit >= 0 ? '+' : ''}${Formats.money(profit, h.currency)}',
+                                ),
+                                const SizedBox(width: 6),
+                                Text(
+                                  '(${Formats.pct(profitPct)})',
+                                  style: T.mono(
+                                    size: 12,
+                                    color: T.changeColor(profit),
+                                  ),
+                                ),
+                              ],
                             ),
-                          ],
-                        )
-                      : Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            DeltaText(
-                              value: profitPct,
-                              text: hide
-                                  ? '****'
-                                  : '${profit >= 0 ? '+' : ''}${Formats.money(profit, h.currency)}',
-                            ),
-                            const SizedBox(width: 6),
-                            Text(
-                              '(${Formats.pct(profitPct)})',
-                              style: T.mono(
-                                size: 12,
-                                color: T.changeColor(profit),
-                              ),
-                            ),
-                          ],
-                        ),
+                    ),
+                  ),
                 ),
-              ),
+              if (menu != null) ...[
+                const SizedBox(width: T.s2),
+                HoldingActionsButton(
+                  compact: true,
+                  onPressed: (at) => menu(h, at),
+                ),
+              ],
             ],
           ),
         ),
       ),
     );
-    if (onHoldingMenu == null) return row;
-    // Right-click (desktop) or long-press opens the row context menu.
+    if (menu == null) return row;
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
-      onSecondaryTapUp: (d) => onHoldingMenu!(h, d.globalPosition),
-      onLongPress: () => onHoldingMenu!(h, null),
+      onLongPressStart: (details) => menu(h, details.globalPosition),
       child: row,
     );
   }

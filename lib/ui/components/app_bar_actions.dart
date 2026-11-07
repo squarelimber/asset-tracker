@@ -24,26 +24,29 @@ class TerminalAppBarActions extends ConsumerWidget {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        if (currentPath != '/transactions') IconButton(
-          tooltip: '交易流水',
-          icon: const Icon(Icons.receipt_long_outlined, color: T.text2),
-          onPressed: () => context.push('/transactions'),
-        ),
-        if (currentPath != '/alerts') IconButton(
-          tooltip: '提醒',
-          icon: Badge(
-            isLabelVisible: unread > 0,
-            label: Text('$unread'),
-            backgroundColor: T.up,
-            child: const Icon(Icons.notifications_outlined, color: T.text2),
+        if (currentPath != '/transactions')
+          IconButton(
+            tooltip: '交易流水',
+            icon: const Icon(Icons.receipt_long_outlined),
+            onPressed: () => context.push('/transactions'),
           ),
-          onPressed: () => context.push('/alerts'),
-        ),
-        if (currentPath != '/settings') IconButton(
-          tooltip: '设置',
-          icon: const Icon(Icons.settings_outlined, color: T.text2),
-          onPressed: () => context.push('/settings'),
-        ),
+        if (currentPath != '/alerts')
+          IconButton(
+            tooltip: '提醒',
+            icon: Badge(
+              isLabelVisible: unread > 0,
+              label: Text('$unread'),
+              backgroundColor: T.up,
+              child: const Icon(Icons.notifications_outlined),
+            ),
+            onPressed: () => context.push('/alerts'),
+          ),
+        if (currentPath != '/settings')
+          IconButton(
+            tooltip: '设置',
+            icon: const Icon(Icons.settings_outlined),
+            onPressed: () => context.push('/settings'),
+          ),
       ],
     );
   }

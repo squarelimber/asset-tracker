@@ -3,6 +3,7 @@ import 'package:asset_tracker/ui/components/asset_overview_card.dart';
 import 'package:asset_tracker/ui/pages/portfolio/portfolio_welcome.dart';
 import 'package:asset_tracker/ui/shell/shell_page.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 
@@ -36,6 +37,53 @@ GoRouter _router({bool hasAccounts = false}) => GoRouter(
 );
 
 void main() {
+  testWidgets('desktop page shortcuts respect modals and modifier keys', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1280, 800);
+    addTearDown(tester.view.reset);
+    final router = _router();
+    addTearDown(router.dispose);
+    await tester.pumpWidget(
+      MaterialApp.router(theme: AppTheme.dark(), routerConfig: router),
+    );
+    await tester.pumpAndSettle();
+
+    for (final useRootNavigator in [true, false]) {
+      final pageContext = tester.element(find.byType(PortfolioWelcome));
+      showDialog<void>(
+        context: pageContext,
+        useRootNavigator: useRootNavigator,
+        builder: (context) => AlertDialog(
+          title: const Text('确认操作'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('关闭'),
+            ),
+          ],
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.sendKeyEvent(LogicalKeyboardKey.digit2);
+      await tester.pumpAndSettle();
+      expect(find.text('确认操作'), findsOneWidget);
+      expect(find.text('page:holdings'), findsNothing);
+      await tester.tap(find.text('关闭'));
+      await tester.pumpAndSettle();
+    }
+
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.digit2);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    await tester.pumpAndSettle();
+    expect(find.byType(PortfolioWelcome), findsOneWidget);
+    await tester.sendKeyEvent(LogicalKeyboardKey.digit2);
+    await tester.pumpAndSettle();
+    expect(find.text('page:holdings'), findsOneWidget);
+  });
+
   testWidgets('desktop secondary navigation selects only its own destination', (
     tester,
   ) async {

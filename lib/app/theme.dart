@@ -6,6 +6,25 @@ class AppTheme {
   AppTheme._();
 
   static ThemeData dark() {
+    const controlShape = RoundedRectangleBorder(
+      borderRadius: BorderRadius.all(Radius.circular(T.rInput)),
+    );
+    final controlOverlay = WidgetStateProperty.resolveWith<Color?>((states) {
+      if (states.contains(WidgetState.pressed)) {
+        return T.text1.withValues(alpha: 0.15);
+      }
+      if (states.contains(WidgetState.focused)) {
+        return T.accent.withValues(alpha: 0.16);
+      }
+      if (states.contains(WidgetState.hovered)) {
+        return T.text1.withValues(alpha: 0.08);
+      }
+      return null;
+    });
+    const focusBorder = WidgetStateBorderSide.fromMap({
+      WidgetState.focused: BorderSide(color: T.accent),
+      WidgetState.any: BorderSide.none,
+    });
     final scheme = ColorScheme(
       brightness: Brightness.dark,
       primary: T.accent,
@@ -30,11 +49,19 @@ class AppTheme {
       focusColor: T.accent.withValues(alpha: 0.12),
       splashFactory: NoSplash.splashFactory,
       iconButtonTheme: IconButtonThemeData(
-        style: IconButton.styleFrom(
-          foregroundColor: T.text2,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(T.rInput),
-          ),
+        style: ButtonStyle(
+          foregroundColor: WidgetStateProperty.resolveWith((states) {
+            if (states.contains(WidgetState.disabled)) {
+              return T.text3.withValues(alpha: 0.55);
+            }
+            return states.contains(WidgetState.hovered) ||
+                    states.contains(WidgetState.focused)
+                ? T.text1
+                : T.text2;
+          }),
+          overlayColor: controlOverlay,
+          side: focusBorder,
+          shape: const WidgetStatePropertyAll(controlShape),
         ),
       ),
       textSelectionTheme: TextSelectionThemeData(
@@ -63,23 +90,68 @@ class AppTheme {
         waitDuration: const Duration(milliseconds: 450),
       ),
       filledButtonTheme: FilledButtonThemeData(
-        style: FilledButton.styleFrom(
-          minimumSize: const Size(48, 44),
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(T.rInput),
-          ),
-          textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
-        ),
+        style:
+            FilledButton.styleFrom(
+              minimumSize: const Size(48, 44),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              shape: controlShape,
+              elevation: 0,
+              textStyle: const TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+              ),
+            ).copyWith(
+              overlayColor: WidgetStateProperty.resolveWith((states) {
+                if (states.contains(WidgetState.pressed)) {
+                  return Colors.black.withValues(alpha: 0.18);
+                }
+                if (states.contains(WidgetState.hovered)) {
+                  return Colors.white.withValues(alpha: 0.12);
+                }
+                return Colors.transparent;
+              }),
+              side: const WidgetStateBorderSide.fromMap({
+                WidgetState.focused: BorderSide(color: T.bg, width: 2),
+                WidgetState.any: BorderSide.none,
+              }),
+            ),
       ),
       outlinedButtonTheme: OutlinedButtonThemeData(
-        style: OutlinedButton.styleFrom(
-          minimumSize: const Size(48, 44),
-          foregroundColor: T.text1,
-          side: const BorderSide(color: T.border),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(T.rInput),
+        style:
+            OutlinedButton.styleFrom(
+              minimumSize: const Size(48, 44),
+              foregroundColor: T.text1,
+              shape: controlShape,
+            ).copyWith(
+              overlayColor: controlOverlay,
+              side: const WidgetStateBorderSide.fromMap({
+                WidgetState.disabled: BorderSide(color: T.borderSoft),
+                WidgetState.focused: BorderSide(color: T.accent),
+                WidgetState.hovered: BorderSide(color: T.text3),
+                WidgetState.any: BorderSide(color: T.border),
+              }),
+            ),
+      ),
+      textButtonTheme: TextButtonThemeData(
+        style: ButtonStyle(
+          foregroundColor: WidgetStateProperty.resolveWith(
+            (states) => states.contains(WidgetState.disabled)
+                ? T.text3.withValues(alpha: 0.55)
+                : T.text1,
           ),
+          overlayColor: controlOverlay,
+          shape: const WidgetStatePropertyAll(controlShape),
+          side: focusBorder,
+        ),
+      ),
+      popupMenuTheme: const PopupMenuThemeData(
+        color: T.surface2,
+        surfaceTintColor: Colors.transparent,
+        elevation: 4,
+        iconColor: T.text2,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.all(Radius.circular(T.rCard)),
+          side: BorderSide(color: T.border),
         ),
       ),
       appBarTheme: const AppBarTheme(
@@ -95,6 +167,7 @@ class AppTheme {
         scrolledUnderElevation: 0,
         backgroundColor: T.surface,
         foregroundColor: T.text1,
+        shape: Border(bottom: BorderSide(color: T.borderSoft)),
       ),
       cardTheme: CardThemeData(
         elevation: 0,
@@ -106,10 +179,24 @@ class AppTheme {
         ),
       ),
       navigationBarTheme: NavigationBarThemeData(
+        height: 64,
+        elevation: 0,
         backgroundColor: T.surface,
         indicatorColor: T.surface2,
-        iconTheme: WidgetStatePropertyAll(IconThemeData(color: T.text2)),
-        labelTextStyle: WidgetStatePropertyAll(T.label(size: 11)),
+        indicatorShape: controlShape,
+        overlayColor: controlOverlay,
+        iconTheme: WidgetStateProperty.resolveWith(
+          (states) => IconThemeData(
+            size: 22,
+            color: states.contains(WidgetState.selected) ? T.accent : T.text2,
+          ),
+        ),
+        labelTextStyle: WidgetStateProperty.resolveWith(
+          (states) => T.label(
+            size: 11,
+            color: states.contains(WidgetState.selected) ? T.text1 : T.text2,
+          ),
+        ),
       ),
       navigationRailTheme: NavigationRailThemeData(
         backgroundColor: T.surface,

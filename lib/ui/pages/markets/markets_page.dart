@@ -69,17 +69,34 @@ class _MarketsPageState extends ConsumerState<MarketsPage> {
           actions: [
             ValueListenableBuilder<bool>(
               valueListenable: _refreshing,
-              builder: (context, refreshing, _) => IconButton(
-                tooltip: '刷新行情',
-                icon: refreshing
+              builder: (context, refreshing, _) {
+                final label = refreshing ? '正在刷新行情' : '刷新行情';
+                final icon = refreshing
                     ? const SizedBox(
                         width: 18,
                         height: 18,
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
-                    : const Icon(Icons.refresh),
-                onPressed: refreshing ? null : () => _refresh(showSnack: true),
-              ),
+                    : const Icon(Icons.refresh, size: 18);
+                final onPressed = refreshing
+                    ? null
+                    : () => _refresh(showSnack: true);
+                if (Responsive.isDesktop(context)) {
+                  return Padding(
+                    padding: const EdgeInsets.only(right: T.s3),
+                    child: TextButton.icon(
+                      onPressed: onPressed,
+                      icon: icon,
+                      label: Text(label),
+                    ),
+                  );
+                }
+                return IconButton(
+                  tooltip: label,
+                  icon: icon,
+                  onPressed: onPressed,
+                );
+              },
             ),
             const TerminalAppBarActions(),
           ],
@@ -100,18 +117,21 @@ class _MarketsPageState extends ConsumerState<MarketsPage> {
             final tables = [
               for (final name in groupNames)
                 if (groups.containsKey(name))
-                  (name, [
-                    for (final q in groups[name]!)
-                      QuoteRow(
-                        code: q.code,
-                        name: q.name,
-                        price: q.price,
-                        change: q.change,
-                        changePct: q.changePct,
-                        unit: q.unit,
-                        fxSymbol: q.fxSymbol,
-                      ),
-                  ]),
+                  (
+                    name,
+                    [
+                      for (final q in groups[name]!)
+                        QuoteRow(
+                          code: q.code,
+                          name: q.name,
+                          price: q.price,
+                          change: q.change,
+                          changePct: q.changePct,
+                          unit: q.unit,
+                          fxSymbol: q.fxSymbol,
+                        ),
+                    ],
+                  ),
             ];
             return ResponsiveShell(
               child: RefreshIndicator(
@@ -165,25 +185,29 @@ class _MarketsPageState extends ConsumerState<MarketsPage> {
     _refreshing.value = true;
     try {
       final fresh = await GlobalQuoteSource().fetch();
-      _quotesCache.items = fresh;
-      _quotesCache.fetchedAt = DateTime.now();
-      ref.invalidate(quotesProvider);
-      if (showSnack && mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(fresh.isEmpty ? '未获取到行情数据' : '行情已更新')));
+      if (!mounted) return;
+      if (fresh.isNotEmpty) {
+        _quotesCache.items = fresh;
+        _quotesCache.fetchedAt = DateTime.now();
+        ref.invalidate(quotesProvider);
+      }
+      if (showSnack) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(fresh.isEmpty ? '未获取到行情数据' : '行情已更新')),
+        );
       }
     } catch (_) {
       if (showSnack && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(_quotesCache.items != null
-                ? '刷新失败，显示缓存数据'
-                : '行情刷新失败，请稍后重试'),
+            content: Text(
+              _quotesCache.items != null ? '刷新失败，显示缓存数据' : '行情刷新失败，请稍后重试',
+            ),
           ),
         );
       }
     } finally {
-      _refreshing.value = false;
+      if (mounted) _refreshing.value = false;
     }
   }
 
@@ -208,7 +232,9 @@ class _MarketsPageState extends ConsumerState<MarketsPage> {
             Text(r.code, style: T.mono(size: 12, color: T.text3)),
             const SizedBox(height: T.s3),
             Text(
-              r.fxSymbol != null ? r.price.toStringAsFixed(4) : Formats.num(r.price),
+              r.fxSymbol != null
+                  ? r.price.toStringAsFixed(4)
+                  : Formats.num(r.price),
               style: T.mono(size: 26, weight: FontWeight.w700),
             ),
             const SizedBox(height: T.s2),
@@ -243,12 +269,12 @@ class _GroupGrid extends StatelessWidget {
   Widget build(BuildContext context) {
     final mid = (tables.length + 1) ~/ 2;
     Widget column(List<(String, List<QuoteRow>)> items) => Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            for (final (name, rows) in items)
-              QuoteTable(group: name, rows: rows, onQuoteTap: onQuoteTap),
-          ],
-        );
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (final (name, rows) in items)
+          QuoteTable(group: name, rows: rows, onQuoteTap: onQuoteTap),
+      ],
+    );
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [

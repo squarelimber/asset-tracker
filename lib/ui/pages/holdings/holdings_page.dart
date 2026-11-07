@@ -19,9 +19,7 @@ import '../../components/data_row.dart';
 import '../../components/delta_text.dart';
 import '../../components/empty_state.dart';
 import '../../components/error_state.dart';
-import '../../components/form_fields.dart';
 import '../../components/key_shortcuts.dart';
-import '../../components/section_header.dart';
 import '../../components/status_chip.dart';
 import '../../components/terminal_card.dart';
 import '../../components/terminal_fab.dart';
@@ -78,9 +76,7 @@ double _holdingMarketValue(HoldingRow h) {
 /// Total cost in the holding's own currency (same basis as market value).
 double _holdingCost(HoldingRow h) {
   final type = AssetType.fromStorage(h.assetType);
-  return type.isAmountBased
-      ? effectiveCostOf(h)
-      : h.quantity * h.costPrice;
+  return type.isAmountBased ? effectiveCostOf(h) : h.quantity * h.costPrice;
 }
 
 /// Today's profit for a holding from its cached quote: the cached unit
@@ -151,9 +147,10 @@ class HoldingsPage extends ConsumerStatefulWidget {
 
 class _HoldingsPageState extends ConsumerState<HoldingsPage> {
   HoldingSection _section = HoldingSection.assets;
-  HoldingSort _sort = HoldingSort.defaultOrder;
+  HoldingSort _assetSort = HoldingSort.defaultOrder;
+  HoldingSort _liabilitySort = HoldingSort.defaultOrder;
   HoldingFilter _filter = HoldingFilter.all;
-  bool _searching = false;
+  final _searchFocus = FocusNode();
   final _searchCtrl = TextEditingController();
   String _query = '';
 
@@ -163,7 +160,6 @@ class _HoldingsPageState extends ConsumerState<HoldingsPage> {
     if (widget.initialQuery != null && widget.initialQuery!.isNotEmpty) {
       _query = widget.initialQuery!;
       _searchCtrl.text = _query;
-      _searching = true;
     }
     // Auto-refresh quotes shortly after opening so existing holdings
     // show up-to-date NAV without any manual action.
@@ -176,6 +172,7 @@ class _HoldingsPageState extends ConsumerState<HoldingsPage> {
 
   @override
   void dispose() {
+    _searchFocus.dispose();
     _searchCtrl.dispose();
     super.dispose();
   }
@@ -208,7 +205,9 @@ class _HoldingsPageState extends ConsumerState<HoldingsPage> {
     final cat = AssetCategory.values
         .where((c) => c.label == q || c.storageName == q)
         .firstOrNull;
-    if (cat != null && type != AssetType.liability && effectiveCategoryOf(h) == cat) {
+    if (cat != null &&
+        type != AssetType.liability &&
+        effectiveCategoryOf(h) == cat) {
       return true;
     }
     return h.name.toLowerCase().contains(q) ||
@@ -217,7 +216,26 @@ class _HoldingsPageState extends ConsumerState<HoldingsPage> {
         type.storageName.toLowerCase().contains(q);
   }
 
+  bool get _isAssets => _section == HoldingSection.assets;
+
+  HoldingSort get _sort => _isAssets ? _assetSort : _liabilitySort;
+
+  void _setSort(HoldingSort sort) => setState(() {
+    if (_isAssets) {
+      _assetSort = sort;
+    } else {
+      _liabilitySort = sort;
+    }
+  });
+
   List<HoldingRow> _sorted(List<HoldingRow> list) {
+    list = list
+        .where(
+          (h) =>
+              (AssetType.fromStorage(h.assetType) != AssetType.liability) ==
+              _isAssets,
+        )
+        .toList();
     final q = _query.trim().toLowerCase();
     var filtered = q.isEmpty
         ? [...list]
@@ -225,6 +243,9 @@ class _HoldingsPageState extends ConsumerState<HoldingsPage> {
     filtered = filtered.where(_matchesFilter).toList();
     switch (_sort) {
       case HoldingSort.defaultOrder:
+        if (!_isAssets) {
+          return filtered..sort((a, b) => b.quantity.compareTo(a.quantity));
+        }
         // Active holdings keep their database order; fully exited ones sink
         // to the bottom, most recently touched first.
         final active = filtered.where((h) => !isHoldingClosed(h)).toList();
@@ -232,9 +253,13 @@ class _HoldingsPageState extends ConsumerState<HoldingsPage> {
           ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
         return [...active, ...closed];
       case HoldingSort.amountDesc:
-        filtered.sort((a, b) => _holdingMarketValue(b).compareTo(_holdingMarketValue(a)));
+        filtered.sort(
+          (a, b) => _holdingMarketValue(b).compareTo(_holdingMarketValue(a)),
+        );
       case HoldingSort.amountAsc:
-        filtered.sort((a, b) => _holdingMarketValue(a).compareTo(_holdingMarketValue(b)));
+        filtered.sort(
+          (a, b) => _holdingMarketValue(a).compareTo(_holdingMarketValue(b)),
+        );
       case HoldingSort.nameAsc:
         filtered.sort((a, b) => a.name.compareTo(b.name));
       case HoldingSort.nameDesc:
@@ -256,375 +281,519 @@ class _HoldingsPageState extends ConsumerState<HoldingsPage> {
       case HoldingSort.priceAsc:
         filtered.sort((a, b) => a.latestPrice.compareTo(b.latestPrice));
       case HoldingSort.profitDesc:
-        filtered.sort((a, b) =>
-            (_holdingMarketValue(b) - _holdingCost(b))
-                .compareTo(_holdingMarketValue(a) - _holdingCost(a)));
+        filtered.sort(
+          (a, b) => (_holdingMarketValue(b) - _holdingCost(b)).compareTo(
+            _holdingMarketValue(a) - _holdingCost(a),
+          ),
+        );
       case HoldingSort.profitAsc:
-        filtered.sort((a, b) =>
-            (_holdingMarketValue(a) - _holdingCost(a))
-                .compareTo(_holdingMarketValue(b) - _holdingCost(b)));
+        filtered.sort(
+          (a, b) => (_holdingMarketValue(a) - _holdingCost(a)).compareTo(
+            _holdingMarketValue(b) - _holdingCost(b),
+          ),
+        );
     }
     return filtered;
   }
 
-  void _toggleSearch() {
-    setState(() {
-      _searching = !_searching;
-      if (!_searching) {
-        _query = '';
-        _searchCtrl.clear();
-      }
-    });
-  }
+  void _clearSearch() => setState(() {
+    _searchCtrl.clear();
+    _query = '';
+  });
+
+  void _resetFilters() => setState(() {
+    _searchCtrl.clear();
+    _query = '';
+    _filter = HoldingFilter.all;
+  });
 
   @override
   Widget build(BuildContext context) {
     final holdings = ref.watch(holdingsProvider);
     final refreshing = ref.watch(_refreshingProvider);
-    // Phones/tablets have no room for search + filter + sort in the
-    // toolbar: the search box and the two list controls move into the
-    // body below (matching the non-desktop body branch).
-    final isDesktop = Responsive.isDesktop(context);
+    final desktop = Responsive.isDesktop(context);
+    final refreshLabel = refreshing ? '正在刷新行情' : '刷新行情';
+    final refreshIcon = refreshing
+        ? const SizedBox.square(
+            dimension: 18,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          )
+        : const Icon(Icons.refresh, size: 18);
+    final VoidCallback? onRefresh = refreshing ? null : _refresh;
+    final addHolding = TerminalFab(
+      onPressed: () => showAddHoldingDialog(context, ref),
+      icon: Icons.add,
+      label: '添加持仓',
+    );
     return KeyShortcuts(
       onKeyDown: (key) {
-        if (key == LogicalKeyboardKey.keyR) _refresh(showSnack: true);
-        if (key == LogicalKeyboardKey.slash) _toggleSearch();
+        if (key == LogicalKeyboardKey.keyR) _refresh();
+        if (key == LogicalKeyboardKey.slash) _searchFocus.requestFocus();
       },
       child: Scaffold(
-      appBar: AppBar(
-        title: (isDesktop && _searching)
-            ? TextField(
-                controller: _searchCtrl,
-                autofocus: true,
-                decoration: const InputDecoration(
-                  hintText: '搜索名称/代码/类型',
-                  border: InputBorder.none,
-                ),
-                onChanged: (v) => setState(() => _query = v),
+        appBar: AppBar(
+          title: const Text('持仓'),
+          actions: [
+            const TerminalAppBarActions(),
+            if (desktop)
+              TextButton.icon(
+                onPressed: onRefresh,
+                icon: refreshIcon,
+                label: Text(refreshLabel),
               )
-            : const Text('持仓'),
-        actions: [
-          const TerminalAppBarActions(),
-          if (isDesktop)
-            IconButton(
-              tooltip: '搜索',
-              icon: Icon(_searching ? Icons.close : Icons.search),
-              onPressed: _toggleSearch,
-            ),
-          if (isDesktop)
-            PopupMenuButton<HoldingFilter>(
-              tooltip: '筛选',
-              icon: Icon(
-                _filter == HoldingFilter.all
-                    ? Icons.filter_list
-                    : Icons.filter_alt,
-                color: _filter == HoldingFilter.all ? null : T.accent,
+            else
+              IconButton(
+                tooltip: refreshLabel,
+                onPressed: onRefresh,
+                icon: refreshIcon,
               ),
-              initialValue: _filter,
-              onSelected: (f) => setState(() => _filter = f),
-              itemBuilder: (_) => [
-                for (final f in HoldingFilter.values)
-                  PopupMenuItem(value: f, child: Text(f.label)),
-              ],
-            ),
-          if (isDesktop)
-            PopupMenuButton<HoldingSort>(
-              tooltip: '排序',
-              icon: const Icon(Icons.sort),
-              initialValue: _sort,
-              onSelected: (s) => setState(() => _sort = s),
-              itemBuilder: (_) => [
-                for (final s in HoldingSort.values)
-                  PopupMenuItem(value: s, child: Text(s.label)),
-              ],
-            ),
-          IconButton(
-            tooltip: '刷新行情',
-            onPressed: refreshing ? null : () => _refresh(showSnack: true),
-            icon: refreshing
-                ? const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.refresh),
-          ),
-        ],
-      ),
-      floatingActionButton: TerminalFab(
-        onPressed: () => showAddHoldingDialog(context, ref),
-        icon: Icons.add,
-        label: '添加持仓',
-      ),
-      body: holdings.when(
-        data: (list) {
-          if (list.isEmpty) {
-            return const EmptyState(
-              message: '还没有持仓\n点击右下角按钮添加第一个持仓',
-            );
-          }
-          final sorted = _sorted(list);
-          final assets = sorted
-              .where((h) =>
-                  AssetType.fromStorage(h.assetType) != AssetType.liability)
-              .toList();
-          final liabilities = sorted
-              .where((h) =>
-                  AssetType.fromStorage(h.assetType) == AssetType.liability)
-              .toList()
-            ..sort((a, b) =>
-                _holdingMarketValue(b).compareTo(_holdingMarketValue(a)));
-          final rates = ref.watch(cnyRatesProvider).value ?? const {};
-          final isAssets = _section == HoldingSection.assets;
-          return ResponsiveShell(
-            child: isDesktop
-                ? HoldingsTable(
-                    section: _section,
-                    assets: assets,
-                    liabilities: liabilities,
-                    sort: _sort,
-                    onSortChanged: (s) => setState(() => _sort = s),
-                    onHoldingTap: (h) => showHoldingDetailSheet(context, ref, h),
-                    onHoldingMenu: (h, at) => showHoldingMenu(context, ref, h, at: at),
-                  )
-                : Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      // Search box pinned below the toolbar: it no longer
-                      // fits in the AppBar on narrow screens.
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(T.s3, 0, T.s3, 0),
-                        child: TerminalTextField(
-                          controller: _searchCtrl,
-                          label: '搜索名称/代码/类型',
-                          onChanged: (v) => setState(() => _query = v),
-                        ),
-                      ),
-                      Expanded(
-                        child: RefreshIndicator(
-                          onRefresh: () => _refresh(showSnack: true),
-                          child: ListView(
-                            physics: const AlwaysScrollableScrollPhysics(),
-                            padding: const EdgeInsets.all(T.s3),
-                            children: [
-                            SegmentedButton<HoldingSection>(
-                              segments: const [
-                                ButtonSegment(value: HoldingSection.assets, label: Text('资产')),
-                                ButtonSegment(
-                                  value: HoldingSection.liabilities,
-                                  label: Text('负债'),
-                                ),
-                              ],
-                              selected: {_section},
-                              onSelectionChanged: (s) =>
-                                  setState(() => _section = s.first),
-                              showSelectedIcon: false,
-                            ),
-                            const SizedBox(height: T.s3),
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: DropdownButtonFormField<
-                                      HoldingFilter>(
-                                    initialValue: _filter,
-                                    isExpanded: true,
-                                    decoration: terminalDecoration('筛选'),
-                                    items: [
-                                      for (final f in HoldingFilter.values)
-                                        DropdownMenuItem(
-                                            value: f, child: Text(f.label)),
-                                    ],
-                                    onChanged: (f) => setState(
-                                        () => _filter = f ?? HoldingFilter.all),
-                                  ),
-                                ),
-                                const SizedBox(width: T.s3),
-                                Expanded(
-                                  child: DropdownButtonFormField<HoldingSort>(
-                                    initialValue: _sort,
-                                    isExpanded: true,
-                                    decoration: terminalDecoration('排序'),
-                                    items: [
-                                      for (final s in HoldingSort.values)
-                                        DropdownMenuItem(
-                                            value: s, child: Text(s.label)),
-                                    ],
-                                    onChanged: (s) => setState(
-                                        () => _sort =
-                                            s ?? HoldingSort.defaultOrder),
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: T.s3),
-                            if (isAssets) ...[
-                        SectionHeader(
-                          label: '资产',
-                          trailing: Text(
-                            Formats.amount(assetTotalOf(assets, rates)),
-                            style: T.mono(size: 13, weight: FontWeight.w600),
-                          ),
-                        ),
-                        if (assets.isEmpty)
-                          EmptyState(
-                            message: _filter == HoldingFilter.all
-                                ? '暂无资产'
-                                : '没有符合条件的持仓',
-                          )
-                        else
-                          for (final h in assets)
-                            _HoldingRowCard(
-                              holding: h,
-                              onTap: () => showHoldingDetailSheet(context, ref, h),
-                            ),
-                      ] else ...[
-                        SectionHeader(
-                          label: '负债',
-                          trailing: Text(
-                            Formats.amount(liabilityTotalOf(liabilities, rates)),
-                            style: T.mono(size: 13, weight: FontWeight.w600, color: T.down),
-                          ),
-                        ),
-                        if (liabilities.isEmpty)
-                          EmptyState(
-                            message: _filter == HoldingFilter.all
-                                ? '暂无负债'
-                                : '没有符合条件的持仓',
-                          )
-                        else
-                          for (final h in liabilities)
-                            _HoldingRowCard(
-                              holding: h,
-                              onTap: () => showHoldingDetailSheet(context, ref, h),
-                            ),
-                      ],
-                            ],
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-          );
-        },
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => ErrorState(
-          message: '持仓数据加载失败，请重试',
-          onRetry: () => ref.invalidate(holdingsProvider),
+            if (desktop)
+              Padding(
+                padding: const EdgeInsets.only(left: T.s2, right: T.s4),
+                child: addHolding,
+              ),
+          ],
         ),
-      ),
+        floatingActionButton: desktop ? null : addHolding,
+        body: holdings.when(
+          data: (list) => list.isEmpty
+              ? const EmptyState(message: '还没有持仓，可先添加一项资产或负债。')
+              : _buildList(list, desktop),
+          loading: () => const Center(child: CircularProgressIndicator()),
+          error: (e, _) => ErrorState(
+            message: '持仓数据加载失败，请重试',
+            onRetry: () => ref.invalidate(holdingsProvider),
+          ),
+        ),
       ),
     );
   }
 
-  Future<void> _refresh({bool showSnack = true}) async {
-    ref.read(_refreshingProvider.notifier).state = true;
-    final result = await ref.read(marketServiceProvider).refreshAll();
-    // FX rates may have changed with the refresh.
-    ref.invalidate(cnyRatesProvider);
-    ref.invalidate(priceCacheProvider);
-    ref.read(_refreshingProvider.notifier).state = false;
-    // Prices are fresh: re-evaluate alert rules and notify for anything
-    // newly fired (no-op when disabled or nothing changed today).
-    unawaited(ref.read(alertNotificationServiceProvider).checkAndNotify());
-    if (!mounted) return;
-    if (showSnack) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(result.failed == 0
-              ? '行情已更新 (${result.updated} 项)'
-              : '更新 ${result.updated} 项，失败 ${result.failed} 项'),
+  Widget _buildList(List<HoldingRow> list, bool desktop) {
+    final visible = _sorted(list);
+    final rates = ref.watch(cnyRatesProvider).value ?? const {};
+    final hide = ref.watch(hideAmountsProvider);
+    final total = _isAssets
+        ? assetTotalOf(visible, rates)
+        : liabilityTotalOf(visible, rates);
+    final hasFilters = _filter != HoldingFilter.all || _query.trim().isNotEmpty;
+    final empty = EmptyState(
+      message: hasFilters ? '没有符合条件的持仓' : (_isAssets ? '暂无资产' : '暂无负债'),
+      action: hasFilters
+          ? OutlinedButton(onPressed: _resetFilters, child: const Text('清除筛选'))
+          : null,
+    );
+    final summary = Row(
+      children: [
+        Text('${visible.length} 项', style: T.label(size: 12)),
+        const SizedBox(width: T.s2),
+        Expanded(
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              Text('合计', style: T.label(size: 12)),
+              const SizedBox(width: T.s2),
+              Flexible(
+                child: Text(
+                  hide ? Formats.masked() : Formats.money(total),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: T.mono(size: 13, weight: FontWeight.w600),
+                ),
+              ),
+            ],
+          ),
         ),
+      ],
+    );
+    return ResponsiveShell(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _buildControls(desktop),
+          const SizedBox(height: T.s3),
+          summary,
+          const SizedBox(height: T.s2),
+          Expanded(
+            child: desktop
+                ? (visible.isEmpty
+                      ? empty
+                      : HoldingsTable(
+                          section: _section,
+                          rows: visible,
+                          sort: _sort,
+                          onSortChanged: _setSort,
+                          onHoldingTap: (h) =>
+                              showHoldingDetailSheet(context, ref, h),
+                          onHoldingMenu: (h, at) =>
+                              showHoldingMenu(context, ref, h, at: at),
+                        ))
+                : RefreshIndicator(
+                    onRefresh: _refresh,
+                    child: ListView.builder(
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      padding: const EdgeInsets.only(bottom: 60),
+                      itemCount: visible.isEmpty ? 1 : visible.length,
+                      itemBuilder: (_, index) {
+                        if (visible.isEmpty) return empty;
+                        final h = visible[index];
+                        return _HoldingRowCard(
+                          key: ValueKey(h.id),
+                          holding: h,
+                          onTap: () => showHoldingDetailSheet(context, ref, h),
+                          onMenu: (at) =>
+                              showHoldingMenu(context, ref, h, at: at),
+                          onArchive: () =>
+                              setHoldingArchived(context, ref, h, true),
+                        );
+                      },
+                    ),
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildControls(bool desktop) {
+    final sections = SegmentedButton<HoldingSection>(
+      segments: const [
+        ButtonSegment(value: HoldingSection.assets, label: Text('资产')),
+        ButtonSegment(value: HoldingSection.liabilities, label: Text('负债')),
+      ],
+      selected: {_section},
+      onSelectionChanged: (s) => setState(() => _section = s.first),
+      showSelectedIcon: false,
+      style: SegmentedButton.styleFrom(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(T.rInput),
+        ),
+        side: const BorderSide(color: T.border),
+        minimumSize: Size(72, desktop ? 36 : 44),
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        foregroundColor: T.text2,
+        backgroundColor: T.surface,
+        selectedForegroundColor: T.text1,
+        selectedBackgroundColor: T.surface2,
+      ),
+    );
+    final search = TextField(
+      controller: _searchCtrl,
+      focusNode: _searchFocus,
+      onChanged: (v) => setState(() => _query = v),
+      style: const TextStyle(fontSize: 13),
+      decoration: InputDecoration(
+        hintText: '搜索名称/代码/类型',
+        prefixIcon: const Icon(Icons.search, size: 17),
+        prefixIconConstraints: const BoxConstraints(minWidth: 36),
+        suffixIconConstraints: BoxConstraints(
+          minWidth: desktop ? 36 : 44,
+          minHeight: desktop ? 36 : 44,
+        ),
+        suffixIcon: _query.isEmpty
+            ? null
+            : IconButton(
+                tooltip: '清空搜索',
+                icon: const Icon(Icons.close, size: 16),
+                onPressed: () {
+                  _clearSearch();
+                  _searchFocus.requestFocus();
+                },
+              ),
+        isDense: true,
+        constraints: BoxConstraints(minHeight: desktop ? 36 : 44),
+        contentPadding: EdgeInsets.symmetric(vertical: desktop ? 9 : 13),
+      ),
+    );
+    final filter = _HoldingsMenu<HoldingFilter>(
+      label: '筛选',
+      value: _filter,
+      values: HoldingFilter.values,
+      labelFor: (value) => value.label,
+      onSelected: (f) => setState(() => _filter = f),
+      active: _filter != HoldingFilter.all,
+      desktop: desktop,
+    );
+    final sort = _HoldingsMenu<HoldingSort>(
+      label: '排序',
+      value: _sort,
+      values: _isAssets
+          ? HoldingSort.values
+          : const [
+              HoldingSort.defaultOrder,
+              HoldingSort.amountDesc,
+              HoldingSort.amountAsc,
+              HoldingSort.nameAsc,
+              HoldingSort.nameDesc,
+            ],
+      labelFor: (value) {
+        if (_isAssets) return value.label;
+        return switch (value) {
+          HoldingSort.amountDesc => '余额从高到低',
+          HoldingSort.amountAsc => '余额从低到高',
+          _ => value.label,
+        };
+      },
+      onSelected: _setSort,
+      active: _sort != HoldingSort.defaultOrder,
+      desktop: desktop,
+    );
+    if (desktop) {
+      return Row(
+        children: [
+          sections,
+          const SizedBox(width: T.s3),
+          Expanded(child: search),
+          const SizedBox(width: T.s2),
+          SizedBox(width: 156, child: filter),
+          const SizedBox(width: T.s2),
+          SizedBox(width: 174, child: sort),
+        ],
       );
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        search,
+        const SizedBox(height: T.s2),
+        sections,
+        const SizedBox(height: T.s2),
+        Row(
+          children: [
+            Expanded(child: filter),
+            const SizedBox(width: T.s2),
+            Expanded(child: sort),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Future<void> _refresh({bool showSnack = true}) async {
+    final container = ProviderScope.containerOf(context, listen: false);
+    final refreshing = container.read(_refreshingProvider.notifier);
+    if (refreshing.state) return;
+    refreshing.state = true;
+    String message;
+    try {
+      final result = await container.read(marketServiceProvider).refreshAll();
+      if (!refreshing.mounted) return;
+      container.invalidate(cnyRatesProvider);
+      container.invalidate(priceCacheProvider);
+      unawaited(
+        container.read(alertNotificationServiceProvider).checkAndNotify(),
+      );
+      message = switch ((result.updated, result.failed)) {
+        (0, 0) => '暂无可更新的行情',
+        (final count, 0) => '已更新 $count 项行情',
+        (final count, final failed) => '更新 $count 项行情，失败 $failed 项',
+      };
+    } catch (_) {
+      message = '行情刷新失败，请稍后重试';
+    } finally {
+      if (refreshing.mounted) refreshing.state = false;
+    }
+    if (mounted && showSnack) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(message)));
     }
   }
 }
 
+class _HoldingsMenu<TValue> extends StatelessWidget {
+  const _HoldingsMenu({
+    required this.label,
+    required this.value,
+    required this.values,
+    required this.labelFor,
+    required this.onSelected,
+    required this.active,
+    required this.desktop,
+  });
+
+  final String label;
+  final TValue value;
+  final List<TValue> values;
+  final String Function(TValue) labelFor;
+  final ValueChanged<TValue> onSelected;
+  final bool active;
+  final bool desktop;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: T.surface,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(T.rInput),
+        side: const BorderSide(color: T.border),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: PopupMenuButton<TValue>(
+        tooltip: label,
+        position: PopupMenuPosition.under,
+        initialValue: value,
+        onSelected: onSelected,
+        itemBuilder: (_) => [
+          for (final item in values)
+            CheckedPopupMenuItem(
+              value: item,
+              checked: item == value,
+              height: desktop ? 38 : 48,
+              child: Text(labelFor(item)),
+            ),
+        ],
+        child: Container(
+          constraints: BoxConstraints(minHeight: desktop ? 36 : 44),
+          padding: const EdgeInsets.symmetric(horizontal: T.s2),
+          child: Row(
+            children: [
+              Text(label, style: T.label(size: 12)),
+              const SizedBox(width: T.s2),
+              Expanded(
+                child: Text(
+                  labelFor(value),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: T.label(size: 12, color: active ? T.accent : T.text1),
+                ),
+              ),
+              const Icon(Icons.arrow_drop_down, size: 16, color: T.text2),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _HoldingRowCard extends ConsumerWidget {
-  const _HoldingRowCard({required this.holding, required this.onTap});
+  const _HoldingRowCard({
+    super.key,
+    required this.holding,
+    required this.onTap,
+    required this.onMenu,
+    required this.onArchive,
+  });
 
   final HoldingRow holding;
   final VoidCallback onTap;
+  final ValueChanged<Offset> onMenu;
+  final Future<void> Function() onArchive;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final type = AssetType.fromStorage(holding.assetType);
     final marketValue = _holdingMarketValue(holding);
     // Today's change from the price cache (only when written today).
-    final cache = ref.watch(priceCacheProvider).value ?? const <String, PriceCacheRow>{};
+    final cache =
+        ref.watch(priceCacheProvider).value ?? const <String, PriceCacheRow>{};
     final todayRow = cachedQuoteForHolding(cache, holding);
     final source = MarketSource.fromStorage(holding.marketSource);
-    final todayProfit = todayProfitOf(todayRow, holding.quantity, source: source);
+    final todayProfit = todayProfitOf(
+      todayRow,
+      holding.quantity,
+      source: source,
+    );
     final todayPct = todayChangePctOf(todayRow, source: source);
     final hide = ref.watch(hideAmountsProvider);
     final closed = isHoldingClosed(holding);
     final subtitle = closed
         ? (type == AssetType.liability
-            ? '已还清'
-            : type.isAmountBased
-                ? '已结清'
-                : '清仓 · ${holding.symbol ?? '手动净值'}')
+              ? '已还清'
+              : type.isAmountBased
+              ? '已结清'
+              : '清仓 · ${holding.symbol ?? '手动净值'}')
         : type == AssetType.liability
-            ? '负债 · 起始 ${Formats.date(holding.purchaseDate ?? holding.createdAt)}'
-            : type.isAmountBased
-                ? '持有 ${Formats.holdingDuration(holding.purchaseDate ?? holding.createdAt)}'
-                : '${holding.symbol ?? '手动净值'} · 持有 ${Formats.holdingDuration(holding.purchaseDate ?? holding.createdAt)}';
+        ? '负债 · 起始 ${Formats.date(holding.purchaseDate ?? holding.createdAt)}'
+        : type.isAmountBased
+        ? '持有 ${Formats.holdingDuration(holding.purchaseDate ?? holding.createdAt)}'
+        : '${holding.symbol ?? '手动净值'} · 持有 ${Formats.holdingDuration(holding.purchaseDate ?? holding.createdAt)}';
     final card = TerminalCard(
       onTap: onTap,
+      padding: const EdgeInsets.only(left: T.s3, right: T.s1),
+      margin: const EdgeInsets.only(bottom: T.s2),
       child: DataRow(
         title: holding.name,
         titleSuffix: closed
             ? StatusChip(closedHoldingLabel(holding))
             : (holding.archived ? const StatusChip('已归档') : null),
         dimmed: closed || holding.archived,
-        subtitle: Text(subtitle, style: T.label(size: 11, color: T.text3)),
+        subtitle: Text(
+          subtitle,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: T.label(size: 11, color: T.text3),
+        ),
         leading: Icon(type.icon, size: 16, color: type.color),
-        showChevron: true,
-        trailing: Column(
-          crossAxisAlignment: CrossAxisAlignment.end,
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Text(
-              hide ? '****' : Formats.money(marketValue, holding.currency),
-              style: T.mono(
-                size: 14,
-                color: type == AssetType.liability ? T.down : T.text1,
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 128),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text(
+                      hide
+                          ? '****'
+                          : Formats.money(marketValue, holding.currency),
+                      style: T.mono(
+                        size: 14,
+                        color: type == AssetType.liability ? T.down : T.text1,
+                      ),
+                    ),
+                  ),
+                  if (todayProfit == null)
+                    Text('--', style: T.mono(size: 12, color: T.text3))
+                  else
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: DeltaText(
+                        value: todayPct ?? 0,
+                        text: hide
+                            ? '****'
+                            : '${todayProfit >= 0 ? '+' : ''}${Formats.money(todayProfit, holding.currency)}',
+                        size: 12,
+                      ),
+                    ),
+                ],
               ),
             ),
-            if (todayProfit == null)
-              Text('--', style: T.mono(size: 12, color: T.text3))
-            else
-              DeltaText(
-                value: todayPct ?? 0,
-                text: hide
-                    ? '****'
-                    : '${todayProfit >= 0 ? '+' : ''}${Formats.money(todayProfit, holding.currency)}',
-                size: 12,
-              ),
+            const SizedBox(width: T.s1),
+            HoldingActionsButton(onPressed: onMenu),
           ],
         ),
       ),
     );
-    // Mobile row actions: swipe left to archive, long-press for the full
-    // context menu (记交易 / 更新价格 / 编辑 / 归档 / 删除).
     return Dismissible(
-      key: ValueKey('holding-${holding.id}'),
+      key: ValueKey(holding.id),
       direction: holding.archived
           ? DismissDirection.none
           : DismissDirection.endToStart,
       background: Container(
         alignment: Alignment.centerRight,
+        margin: const EdgeInsets.only(bottom: T.s2),
         padding: const EdgeInsets.only(right: T.s4),
         color: T.surface2,
-        child: const Icon(Icons.archive_outlined, color: T.text2),
+        child: const Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.archive_outlined, size: 17, color: T.text2),
+            SizedBox(width: T.s2),
+            Text('归档', style: TextStyle(color: T.text2)),
+          ],
+        ),
       ),
-      onDismissed: (_) async {
-        await ref.read(daoProvider).setArchived(holding.id, true);
-        if (context.mounted) {
-          ScaffoldMessenger.of(context)
-              .showSnackBar(const SnackBar(content: Text('已归档')));
-        }
+      confirmDismiss: (_) async {
+        await onArchive();
+        // The database stream removes the row when the archive succeeds.
+        return false;
       },
       child: GestureDetector(
-        onLongPress: () => showHoldingMenu(context, ref, holding),
+        onLongPressStart: (details) => onMenu(details.globalPosition),
         child: card,
       ),
     );

@@ -8,6 +8,42 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  testWidgets('a range without snapshots can be changed on a phone', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(320, 700);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final now = DateTime.now();
+    final previousYear = DateTime(now.year - 1, 6, 15);
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          snapshotsProvider.overrideWith(
+            (ref) => Stream.value([
+              SnapshotRow(
+                date: previousYear.toIso8601String().substring(0, 10),
+                currency: 'CNY',
+                totalValue: 1100,
+                totalCost: 1000,
+                liabilities: 0,
+                createdAt: previousYear,
+              ),
+            ]),
+          ),
+        ],
+        child: const MaterialApp(home: Scaffold(body: NetWorthChart())),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('所选区间没有净值记录'), findsOneWidget);
+    await tester.tap(find.text('全部'));
+    await tester.pumpAndSettle();
+    expect(find.byType(LineChart), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('trend chart responds to mouse and touch with a single overlay', (tester) async {
     tester.view.physicalSize = const Size(1000, 900);
     tester.view.devicePixelRatio = 1;

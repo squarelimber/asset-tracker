@@ -65,12 +65,13 @@ class PortfolioPage extends ConsumerStatefulWidget {
 class _PortfolioPageState extends ConsumerState<PortfolioPage> {
   final _refreshing = ValueNotifier<bool>(false);
   DateTime? _lastRefreshAt;
+  String? _refreshIssue;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _refreshPrices(showSnack: false);
+      if (mounted) _refreshPrices(showSnack: false);
     });
   }
 
@@ -84,9 +85,9 @@ class _PortfolioPageState extends ConsumerState<PortfolioPage> {
     if (_refreshing.value) return;
     _refreshing.value = true;
     MarketRefreshResult? result;
-    var failed = false;
     try {
       result = await ref.read(marketServiceProvider).refreshAll();
+      if (!mounted) return;
       // Refresh quotes only — DO NOT rewrite today's snapshot here. Today's
       // row is owned by the history backfill, which prices it from these
       // fresh quotes with the SAME replay cost basis as every earlier day;
@@ -102,30 +103,33 @@ class _PortfolioPageState extends ConsumerState<PortfolioPage> {
       // newly fired (no-op when disabled or nothing changed today).
       unawaited(ref.read(alertNotificationServiceProvider).checkAndNotify());
     } catch (_) {
-      failed = true;
+      result = null;
     } finally {
       if (mounted) _refreshing.value = false;
     }
     if (!mounted) return;
-    if (failed || result == null) {
-      if (showSnack) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('行情刷新失败，请稍后重试')));
-      }
-      return;
+    final String message;
+    if (result == null || (result.updated == 0 && result.failed > 0)) {
+      message = '行情刷新失败，请稍后重试';
+      setState(() => _refreshIssue = '行情刷新失败');
+    } else if (result.updated == 0) {
+      message = '暂无可更新行情';
+      setState(() => _refreshIssue = message);
+    } else {
+      final failed = result.failed;
+      final fetchedAt = result.fetchedAt;
+      message = failed == 0
+          ? '行情已更新 (${result.updated} 项)'
+          : '更新 ${result.updated} 项，失败 $failed 项';
+      setState(() {
+        _lastRefreshAt = fetchedAt;
+        _refreshIssue = failed == 0 ? null : '$failed 项未更新';
+      });
     }
-    setState(() => _lastRefreshAt = DateTime.now());
     if (showSnack) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            result.failed == 0
-                ? '行情已更新 (${result.updated} 项)'
-                : '更新 ${result.updated} 项，失败 ${result.failed} 项',
-          ),
-        ),
-      );
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(content: Text(message)));
     }
   }
 
@@ -155,37 +159,36 @@ class _PortfolioPageState extends ConsumerState<PortfolioPage> {
           title: const Text('总览'),
           actions: [
             const TerminalAppBarActions(),
-            // 手机端眼睛已移入资产总览卡内（银行卡右上角）；桌面保留 AppBar 入口。
-            if (MediaQuery.sizeOf(context).width >= 1100)
-              Consumer(
-                builder: (context, ref, _) {
-                  final hidden = ref.watch(hideAmountsProvider);
-                  return IconButton(
-                    tooltip: hidden ? '显示金额' : '隐藏金额',
-                    onPressed: () =>
-                        ref.read(hideAmountsProvider.notifier).state = !hidden,
-                    icon: Icon(
-                      hidden
-                          ? Icons.visibility_off_outlined
-                          : Icons.visibility_outlined,
-                      color: T.text2,
-                    ),
-                  );
-                },
-              ),
             ValueListenableBuilder<bool>(
               valueListenable: _refreshing,
-              builder: (context, refreshing, _) => IconButton(
-                tooltip: '刷新行情',
-                onPressed: refreshing ? null : _refreshPrices,
-                icon: refreshing
+              builder: (context, refreshing, _) {
+                final icon = refreshing
                     ? const SizedBox(
                         width: 18,
                         height: 18,
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
-                    : const Icon(Icons.refresh, color: T.text2),
-              ),
+                    : const Icon(Icons.refresh, size: 18);
+                final label = refreshing ? '正在刷新行情' : '刷新行情';
+                final VoidCallback? onPressed = refreshing
+                    ? null
+                    : _refreshPrices;
+                if (Responsive.isDesktop(context)) {
+                  return Padding(
+                    padding: const EdgeInsets.only(right: T.s3),
+                    child: TextButton.icon(
+                      onPressed: onPressed,
+                      icon: icon,
+                      label: Text(label),
+                    ),
+                  );
+                }
+                return IconButton(
+                  tooltip: label,
+                  onPressed: onPressed,
+                  icon: icon,
+                );
+              },
             ),
           ],
         ),
@@ -246,17 +249,27 @@ class _PortfolioPageState extends ConsumerState<PortfolioPage> {
         physics: const AlwaysScrollableScrollPhysics(),
         padding: EdgeInsets.all(Responsive.isPhone(context) ? T.s3 : T.s5),
         children: [
-          Row(
-            children: [
-              const SessionChip(),
-              const SizedBox(width: T.s2),
-              if (_lastRefreshAt != null)
-                Text(
-                  '更新于 ${Formats.dateTime(_lastRefreshAt!)}',
-                  style: T.mono(size: 11, color: T.text3),
-                ),
-              const Spacer(),
-            ],
+          ValueListenableBuilder<bool>(
+            valueListenable: _refreshing,
+            builder: (context, refreshing, _) => Wrap(
+              spacing: T.s2,
+              runSpacing: T.s1,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                const SessionChip(),
+                if (refreshing)
+                  Text('正在刷新行情…', style: T.label())
+                else ...[
+                  if (_lastRefreshAt case final time?)
+                    Text(
+                      '行情更新于 ${Formats.dateTime(time)}',
+                      style: T.label(color: T.text3),
+                    ),
+                  if (_refreshIssue case final issue?)
+                    Text(issue, style: T.label()),
+                ],
+              ],
+            ),
           ),
           const SizedBox(height: T.s2),
           _KpiRow(summary: s),

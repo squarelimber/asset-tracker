@@ -21,18 +21,29 @@ class TerminalChoice extends StatelessWidget {
     selected: selected,
     child: TextButton(
       onPressed: onPressed,
-      style: TextButton.styleFrom(
-        minimumSize: Size(32, Responsive.isPhone(context) ? 44 : 30),
-        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-        padding: const EdgeInsets.symmetric(horizontal: 10),
-        foregroundColor: selected ? T.text1 : T.text2,
-        backgroundColor: selected ? T.surface2 : Colors.transparent,
-        side: BorderSide(color: selected ? T.border : Colors.transparent),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(T.rInput),
-        ),
-        textStyle: const TextStyle(fontSize: 11, fontWeight: FontWeight.w500),
-      ),
+      style:
+          TextButton.styleFrom(
+            minimumSize: Size(44, Responsive.isPhone(context) ? 44 : 32),
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            foregroundColor: selected ? T.text1 : T.text2,
+            backgroundColor: selected ? T.surface2 : Colors.transparent,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(T.rInput),
+            ),
+            textStyle: const TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w500,
+            ),
+          ).copyWith(
+            overlayColor: Theme.of(context).textButtonTheme.style?.overlayColor,
+            side: WidgetStateBorderSide.fromMap({
+              WidgetState.focused: const BorderSide(color: T.accent),
+              WidgetState.any: selected
+                  ? const BorderSide(color: T.border)
+                  : BorderSide.none,
+            }),
+          ),
       child: Text(label),
     ),
   );

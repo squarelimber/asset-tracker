@@ -9,37 +9,53 @@ import '../../tokens.dart';
 import '../transaction_dialogs.dart';
 import 'holding_dialogs.dart';
 
-/// Context menu for a holding row: 记交易 / 更新价格 / 编辑 / 归档 / 删除.
-///
-/// [at] is the global position to anchor the menu (right-click or
-/// long-press location); when omitted the menu opens at the bottom of
-/// [context]'s row.
+class HoldingActionsButton extends StatelessWidget {
+  const HoldingActionsButton({
+    super.key,
+    required this.onPressed,
+    this.compact = false,
+  });
+
+  final ValueChanged<Offset> onPressed;
+  final bool compact;
+
+  @override
+  Widget build(BuildContext context) {
+    final size = compact ? 36.0 : 44.0;
+    return IconButton(
+      tooltip: '更多操作',
+      icon: const Icon(Icons.more_horiz, size: 20),
+      constraints: BoxConstraints.tightFor(width: size, height: size),
+      padding: EdgeInsets.zero,
+      style: IconButton.styleFrom(
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        visualDensity: VisualDensity.standard,
+      ),
+      onPressed: () {
+        final box = context.findRenderObject()! as RenderBox;
+        onPressed(box.localToGlobal(box.size.bottomRight(Offset.zero)));
+      },
+    );
+  }
+}
+
+/// Opens the holding actions at the button or pointer position.
 Future<void> showHoldingMenu(
   BuildContext context,
   WidgetRef ref,
   HoldingRow holding, {
-  Offset? at,
+  required Offset at,
 }) async {
   final type = AssetType.fromStorage(holding.assetType);
   final closed = isHoldingClosed(holding);
-  final box = context.findRenderObject();
-  final Offset anchor;
-  if (at != null) {
-    anchor = at;
-  } else if (box is RenderBox) {
-    final origin = box.localToGlobal(Offset.zero);
-    anchor = Offset(origin.dx, origin.dy + box.size.height);
-  } else {
-    anchor = const Offset(0, 0);
-  }
-  final size = MediaQuery.sizeOf(context);
+  final overlay =
+      Navigator.of(context).overlay!.context.findRenderObject()! as RenderBox;
+  final anchor = overlay.globalToLocal(at);
   final value = await showMenu<String>(
     context: context,
-    position: RelativeRect.fromLTRB(
-      anchor.dx.clamp(0.0, size.width - 160),
-      anchor.dy.clamp(0.0, size.height - 10),
-      0,
-      0,
+    position: RelativeRect.fromRect(
+      anchor & Size.zero,
+      Offset.zero & overlay.size,
     ),
     items: [
       if (!closed && type != AssetType.liability)
@@ -51,12 +67,7 @@ Future<void> showHoldingMenu(
         Icons.archive_outlined,
         holding.archived ? '取消归档' : '归档',
       ),
-      const PopupMenuItem<String>(
-        value: 'sep',
-        enabled: false,
-        height: 12,
-        child: SizedBox.shrink(),
-      ),
+      const PopupMenuDivider(),
       _item('delete', Icons.delete_outline, '删除', color: T.up),
     ],
   );
@@ -69,16 +80,52 @@ Future<void> showHoldingMenu(
     case 'edit':
       await showEditHoldingDialog(context, ref, holding);
     case 'archive':
-      await ref.read(daoProvider).setArchived(holding.id, true);
-      if (context.mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('已归档')));
-      }
+      await setHoldingArchived(context, ref, holding, true);
     case 'unarchive':
-      await ref.read(daoProvider).setArchived(holding.id, false);
+      await setHoldingArchived(context, ref, holding, false);
     case 'delete':
       await _confirmDelete(context, ref, holding);
   }
+}
+
+Future<void> setHoldingArchived(
+  BuildContext context,
+  WidgetRef ref,
+  HoldingRow holding,
+  bool archived,
+) async {
+  final dao = ref.read(daoProvider);
+  final messenger = ScaffoldMessenger.of(context);
+  try {
+    await dao.setArchived(holding.id, archived);
+  } catch (_) {
+    if (context.mounted) {
+      messenger.showSnackBar(const SnackBar(content: Text('操作失败，请重试')));
+    }
+    return;
+  }
+  if (!context.mounted) return;
+  messenger.showSnackBar(
+    SnackBar(
+      content: Text(archived ? '已归档' : '已取消归档'),
+      action: archived
+          ? SnackBarAction(
+              label: '撤销',
+              onPressed: () async {
+                try {
+                  await dao.setArchived(holding.id, false);
+                } catch (_) {
+                  if (messenger.mounted) {
+                    messenger.showSnackBar(
+                      const SnackBar(content: Text('撤销失败，请重试')),
+                    );
+                  }
+                }
+              },
+            )
+          : null,
+    ),
+  );
 }
 
 PopupMenuItem<String> _item(
@@ -119,6 +166,10 @@ Future<void> _confirmDelete(
           child: const Text('取消'),
         ),
         FilledButton(
+          style: FilledButton.styleFrom(
+            backgroundColor: Theme.of(context).colorScheme.error,
+            foregroundColor: Theme.of(context).colorScheme.onError,
+          ),
           onPressed: () => Navigator.of(context).pop(true),
           child: const Text('删除'),
         ),
@@ -128,7 +179,8 @@ Future<void> _confirmDelete(
   if (ok != true || !context.mounted) return;
   await ref.read(daoProvider).deleteHolding(holding.id);
   if (context.mounted) {
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text('已删除「${holding.name}」')));
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text('已删除「${holding.name}」')));
   }
 }

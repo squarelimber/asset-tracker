@@ -37,6 +37,13 @@ class _TransactionsPageState extends ConsumerState<TransactionsPage> {
   int? _accountFilter;
   String _datePreset = 'all'; // all | month | 3m | year
   final _keywordCtrl = TextEditingController();
+  bool _exporting = false;
+
+  bool get _hasFilters =>
+      _typeFilter != null ||
+      _accountFilter != null ||
+      _datePreset != 'all' ||
+      _keywordCtrl.text.trim().isNotEmpty;
 
   @override
   void dispose() {
@@ -83,7 +90,10 @@ class _TransactionsPageState extends ConsumerState<TransactionsPage> {
   }
 
   /// Counterparty line for the tile, e.g. "扣款来源：天天宝".
-  String? _counterpartyText(TransactionRow t, Map<int, HoldingRow> holdingsById) {
+  String? _counterpartyText(
+    TransactionRow t,
+    Map<int, HoldingRow> holdingsById,
+  ) {
     String name(int? id) => id == null ? '' : (holdingsById[id]?.name ?? '');
     final type = TransactionType.fromStorage(t.type);
     return switch (type) {
@@ -137,10 +147,14 @@ class _TransactionsPageState extends ConsumerState<TransactionsPage> {
   double? _tileCostPrice(TransactionRow t, Map<int, HoldingRow> holdingsById) {
     final h = t.holdingId == null ? null : holdingsById[t.holdingId];
     if (h == null) return null;
-    return AssetType.fromStorage(h.assetType).isAmountBased ? null : h.costPrice;
+    return AssetType.fromStorage(h.assetType).isAmountBased
+        ? null
+        : h.costPrice;
   }
 
-  List<(DateTime, List<TransactionRow>)> _groupByDay(List<TransactionRow> txns) {
+  List<(DateTime, List<TransactionRow>)> _groupByDay(
+    List<TransactionRow> txns,
+  ) {
     final groups = <DateTime, List<TransactionRow>>{};
     for (final t in txns) {
       final d = t.occurredAt.toLocal();
@@ -150,31 +164,45 @@ class _TransactionsPageState extends ConsumerState<TransactionsPage> {
     return [for (final k in keys) (k, groups[k]!)];
   }
 
-  Future<void> _exportCsv() async {
-    final txns = ref.read(transactionsProvider).valueOrNull;
-    if (txns == null) return;
-    final holdings = ref.read(holdingsProvider).value ?? const <HoldingRow>[];
-    final accounts =
-        ref.read(accountsProvider).value ?? const <AccountRow>[];
-    final holdingsById = {for (final h in holdings) h.id: h};
-    final accountName = {for (final a in accounts) a.id: a.name};
-    final filtered = _filter(txns, holdingsById, accountName);
-    final content = const CsvExport().transactionsDetailed(
-      filtered,
-      {for (final h in holdings) h.id: h.name},
-      accountName,
-    );
+  Future<void> _exportCsv(
+    List<TransactionRow> filtered,
+    List<HoldingRow> holdings,
+    Map<int, String> accountName,
+  ) async {
+    if (_exporting || filtered.isEmpty) return;
+    setState(() => _exporting = true);
+    final content = const CsvExport().transactionsDetailed(filtered, {
+      for (final h in holdings) h.id: h.name,
+    }, accountName);
     final now = DateTime.now();
     final stamp =
         '${now.hour.toString().padLeft(2, '0')}${now.minute.toString().padLeft(2, '0')}';
-    if (!mounted) return;
-    await saveBytesToUser(
-      context,
-      Uint8List.fromList(utf8.encode(content)),
-      fileName: '流水_${todayKey()}-$stamp.csv',
-      mime: 'text/csv',
-      typeGroup: const XTypeGroup(label: 'CSV', extensions: ['csv']),
-    );
+    try {
+      await saveBytesToUser(
+        context,
+        Uint8List.fromList(utf8.encode(content)),
+        fileName: '流水_${todayKey()}-$stamp.csv',
+        mime: 'text/csv',
+        typeGroup: const XTypeGroup(label: 'CSV', extensions: ['csv']),
+      );
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('导出失败，请重试')));
+      }
+    } finally {
+      if (mounted) setState(() => _exporting = false);
+    }
+  }
+
+  void _resetFilters() {
+    setState(() {
+      _typeFilter = null;
+      _accountFilter = null;
+      _datePreset = 'all';
+      _keywordCtrl.clear();
+    });
   }
 
   /// 修改一笔流水的发生日期。日期是历史回放（金额型平滑、收益日历、
@@ -184,8 +212,10 @@ class _TransactionsPageState extends ConsumerState<TransactionsPage> {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('修改流水日期'),
-        content: const Text('将更改这笔流水在历史净值中的归属日期，'
-            '保存后会自动全量重算历史。'),
+        content: const Text(
+          '将更改这笔流水在历史净值中的归属日期，'
+          '保存后会自动全量重算历史。',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
@@ -220,9 +250,9 @@ class _TransactionsPageState extends ConsumerState<TransactionsPage> {
     await dao.setSetting(historySyncDirtyKey, historyDirtySet);
     await dao.setSetting(historyFullRebuildKey, '1');
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('流水日期已更新，将重建全部历史净值')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('流水日期已更新，将重建全部历史净值')));
     }
   }
 
@@ -232,16 +262,34 @@ class _TransactionsPageState extends ConsumerState<TransactionsPage> {
     final holdings = ref.watch(holdingsProvider).value ?? const <HoldingRow>[];
     final accounts = ref.watch(accountsProvider).value ?? const <AccountRow>[];
     final rates = ref.watch(cnyRatesProvider).value ?? const <String, double>{};
+    final holdingsById = {for (final h in holdings) h.id: h};
+    final accountName = {for (final a in accounts) a.id: a.name};
+    final filtered = _filter(
+      txns.valueOrNull ?? const [],
+      holdingsById,
+      accountName,
+    );
+    final exportAction = _exporting || filtered.isEmpty
+        ? null
+        : () => _exportCsv(filtered, holdings, accountName);
+    final isPhone = Responsive.isPhone(context);
 
     return Scaffold(
       appBar: AppBar(
-        leading: Responsive.isDesktop(context) ? null : const SecondaryPageBackButton(),
+        leading: Responsive.isDesktop(context)
+            ? null
+            : const SecondaryPageBackButton(),
         title: const Text('交易流水'),
         actions: [
           IconButton(
-            tooltip: '导出 CSV（当前筛选）',
-            icon: const Icon(Icons.file_download_outlined, color: T.text2),
-            onPressed: _exportCsv,
+            tooltip: _exporting ? '正在导出' : '导出 CSV（当前筛选）',
+            icon: _exporting
+                ? const SizedBox.square(
+                    dimension: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.file_download_outlined),
+            onPressed: exportAction,
           ),
           const TerminalAppBarActions(),
         ],
@@ -253,151 +301,173 @@ class _TransactionsPageState extends ConsumerState<TransactionsPage> {
           onRetry: () => ref.invalidate(transactionsProvider),
         ),
         data: (all) {
-          final holdingsById = {for (final h in holdings) h.id: h};
-          final accountName = {for (final a in accounts) a.id: a.name};
-          final filtered = _filter(all, holdingsById, accountName);
           final stats = const TradeStatsCalculator().compute(
             filtered,
             holdings,
             cnyRates: rates,
           );
           return SingleChildScrollView(
-            padding: EdgeInsets.symmetric(
-              horizontal: Responsive.isPhone(context) ? 16 : 24,
-              vertical: 16,
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                SizedBox(
-                  height: 40,
-                  child: ListView(
-                    scrollDirection: Axis.horizontal,
-                    children: [
-                      for (final opt in <(TransactionType?, String)>[
-                        (null, '全部'),
-                        for (final t in TransactionType.values) (t, t.label),
-                      ])
-                        Padding(
-                          padding: const EdgeInsets.only(right: 8),
-                          child: ChoiceChip(
-                            label: Text(opt.$2),
-                            selected: _typeFilter == opt.$1,
-                            onSelected: (_) =>
-                                setState(() => _typeFilter = opt.$1),
-                            showCheckmark: false,
-                            selectedColor: T.accent,
-                            backgroundColor: T.surface2,
-                            side: const BorderSide(color: T.border),
-                            labelStyle: TextStyle(
-                              fontSize: 12,
-                              color: _typeFilter == opt.$1 ? T.bg : T.text2,
-                            ),
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 8,
-                              vertical: 4,
-                            ),
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: T.s3),
-                Row(
-                  children: [
-                    SizedBox(
-                      width: 136,
-                      child: DropdownButtonFormField<int?>(
-                        initialValue: _accountFilter,
-                        isExpanded: true,
-                        decoration: terminalDecoration('账户'),
-                        items: [
-                          const DropdownMenuItem<int?>(
-                            value: null,
-                            child: Text('全部账户'),
-                          ),
-                          for (final a in accounts)
-                            DropdownMenuItem(
-                              value: a.id,
-                              child: Text(
-                                a.name,
-                                overflow: TextOverflow.ellipsis,
+            child: ResponsiveShell(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  SizedBox(
+                    height: 40,
+                    child: ListView(
+                      scrollDirection: Axis.horizontal,
+                      children: [
+                        for (final opt in <(TransactionType?, String)>[
+                          (null, '全部'),
+                          for (final t in TransactionType.values) (t, t.label),
+                        ])
+                          Padding(
+                            padding: const EdgeInsets.only(right: 8),
+                            child: ChoiceChip(
+                              label: Text(opt.$2),
+                              selected: _typeFilter == opt.$1,
+                              onSelected: (_) =>
+                                  setState(() => _typeFilter = opt.$1),
+                              showCheckmark: false,
+                              selectedColor: T.surface2,
+                              backgroundColor: T.surface,
+                              side: BorderSide(
+                                color: _typeFilter == opt.$1
+                                    ? T.accent
+                                    : T.border,
+                              ),
+                              labelStyle: TextStyle(
+                                fontSize: 12,
+                                color: _typeFilter == opt.$1
+                                    ? T.text1
+                                    : T.text2,
+                              ),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 4,
                               ),
                             ),
-                        ],
-                        onChanged: (v) =>
-                            setState(() => _accountFilter = v),
-                      ),
+                          ),
+                      ],
                     ),
-                    const SizedBox(width: T.s3),
-                    SizedBox(
-                      width: 108,
-                      child: DropdownButtonFormField<String>(
-                        initialValue: _datePreset,
-                        isExpanded: true,
-                        decoration: terminalDecoration('时间'),
-                        items: const [
-                          DropdownMenuItem(value: 'all', child: Text('全部')),
-                          DropdownMenuItem(value: 'month', child: Text('本月')),
-                          DropdownMenuItem(value: '3m', child: Text('近3月')),
-                          DropdownMenuItem(value: 'year', child: Text('今年')),
-                        ],
-                        onChanged: (v) =>
-                            setState(() => _datePreset = v ?? 'all'),
-                      ),
-                    ),
-                    const SizedBox(width: T.s3),
-                    Expanded(
-                      child: TerminalTextField(
-                        controller: _keywordCtrl,
-                        label: '搜索产品 / 备注',
-                        onChanged: (_) => setState(() {}),
-                      ),
-                    ),
+                  ),
+                  const SizedBox(height: T.s3),
+                  if (isPhone) ...[
+                    _searchField(),
+                    const SizedBox(height: T.s3),
                   ],
-                ),
-                const SizedBox(height: T.s4),
-                _SummaryCard(stats: stats, count: filtered.length),
-                const SizedBox(height: T.s4),
-                if (filtered.isEmpty)
-                  const Padding(
-                    padding: EdgeInsets.all(32),
-                    child: Center(
-                      child: Text('没有符合条件的流水',
-                          style: TextStyle(color: T.text3, fontSize: 13)),
-                    ),
-                  )
-                else
-                  for (final (day, rows) in _groupByDay(filtered)) ...[
-                    _DayHeader(
-                      day: day,
-                      net: _dayNet(rows, rates),
-                    ),
-                    for (final t in rows) ...[
-                      InkWell(
-                        borderRadius: BorderRadius.circular(6),
-                        onTap: () => _editDate(t),
-                        child: TransactionTile(
-                          txn: t,
-                          costPrice: _tileCostPrice(t, holdingsById),
-                          holdingName: t.holdingId == null
-                              ? null
-                              : holdingsById[t.holdingId]?.name,
-                          accountName: accountName[t.accountId],
-                          counterpartyText:
-                              _counterpartyText(t, holdingsById),
+                  Row(
+                    children: [
+                      Flexible(
+                        child: DropdownButtonFormField<int?>(
+                          initialValue: _accountFilter,
+                          isExpanded: true,
+                          decoration: terminalDecoration('账户'),
+                          items: [
+                            const DropdownMenuItem<int?>(
+                              value: null,
+                              child: Text('全部账户'),
+                            ),
+                            for (final a in accounts)
+                              DropdownMenuItem(
+                                value: a.id,
+                                child: Text(
+                                  a.name,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                          ],
+                          onChanged: (v) => setState(() => _accountFilter = v),
                         ),
                       ),
-                      const SizedBox(height: 4),
+                      const SizedBox(width: T.s3),
+                      Flexible(
+                        child: DropdownButtonFormField<String>(
+                          initialValue: _datePreset,
+                          isExpanded: true,
+                          decoration: terminalDecoration('时间'),
+                          items: const [
+                            DropdownMenuItem(value: 'all', child: Text('全部')),
+                            DropdownMenuItem(value: 'month', child: Text('本月')),
+                            DropdownMenuItem(value: '3m', child: Text('近3月')),
+                            DropdownMenuItem(value: 'year', child: Text('今年')),
+                          ],
+                          onChanged: (v) =>
+                              setState(() => _datePreset = v ?? 'all'),
+                        ),
+                      ),
+                      if (!isPhone) ...[
+                        const SizedBox(width: T.s3),
+                        Expanded(flex: 2, child: _searchField()),
+                      ],
                     ],
-                  ],
-              ],
+                  ),
+                  if (_hasFilters)
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: TextButton(
+                        onPressed: _resetFilters,
+                        child: const Text('清除筛选'),
+                      ),
+                    ),
+                  const SizedBox(height: T.s4),
+                  _SummaryCard(stats: stats, count: filtered.length),
+                  const SizedBox(height: T.s4),
+                  if (filtered.isEmpty)
+                    Padding(
+                      padding: const EdgeInsets.all(32),
+                      child: Center(
+                        child: Text(
+                          all.isEmpty ? '暂无交易流水' : '没有符合条件的流水',
+                          style: const TextStyle(color: T.text2, fontSize: 13),
+                        ),
+                      ),
+                    )
+                  else
+                    for (final (day, rows) in _groupByDay(filtered)) ...[
+                      _DayHeader(day: day, net: _dayNet(rows, rates)),
+                      for (final t in rows) ...[
+                        InkWell(
+                          borderRadius: BorderRadius.circular(6),
+                          onTap: () => _editDate(t),
+                          child: TransactionTile(
+                            txn: t,
+                            costPrice: _tileCostPrice(t, holdingsById),
+                            holdingName: t.holdingId == null
+                                ? null
+                                : holdingsById[t.holdingId]?.name,
+                            accountName: accountName[t.accountId],
+                            counterpartyText: _counterpartyText(
+                              t,
+                              holdingsById,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                      ],
+                    ],
+                ],
+              ),
             ),
           );
         },
       ),
     );
   }
+
+  Widget _searchField() => TextField(
+    controller: _keywordCtrl,
+    onChanged: (_) => setState(() {}),
+    decoration: terminalDecoration('搜索产品、账户或备注').copyWith(
+      prefixIcon: const Icon(Icons.search, size: 18),
+      suffixIcon: _keywordCtrl.text.isEmpty
+          ? null
+          : IconButton(
+              tooltip: '清除搜索',
+              onPressed: () => setState(_keywordCtrl.clear),
+              icon: const Icon(Icons.close, size: 18),
+            ),
+    ),
+  );
 }
 
 class _SummaryCard extends StatelessWidget {
@@ -480,9 +550,8 @@ class _DayHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final now = DateTime.now();
-    final isToday = day.year == now.year &&
-        day.month == now.month &&
-        day.day == now.day;
+    final isToday =
+        day.year == now.year && day.month == now.month && day.day == now.day;
     return Padding(
       padding: const EdgeInsets.only(top: T.s3, bottom: T.s2),
       child: Row(

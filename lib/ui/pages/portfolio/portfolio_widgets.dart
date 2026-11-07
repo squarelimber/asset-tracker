@@ -40,16 +40,18 @@ class AllocationCard extends ConsumerWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(children: [
-              const Expanded(child: SectionHeader(label: '资产配置')),
-              TextButton(
-                onPressed: () => showDialog<void>(
-                  context: context,
-                  builder: (_) => TargetAllocationDialog(summary: summary),
+            Row(
+              children: [
+                const Expanded(child: SectionHeader(label: '资产配置')),
+                TextButton(
+                  onPressed: () => showDialog<void>(
+                    context: context,
+                    builder: (_) => TargetAllocationDialog(summary: summary),
+                  ),
+                  child: const Text('调整目标'),
                 ),
-                child: const Text('调整目标'),
-              ),
-            ]),
+              ],
+            ),
             const Text('暂无资产配置数据', style: TextStyle(color: T.text3)),
           ],
         ),
@@ -97,16 +99,18 @@ class AllocationCard extends ConsumerWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(children: [
-            const Expanded(child: SectionHeader(label: '资产配置')),
-            TextButton(
-              onPressed: () => showDialog<void>(
-                context: context,
-                builder: (_) => TargetAllocationDialog(summary: summary),
+          Row(
+            children: [
+              const Expanded(child: SectionHeader(label: '资产配置')),
+              TextButton(
+                onPressed: () => showDialog<void>(
+                  context: context,
+                  builder: (_) => TargetAllocationDialog(summary: summary),
+                ),
+                child: const Text('调整目标'),
               ),
-              child: const Text('调整目标'),
-            ),
-          ]),
+            ],
+          ),
           const SizedBox(height: T.s2),
           Row(
             crossAxisAlignment: CrossAxisAlignment.center,
@@ -319,7 +323,7 @@ class AllocationCard extends ConsumerWidget {
   }
 }
 
-/// Alipay-style net worth trend: range selector + range stats + touch chart.
+/// Net worth and return trends with range statistics and benchmark overlays.
 class NetWorthChart extends ConsumerStatefulWidget {
   const NetWorthChart({super.key});
 
@@ -331,7 +335,6 @@ class _NetWorthChartState extends ConsumerState<NetWorthChart> {
   RangeOption _range = RangeOption.ytd;
   DateTime? _customFrom;
   DateTime? _customTo;
-  // 默认净资产视图（参考图：净资产 pill 选中）。
   _TrendView _view = _TrendView.returnRate;
 
   /// Benchmark indexes: symbol, label, line color.
@@ -347,15 +350,6 @@ class _NetWorthChartState extends ConsumerState<NetWorthChart> {
 
   Set<String> _benchSelected = {};
   Map<String, HistoryPriceLookup> _benchData = {};
-
-  /// Segmented range presets (all/custom live behind the calendar button).
-  static const _rangeOptions = [
-    RangeOption.month1,
-    RangeOption.month3,
-    RangeOption.ytd,
-    RangeOption.year1,
-    RangeOption.year3,
-  ];
 
   Color _benchColor(String code) =>
       _benchIndexes.firstWhere((b) => b.code == code).color;
@@ -379,51 +373,70 @@ class _NetWorthChartState extends ConsumerState<NetWorthChart> {
   }
 
   Future<void> _showBenchmarkPanel() async {
+    final selection = {..._benchSelected};
     final result = await showModalBottomSheet<Set<String>>(
       context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
       showDragHandle: true,
       builder: (context) => StatefulBuilder(
         builder: (context, setSheetState) => SafeArea(
-          child: Padding(
+          child: SingleChildScrollView(
             padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const Text(
-                  '对比指数（收益率视图下叠加显示）',
+                  '指数对比',
                   style: TextStyle(
                     fontSize: 15,
                     fontWeight: FontWeight.w600,
                     color: T.text1,
                   ),
                 ),
-                const SizedBox(height: 12),
-                for (final b in _benchIndexes) ...[
-                  FilterChip(
-                    label: Text(b.label),
-                    selected: _benchSelected.contains(b.code),
-                    visualDensity: VisualDensity.compact,
-                    onSelected: (sel) {
-                      if (sel) {
-                        if (_benchSelected.length >= _maxBenchmarks) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('最多同时对比 3 个指数')),
-                          );
-                          return;
-                        }
-                        setSheetState(() => _benchSelected.add(b.code));
-                      } else {
-                        setSheetState(() => _benchSelected.remove(b.code));
-                      }
-                    },
-                  ),
-                  const SizedBox(height: 6),
-                ],
-                const SizedBox(height: 12),
-                FilledButton(
-                  onPressed: () => Navigator.pop(context, {..._benchSelected}),
-                  child: const Text('完成'),
+                const SizedBox(height: T.s2),
+                Text(
+                  '在收益率视图中显示。已选 ${selection.length} / $_maxBenchmarks',
+                  style: T.label(size: 12),
+                ),
+                const SizedBox(height: T.s3),
+                Wrap(
+                  spacing: T.s2,
+                  runSpacing: T.s1,
+                  children: [
+                    for (final b in _benchIndexes)
+                      FilterChip(
+                        label: Text(b.label),
+                        selected: selection.contains(b.code),
+                        onSelected:
+                            selection.length == _maxBenchmarks &&
+                                !selection.contains(b.code)
+                            ? null
+                            : (selected) => setSheetState(() {
+                                if (selected) {
+                                  selection.add(b.code);
+                                } else {
+                                  selection.remove(b.code);
+                                }
+                              }),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: T.s4),
+                OverflowBar(
+                  alignment: MainAxisAlignment.end,
+                  spacing: T.s2,
+                  children: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(context),
+                      child: const Text('取消'),
+                    ),
+                    FilledButton(
+                      onPressed: () => Navigator.pop(context, selection),
+                      child: const Text('应用'),
+                    ),
+                  ],
                 ),
               ],
             ),
@@ -432,7 +445,10 @@ class _NetWorthChartState extends ConsumerState<NetWorthChart> {
       ),
     );
     if (result == null || !mounted) return;
-    setState(() => _benchSelected = result);
+    setState(() {
+      _benchSelected = result;
+      if (result.isNotEmpty) _view = _TrendView.returnRate;
+    });
     await _loadBenchmarks();
   }
 
@@ -466,34 +482,6 @@ class _NetWorthChartState extends ConsumerState<NetWorthChart> {
     }
   }
 
-  Future<void> _showRangeMenu() async {
-    final choice = await showModalBottomSheet<String>(
-      context: context,
-      showDragHandle: true,
-      builder: (context) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              title: const Text('全部'),
-              onTap: () => Navigator.pop(context, 'all'),
-            ),
-            ListTile(
-              title: const Text('自定义日期'),
-              onTap: () => Navigator.pop(context, 'custom'),
-            ),
-          ],
-        ),
-      ),
-    );
-    if (!mounted) return;
-    if (choice == 'all') {
-      setState(() => _range = RangeOption.all);
-    } else if (choice == 'custom') {
-      await _pickCustomRange();
-    }
-  }
-
   Future<void> _pickCustomRange() async {
     final now = DateTime.now();
     final from = await showDatePicker(
@@ -504,14 +492,17 @@ class _NetWorthChartState extends ConsumerState<NetWorthChart> {
       helpText: '选择起始日期',
     );
     if (from == null || !mounted) return;
+    final previousTo = _customTo;
     final to = await showDatePicker(
       context: context,
-      initialDate: _customTo ?? now,
+      initialDate: previousTo != null && !previousTo.isBefore(from)
+          ? previousTo
+          : now,
       firstDate: from,
       lastDate: now,
       helpText: '选择结束日期',
     );
-    if (to == null) return;
+    if (to == null || !mounted) return;
     setState(() {
       _customFrom = from;
       _customTo = to;
@@ -519,80 +510,54 @@ class _NetWorthChartState extends ConsumerState<NetWorthChart> {
     });
   }
 
-  Widget _viewToggle() => Row(
-    mainAxisSize: MainAxisSize.min,
-    children: [
-      for (final view in _TrendView.values)
-        TerminalChoice(
-          label: view == _TrendView.returnRate ? '收益率' : '净值',
-          selected: _view == view,
-          onPressed: () => setState(() => _view = view),
-        ),
-    ],
-  );
-
-  Widget _rangeChip(
-    RangeOption opt, {
-    bool custom = false,
-    VoidCallback? onCustomTap,
-  }) {
-    final selected = custom ? _range == RangeOption.custom : _range == opt;
-    return TerminalChoice(
-      label: custom
-          ? (selected
-                ? '自定义: ${Formats.date(_customFrom ?? DateTime.now()).substring(5)}'
-                : '自定义')
-          : opt.label,
-      selected: selected,
-      onPressed: custom
-          ? (onCustomTap ?? _showRangeMenu)
-          : () => setState(() => _range = opt),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final snapshots = ref.watch(snapshotsProvider);
-    // 内凹嵌入式面板（v0.10.3 设计更新）。
-    final benchmarkChip = FilterChip(
-      label: Text(
-        _benchSelected.isEmpty ? '指数对比' : '指数对比(${_benchSelected.length})',
-      ),
-      selected: _benchSelected.isNotEmpty,
-      showCheckmark: false,
-      visualDensity: VisualDensity.compact,
-      onSelected: (_) => _showBenchmarkPanel(),
-    );
     return _InsetPanel(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // 顶部行：指数对比（左）+ 视图切换 收益率/净值（右），相对面板顶部
-          // 稍下沉、与下方内容紧凑。
-          Padding(
-            padding: const EdgeInsets.only(top: T.s1),
-            child: Row(
-              children: [benchmarkChip, const Spacer(), _viewToggle()],
-            ),
+          OverflowBar(
+            alignment: MainAxisAlignment.spaceBetween,
+            overflowAlignment: OverflowBarAlignment.start,
+            spacing: T.s2,
+            children: [
+              const Text(
+                '净值趋势',
+                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+              ),
+              Wrap(
+                spacing: T.s1,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  TextButton.icon(
+                    onPressed: _showBenchmarkPanel,
+                    icon: const Icon(Icons.compare_arrows, size: 16),
+                    label: Text(
+                      _benchSelected.isEmpty
+                          ? '指数对比'
+                          : '指数对比 (${_benchSelected.length})',
+                    ),
+                  ),
+                  for (final view in _TrendView.values)
+                    TerminalChoice(
+                      label: view == _TrendView.returnRate ? '收益率' : '净值',
+                      selected: _view == view,
+                      onPressed: () => setState(() => _view = view),
+                    ),
+                ],
+              ),
+            ],
           ),
-          const SizedBox(height: 8),
-          if (_range == RangeOption.custom && _customFrom != null)
+          const SizedBox(height: T.s2),
+          if (_range == RangeOption.custom)
             Padding(
-              padding: const EdgeInsets.only(top: 6),
+              padding: const EdgeInsets.only(bottom: T.s2),
               child: Text(
-                '${Formats.date(_customFrom!)} ~ ${Formats.date(_customTo ?? DateTime.now())}',
+                '${Formats.date(_customFrom!)} 至 ${Formats.date(_customTo!)}',
                 style: T.mono(size: 11, color: T.text2),
               ),
             ),
-          if (_range == RangeOption.all)
-            const Padding(
-              padding: EdgeInsets.only(top: 6),
-              child: Text(
-                '全部历史',
-                style: TextStyle(fontSize: 11, color: T.text2),
-              ),
-            ),
-          const SizedBox(height: 4),
           snapshots.when(
             data: (all) {
               final now = DateTime.now();
@@ -608,18 +573,20 @@ class _NetWorthChartState extends ConsumerState<NetWorthChart> {
                 to: endDate == null ? null : Formats.date(endDate),
               );
               if (list.isEmpty) {
-                return const Padding(
-                  padding: EdgeInsets.all(24),
+                return Padding(
+                  padding: const EdgeInsets.all(24),
                   child: Center(
                     child: Text(
-                      '暂无净值数据，每日打开 App 自动记录',
-                      style: TextStyle(color: T.text3),
+                      all.isEmpty ? '暂无净值记录' : '所选区间没有净值记录',
+                      style: const TextStyle(color: T.text3),
                     ),
                   ),
                 );
               }
               final stats = const RangeStatsCalculator().compute(list);
               final isRate = _view == _TrendView.returnRate;
+              final showBenchmarks =
+                  isRate && _benchSelected.any(_benchData.containsKey);
               final rates = const RateSeriesCalculator().ratesOf(list);
               final rateDelta = const RateSeriesCalculator().rangeRatePct(list);
               final rateAnnualized = const RateSeriesCalculator()
@@ -637,23 +604,6 @@ class _NetWorthChartState extends ConsumerState<NetWorthChart> {
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  if (_range == RangeOption.custom && _customFrom != null)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 6),
-                      child: Text(
-                        '${Formats.date(_customFrom!)} ~ ${Formats.date(_customTo ?? DateTime.now())}',
-                        style: T.mono(size: 11, color: T.text2),
-                      ),
-                    ),
-                  if (_range == RangeOption.all)
-                    const Padding(
-                      padding: EdgeInsets.only(top: 6),
-                      child: Text(
-                        '全部历史',
-                        style: TextStyle(fontSize: 11, color: T.text2),
-                      ),
-                    ),
-                  const SizedBox(height: 4),
                   if (stats != null) ...[
                     // 布局：左侧纵向说明（区间收益 → 年化/天数），右侧主金额
                     // 右对齐，与趋势图右缘对齐；ⓘ 挂在收益率旁。
@@ -721,7 +671,7 @@ class _NetWorthChartState extends ConsumerState<NetWorthChart> {
                               ),
                               // 方案①：已选指数的区间收益率（与资产同区间、
                               // 同起点），一眼对比「我的收益率 vs 指数」。
-                              if (_benchSelected.isNotEmpty)
+                              if (showBenchmarks)
                                 Padding(
                                   padding: const EdgeInsets.only(top: 3),
                                   child: Wrap(
@@ -770,7 +720,7 @@ class _NetWorthChartState extends ConsumerState<NetWorthChart> {
                     const SizedBox(height: 12),
                   ],
                   // Legend above the chart (no overlay).
-                  if (_benchSelected.isNotEmpty)
+                  if (showBenchmarks)
                     Padding(
                       padding: const EdgeInsets.only(bottom: 8),
                       child: Wrap(
@@ -807,26 +757,6 @@ class _NetWorthChartState extends ConsumerState<NetWorthChart> {
                     },
                     onDayTap: (date) => _showDayDetail(context, date),
                   ),
-                  // 时间区段贴图表下方：强制单行（自定义在近3年右侧），放不下时
-                  // 整体等比缩小（FittedBox scaleDown），不换行也不横向拖动。
-                  const SizedBox(height: 6),
-                  FittedBox(
-                    fit: BoxFit.scaleDown,
-                    alignment: Alignment.centerLeft,
-                    child: Row(
-                      children: [
-                        for (final opt in _rangeOptions) ...[
-                          _rangeChip(opt),
-                          const SizedBox(width: 5),
-                        ],
-                        _rangeChip(
-                          RangeOption.all,
-                          custom: true,
-                          onCustomTap: _showRangeMenu,
-                        ),
-                      ],
-                    ),
-                  ),
                 ],
               );
             },
@@ -848,6 +778,21 @@ class _NetWorthChartState extends ConsumerState<NetWorthChart> {
                 ],
               ),
             ),
+          ),
+          const SizedBox(height: T.s2),
+          Wrap(
+            spacing: T.s1,
+            runSpacing: T.s1,
+            children: [
+              for (final option in RangeOption.values)
+                TerminalChoice(
+                  label: option.label,
+                  selected: _range == option,
+                  onPressed: option == RangeOption.custom
+                      ? _pickCustomRange
+                      : () => setState(() => _range = option),
+                ),
+            ],
           ),
         ],
       ),
@@ -1162,18 +1107,24 @@ class _TrendChartState extends State<_TrendChart> {
                         // by touch distance. The overlay describes the asset,
                         // so never use a benchmark's point as its date.
                         final idx = trendAssetSpotIndex(response?.lineBarSpots);
-                        final ended = event is FlPanEndEvent ||
+                        final ended =
+                            event is FlPanEndEvent ||
                             event is FlPanCancelEvent ||
                             event is FlPointerExitEvent ||
                             event is FlTapCancelEvent;
-                        if (!ended && idx != null && idx >= 0 && idx < list.length) {
+                        if (!ended &&
+                            idx != null &&
+                            idx >= 0 &&
+                            idx < list.length) {
                           _hoverIndex.value = idx;
                         } else {
                           _hoverIndex.value = null;
                         }
 
-                        if (event is FlTapUpEvent && idx != null &&
-                            idx >= 0 && idx < list.length) {
+                        if (event is FlTapUpEvent &&
+                            idx != null &&
+                            idx >= 0 &&
+                            idx < list.length) {
                           widget.onDayTap?.call(list[idx].date);
                         }
                       },

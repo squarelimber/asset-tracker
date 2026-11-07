@@ -2,8 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 /// Invokes [onKeyDown] for physical key-down events (auto-repeat is a
-/// separate [KeyRepeatEvent] type and is ignored), suppressed while a text
-/// field has focus so typing is never intercepted.
+/// separate [KeyRepeatEvent] type and is ignored) on the visible page.
 ///
 /// Works on desktop and web; harmless on touch-only devices.
 class KeyShortcuts extends StatefulWidget {
@@ -19,16 +18,31 @@ class KeyShortcuts extends StatefulWidget {
 class _KeyShortcutsState extends State<KeyShortcuts> {
   bool _handle(KeyEvent e) {
     if (e is! KeyDownEvent) return false;
-    if (_isEditing()) return false;
+    final keyboard = HardwareKeyboard.instance;
+    if (keyboard.isControlPressed ||
+        keyboard.isAltPressed ||
+        keyboard.isMetaPressed ||
+        keyboard.isShiftPressed ||
+        _hasInputFocus()) {
+      return false;
+    }
+    if (ModalRoute.of(context)?.isCurrent == false) return false;
+    final navigator = Navigator.maybeOf(context);
+    // A dialog on the root navigator can cover a still-current shell page.
+    if (navigator != null &&
+        ModalRoute.of(navigator.context)?.isCurrent == false) {
+      return false;
+    }
     widget.onKeyDown(e.logicalKey);
     return false;
   }
 
-  bool _isEditing() {
+  bool _hasInputFocus() {
     final focus = FocusManager.instance.primaryFocus;
     final ctx = focus?.context;
     if (ctx == null) return false;
-    return ctx.findAncestorStateOfType<EditableTextState>() != null;
+    return ModalRoute.of(ctx) is PopupRoute ||
+        ctx.findAncestorStateOfType<EditableTextState>() != null;
   }
 
   @override

@@ -2,9 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../tokens.dart';
 
-/// Terminal-styled floating action button: flat (no elevation), 8px
-/// radius, accent fill with dark text — matches the flat card aesthetic
-/// instead of the default M3 raised FAB.
+/// Labeled primary action for pages that place it above their content.
 class TerminalFab extends StatelessWidget {
   const TerminalFab({
     super.key,
@@ -23,16 +21,16 @@ class TerminalFab extends StatelessWidget {
       onPressed: onPressed,
       icon: Icon(icon, size: 18),
       label: Text(label),
-      style: FilledButton.styleFrom(
-        backgroundColor: T.accent,
-        foregroundColor: Colors.black,
-        disabledBackgroundColor: T.surface2,
-        disabledForegroundColor: T.text3,
-        padding: const EdgeInsets.symmetric(horizontal: T.s4, vertical: T.s3),
-        textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(T.rInput),
-        ),
+      style: const ButtonStyle(
+        backgroundColor: WidgetStateColor.fromMap({
+          WidgetState.disabled: T.surface2,
+          WidgetState.any: T.accent,
+        }),
+        foregroundColor: WidgetStateColor.fromMap({
+          WidgetState.disabled: T.text3,
+          WidgetState.any: T.bg,
+        }),
+        elevation: WidgetStatePropertyAll(0),
       ),
     );
   }

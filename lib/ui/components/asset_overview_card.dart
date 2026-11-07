@@ -48,8 +48,7 @@ class AssetOverviewCard extends StatelessWidget {
         gradient: const LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [Color(0xFF2A3C50), Color(0xFF27313F), Color(0xFF282B33)],
-          stops: [0, 0.55, 1],
+          colors: [Color(0xFF263341), Color(0xFF22272F)],
         ),
         borderRadius: BorderRadius.circular(T.rCard),
         border: Border.all(color: T.border),
@@ -67,16 +66,16 @@ class AssetOverviewCard extends StatelessWidget {
             '资产总览',
             style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
           ),
+          const SizedBox(width: T.s3),
+          Text('CNY', style: T.mono(size: 11, color: T.text2)),
           const Spacer(),
-          if (onOpenEarnings != null) ...[
+          if (onOpenEarnings != null)
             TextButton.icon(
               onPressed: onOpenEarnings,
               icon: const Icon(Icons.calendar_month_outlined, size: 16),
               label: const Text('收益日历'),
             ),
-            const SizedBox(width: 12),
-          ],
-          Text('折合人民币 / CNY', style: T.label(size: 11, color: T.text3)),
+          if (onToggleHidden != null) _privacyButton(),
         ],
       ),
       const SizedBox(height: 20),
@@ -97,6 +96,7 @@ class AssetOverviewCard extends StatelessWidget {
                   _profit,
                   color: _profitColor,
                   detail: _percentage,
+                  opensDetails: onOpenEarnings != null,
                 ),
               ),
             ),
@@ -128,18 +128,7 @@ class AssetOverviewCard extends StatelessWidget {
               onPressed: onOpenEarnings,
               icon: const Icon(Icons.calendar_month_outlined, size: 18),
             ),
-          if (onToggleHidden != null)
-            IconButton(
-              tooltip: hidden ? '显示金额' : '隐藏金额',
-              onPressed: onToggleHidden,
-              icon: Icon(
-                hidden
-                    ? Icons.visibility_off_outlined
-                    : Icons.visibility_outlined,
-                size: 18,
-              ),
-              visualDensity: VisualDensity.compact,
-            ),
+          if (onToggleHidden != null) _privacyButton(),
         ],
       ),
       _number(_amount(netWorth), size: 28),
@@ -147,16 +136,9 @@ class AssetOverviewCard extends StatelessWidget {
       _earningsAction(
         Row(
           children: [
-            Text('今日盈亏', style: T.label()),
-            const SizedBox(width: 12),
-            Flexible(
-              child: Text(
-                _profit,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: T.mono(size: 14, color: _profitColor),
-              ),
-            ),
+            _metricLabel('今日盈亏', opensDetails: onOpenEarnings != null),
+            const SizedBox(width: T.s2),
+            Flexible(child: _number(_profit, size: 14, color: _profitColor)),
             if (_percentage != null) ...[
               const SizedBox(width: 8),
               Text(_percentage!, style: T.mono(size: 11, color: _profitColor)),
@@ -185,6 +167,14 @@ class AssetOverviewCard extends StatelessWidget {
     ],
   );
 
+  Widget _privacyButton() => IconButton(
+    tooltip: hidden ? '显示金额' : '隐藏金额',
+    isSelected: hidden,
+    onPressed: onToggleHidden,
+    icon: const Icon(Icons.visibility_outlined, size: 18),
+    selectedIcon: const Icon(Icons.visibility_off_outlined, size: 18),
+  );
+
   Widget _divider() => const Padding(
     padding: EdgeInsets.symmetric(horizontal: 20),
     child: VerticalDivider(width: 1, color: T.borderSoft),
@@ -197,7 +187,13 @@ class AssetOverviewCard extends StatelessWidget {
           child: InkWell(
             onTap: onOpenEarnings,
             borderRadius: BorderRadius.circular(T.rInput),
-            child: Tooltip(message: '查看当日收益明细', child: child),
+            child: Tooltip(
+              message: '查看当日收益明细',
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(minHeight: 44),
+                child: child,
+              ),
+            ),
           ),
         );
 
@@ -220,16 +216,26 @@ class AssetOverviewCard extends StatelessWidget {
     double size = 22,
     Color? color,
     String? detail,
+    bool opensDetails = false,
   }) => Column(
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
-      Text(label, style: T.label(size: 11)),
+      _metricLabel(label, opensDetails: opensDetails),
       const SizedBox(height: 8),
       _number(value, size: size, color: color),
       if (detail != null) ...[
         const SizedBox(height: 4),
         Text(detail, style: T.mono(size: 11, color: color)),
       ],
+    ],
+  );
+
+  Widget _metricLabel(String label, {required bool opensDetails}) => Row(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      Text(label, style: T.label()),
+      if (opensDetails)
+        const Icon(Icons.chevron_right, color: T.text2, size: 14),
     ],
   );
 }

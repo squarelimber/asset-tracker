@@ -211,6 +211,57 @@ void main() {
     expect(find.text('排序'), findsOneWidget);
   });
 
+  testWidgets('desktop holdings can sort, filter and open liability actions', (tester) async {
+    final low = HoldingRow(
+      id: 1,
+      accountId: 1,
+      name: '信用卡',
+      assetType: 'liability',
+      marketSource: 'manual',
+      quantity: 300,
+      costPrice: 0,
+      latestPrice: 0,
+      currency: 'CNY',
+      archived: false,
+      costRecorded: false,
+      createdAt: DateTime(2026, 1, 1),
+      updatedAt: DateTime(2026, 1, 1),
+    );
+    final high = low.copyWith(id: 2, name: '房贷', quantity: 12000);
+    await pumpPage(
+      tester,
+      const HoldingsPage(),
+      const Size(1100, 720),
+      overrides: [holdingsProvider.overrideWith((_) => Stream.value([low, high]))],
+    );
+    expect(find.text('暂无资产'), findsOneWidget);
+    await tester.tap(find.text('负债'));
+    await tester.pumpAndSettle();
+    final lowRow = find.text('信用卡');
+    final highRow = find.text('房贷');
+    expect(tester.getTopLeft(highRow).dy, lessThan(tester.getTopLeft(lowRow).dy));
+
+    await tester.tap(find.text('余额'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('余额'));
+    await tester.pumpAndSettle();
+    expect(tester.getTopLeft(lowRow).dy, lessThan(tester.getTopLeft(highRow).dy));
+
+    await tester.enterText(find.byType(TextField), '无匹配产品');
+    await tester.pumpAndSettle();
+    expect(find.text('没有符合条件的持仓'), findsOneWidget);
+    await tester.tap(find.text('清除筛选'));
+    await tester.pumpAndSettle();
+    expect(lowRow, findsOneWidget);
+
+    await tester.tap(find.byTooltip('更多操作').first);
+    await tester.pumpAndSettle();
+    expect(find.text('编辑'), findsOneWidget);
+    expect(find.text('归档'), findsOneWidget);
+    expect(find.text('删除'), findsOneWidget);
+    expectNoOverflow(tester);
+  });
+
   testWidgets('accounts no overflow at phone and desktop', (tester) async {
     final account = AccountRow(
       id: 1,
@@ -389,6 +440,17 @@ void main() {
     ];
     await pumpPage(tester, const TransactionsPage(), const Size(360, 640), overrides: overrides);
     expectNoOverflow(tester);
+    final search = find.byType(TextField);
+    expect(tester.getSize(search).width, greaterThan(300));
+    await tester.enterText(search, '不存在的产品');
+    await tester.pumpAndSettle();
+    expect(find.text('没有符合条件的流水'), findsOneWidget);
+    final export = find.widgetWithIcon(IconButton, Icons.file_download_outlined);
+    expect(tester.widget<IconButton>(export).onPressed, isNull);
+    await tester.tap(find.text('清除筛选'));
+    await tester.pumpAndSettle();
+    expect(find.text('汇总（4 笔）'), findsOneWidget);
+    expect(tester.widget<IconButton>(export).onPressed, isNotNull);
     await pumpPage(tester, const TransactionsPage(), const Size(1280, 800), overrides: overrides);
     expectNoOverflow(tester);
   });
