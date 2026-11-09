@@ -4,6 +4,26 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  testWidgets('当前月有数据时默认选中当前月', (tester) async {
+    final now = DateTime.now();
+    final current = '${now.year}-${now.month.toString().padLeft(2, '0')}';
+    final before = DateTime(now.year, now.month - 1);
+    final previous =
+        '${before.year}-${before.month.toString().padLeft(2, '0')}';
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: MonthlyProfitChart(
+            months: {previous: 50, current: 100},
+            hideAmounts: false,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('+¥100.00'), findsOneWidget);
+  });
+
   testWidgets('月度图表选择月份并区分零收益与缺少快照', (tester) async {
     tester.view.physicalSize = const Size(320, 720);
     tester.view.devicePixelRatio = 1;
