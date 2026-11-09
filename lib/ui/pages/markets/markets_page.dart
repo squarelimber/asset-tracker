@@ -1,8 +1,13 @@
+import 'dart:async';
+
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../../core/formats.dart';
+import '../../../core/global_market_session.dart';
 import '../../../core/responsive.dart';
 import '../../../services/market/global_quote_source.dart';
 import '../../components/app_bar_actions.dart';
@@ -10,7 +15,7 @@ import '../../components/delta_text.dart';
 import '../../components/error_state.dart';
 import '../../components/key_shortcuts.dart';
 import '../../components/quote_table.dart';
-import '../../components/session_chip.dart';
+import '../../components/terminal_choice.dart';
 import '../../tokens.dart';
 
 /// In-memory TTL cache so revisiting the page (or re-entering the provider)
@@ -34,6 +39,21 @@ final quotesProvider = FutureProvider<List<GlobalQuote>>((ref) async {
   return GlobalQuoteSource().fetch();
 });
 
+QuoteMarket _marketForGroup(String group) => switch (group) {
+  'A股' => QuoteMarket.china,
+  '港股' => QuoteMarket.hongKong,
+  '日股' => QuoteMarket.japan,
+  '美股' => QuoteMarket.us,
+  '商品' => QuoteMarket.commodity,
+  _ => QuoteMarket.forex,
+};
+
+String _sessionLabel(String group) =>
+    quoteMarketSessionLabel(quoteMarketSession(_marketForGroup(group)));
+
+bool _sessionOpen(String group) =>
+    quoteMarketSession(_marketForGroup(group)) == QuoteMarketSession.open;
+
 class MarketsPage extends ConsumerStatefulWidget {
   const MarketsPage({super.key});
 
@@ -42,11 +62,23 @@ class MarketsPage extends ConsumerStatefulWidget {
 }
 
 class _MarketsPageState extends ConsumerState<MarketsPage> {
-  DateTime? _lastRefreshAt;
   final _refreshing = ValueNotifier<bool>(false);
+  String _selectedGroup = '全部';
+  late final Timer _sessionTimer;
+
+  static const _groupNames = ['A股', '港股', '日股', '美股', '商品', '汇率'];
+
+  @override
+  void initState() {
+    super.initState();
+    _sessionTimer = Timer.periodic(const Duration(minutes: 1), (_) {
+      if (mounted) setState(() {});
+    });
+  }
 
   @override
   void dispose() {
+    _sessionTimer.cancel();
     _refreshing.dispose();
     super.dispose();
   }
@@ -54,11 +86,6 @@ class _MarketsPageState extends ConsumerState<MarketsPage> {
   @override
   Widget build(BuildContext context) {
     final quotes = ref.watch(quotesProvider);
-    ref.listen<AsyncValue<List<GlobalQuote>>>(quotesProvider, (prev, next) {
-      if (next is AsyncData && next.value != null && next.value!.isNotEmpty) {
-        setState(() => _lastRefreshAt = DateTime.now());
-      }
-    });
     return KeyShortcuts(
       onKeyDown: (key) {
         if (key == LogicalKeyboardKey.keyR) _refresh(showSnack: true);
@@ -67,6 +94,11 @@ class _MarketsPageState extends ConsumerState<MarketsPage> {
         appBar: AppBar(
           title: const Text('行情'),
           actions: [
+            IconButton(
+              tooltip: '指数 K 线',
+              icon: const Icon(Icons.candlestick_chart_outlined),
+              onPressed: () => context.push('/markets/kline'),
+            ),
             ValueListenableBuilder<bool>(
               valueListenable: _refreshing,
               builder: (context, refreshing, _) {
@@ -111,12 +143,20 @@ class _MarketsPageState extends ConsumerState<MarketsPage> {
             }
             final groups = <String, List<GlobalQuote>>{};
             for (final q in list) {
-              groups.putIfAbsent(q.group, () => []).add(q);
+              final group = switch (q.group) {
+                'A股' => 'A股',
+                '亚太' => q.code.startsWith('rt_hk') ? '港股' : '日股',
+                '欧美' => '美股',
+                '大宗商品' => '商品',
+                '货币' => '汇率',
+                _ => q.group,
+              };
+              groups.putIfAbsent(group, () => []).add(q);
             }
-            final groupNames = ['A股', '亚太', '欧美', '大宗商品', '货币'];
             final tables = [
-              for (final name in groupNames)
-                if (groups.containsKey(name))
+              for (final name in _groupNames)
+                if (groups.containsKey(name) &&
+                    (_selectedGroup == '全部' || _selectedGroup == name))
                   (
                     name,
                     [
@@ -141,19 +181,32 @@ class _MarketsPageState extends ConsumerState<MarketsPage> {
                   children: [
                     Padding(
                       padding: const EdgeInsets.only(bottom: T.s3),
-                      child: Row(
-                        children: [
-                          const SessionChip(),
-                          const SizedBox(width: T.s2),
-                          if (_lastRefreshAt != null)
-                            Text(
-                              '更新于 ${Formats.dateTime(_lastRefreshAt!)}',
-                              style: T.mono(size: 11, color: T.text3),
-                            ),
-                          const Spacer(),
-                        ],
+                      child: SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        child: Row(
+                          children: [
+                            for (final group in ['全部', ..._groupNames])
+                              Padding(
+                                padding: const EdgeInsets.only(right: T.s1),
+                                child: SizedBox(
+                                  width: 64,
+                                  child: TerminalChoice(
+                                    label: group,
+                                    selected: _selectedGroup == group,
+                                    onPressed: () =>
+                                        setState(() => _selectedGroup = group),
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
                       ),
                     ),
+                    if (tables.isEmpty)
+                      const Padding(
+                        padding: EdgeInsets.symmetric(vertical: T.s5),
+                        child: Center(child: Text('该分类暂无行情')),
+                      ),
                     if (Responsive.isDesktop(context))
                       _GroupGrid(tables: tables, onQuoteTap: _showQuoteDetail)
                     else
@@ -162,9 +215,14 @@ class _MarketsPageState extends ConsumerState<MarketsPage> {
                           group: name,
                           rows: rows,
                           onQuoteTap: _showQuoteDetail,
+                          sessionLabel: _sessionLabel(name),
+                          sessionOpen: _sessionOpen(name),
                         ),
                     const SizedBox(height: T.s2),
-                    Text('数据来自新浪财经公开接口，仅供参考。', style: T.label()),
+                    Text(
+                      '数据来自${kIsWeb ? '腾讯' : '新浪'}财经公开接口，仅供参考。',
+                      style: T.label(),
+                    ),
                   ],
                 ),
               ),
@@ -212,6 +270,15 @@ class _MarketsPageState extends ConsumerState<MarketsPage> {
   }
 
   void _showQuoteDetail(QuoteRow r) {
+    if (const {'sh000001', 'sz399001', 'sz399006'}.contains(r.code)) {
+      context.push(
+        Uri(
+          path: '/markets/kline',
+          queryParameters: {'symbol': r.code},
+        ).toString(),
+      );
+      return;
+    }
     showModalBottomSheet(
       context: context,
       builder: (context) => Padding(
@@ -272,7 +339,13 @@ class _GroupGrid extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         for (final (name, rows) in items)
-          QuoteTable(group: name, rows: rows, onQuoteTap: onQuoteTap),
+          QuoteTable(
+            group: name,
+            rows: rows,
+            onQuoteTap: onQuoteTap,
+            sessionLabel: _sessionLabel(name),
+            sessionOpen: _sessionOpen(name),
+          ),
       ],
     );
     return Row(

@@ -666,23 +666,39 @@ Future<void> showAccountTransactionDialog(
   WidgetRef ref,
   int accountId,
 ) async {
-  final holdings = ref.read(holdingsProvider).value ?? const [];
+  final List<HoldingRow> holdings;
+  final List<AccountRow> accounts;
+  try {
+    holdings = await ref.read(holdingsProvider.future);
+    accounts = await ref.read(accountsProvider.future);
+  } catch (_) {
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('账户或持仓加载失败，请重试')),
+      );
+    }
+    return;
+  }
+  if (!context.mounted) return;
   final moneyHoldings = holdings
       .where((h) {
         final t = AssetType.fromStorage(h.assetType);
         return t.isAmountBased || t == AssetType.liability;
       })
       .toList();
-  if (moneyHoldings.isEmpty) {
+  final accountHoldings =
+      moneyHoldings.where((h) => h.accountId == accountId).toList();
+  final accountNames = {for (final account in accounts) account.id: account.name};
+  if (accountHoldings.isEmpty) {
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('需要先添加现金/存款类持仓才能记流水')),
+      const SnackBar(content: Text('请先为当前账户添加现金、存款或负债持仓')),
     );
     return;
   }
 
   final txnType = ValueNotifier<TransactionType>(TransactionType.transferOut);
-  final sourceId = ValueNotifier<int?>(moneyHoldings.first.id);
-  final targetId = ValueNotifier<int?>(moneyHoldings.length > 1 ? moneyHoldings[1].id : null);
+  final sourceId = ValueNotifier<int?>(accountHoldings.first.id);
+  final targetId = ValueNotifier<int?>(null);
   final amountCtrl = TextEditingController();
   final noteCtrl = TextEditingController();
 
@@ -717,13 +733,15 @@ Future<void> showAccountTransactionDialog(
                     children: [
                       MoneyDropdown(
                         label: '资金来源（现金转出 / 负债还款）',
-                        holdings: moneyHoldings,
+                        holdings: accountHoldings,
+                        accountNames: accountNames,
                         value: sourceId,
                       ),
                       const SizedBox(height: 12),
                       MoneyDropdown(
                         label: '资金去向（现金转入 / 负债还款）',
                         holdings: moneyHoldings,
+                        accountNames: accountNames,
                         value: targetId,
                       ),
                       const SizedBox(height: 8),
@@ -739,7 +757,8 @@ Future<void> showAccountTransactionDialog(
                 }
                 return MoneyDropdown(
                   label: value == TransactionType.income ? '收入入账持仓' : '支出扣款持仓',
-                  holdings: moneyHoldings,
+                  holdings: accountHoldings,
+                  accountNames: accountNames,
                   value: sourceId,
                 );
               },
@@ -773,6 +792,13 @@ Future<void> showAccountTransactionDialog(
             if (txnTypeValue == TransactionType.transferOut && targetId.value == null) {
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(content: Text('请选择资金去向')),
+              );
+              return;
+            }
+            if (txnTypeValue == TransactionType.transferOut &&
+                sourceId.value == targetId.value) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('资金来源和去向不能相同')),
               );
               return;
             }
@@ -853,6 +879,9 @@ Future<void> showAccountTransactionDialog(
   await Future<void>.delayed(const Duration(milliseconds: 350));
   amountCtrl.dispose();
   noteCtrl.dispose();
+  txnType.dispose();
+  sourceId.dispose();
+  targetId.dispose();
 }
 
 class MoneyDropdown extends StatelessWidget {
@@ -861,11 +890,13 @@ class MoneyDropdown extends StatelessWidget {
     required this.label,
     required this.holdings,
     required this.value,
+    required this.accountNames,
   });
 
   final String label;
   final List<HoldingRow> holdings;
   final ValueNotifier<int?> value;
+  final Map<int, String> accountNames;
 
   @override
   Widget build(BuildContext context) {
@@ -873,12 +904,13 @@ class MoneyDropdown extends StatelessWidget {
       valueListenable: value,
       builder: (context, current, _) => DropdownButtonFormField<int>(
         initialValue: current,
-        decoration: terminalDecoration(label),
+        decoration: terminalDecoration(label).copyWith(hintText: '请选择'),
         items: [
           for (final h in holdings)
             DropdownMenuItem(
               value: h.id,
               child: Text(
+                '${accountNames[h.accountId] ?? '账户 #${h.accountId}'} · '
                 '${h.name} (${AssetType.fromStorage(h.assetType).label})',
                 overflow: TextOverflow.ellipsis,
               ),

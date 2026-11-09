@@ -1,5 +1,6 @@
 import 'package:drift/drift.dart';
 
+import '../core/enums.dart';
 import 'database.dart';
 
 /// Data access layer for accounts, holdings, transactions and snapshots.
@@ -37,6 +38,22 @@ class AssetDao {
         currency: Value(account.currency),
         note: Value(account.note),
         updatedAt: Value(now ?? DateTime.now()),
+      ),
+    );
+  }
+
+  /// Updates the editable account fields without overwriting values that may
+  /// have changed while the edit dialog was open.
+  Future<int> updateAccountDetails(
+    int id, {
+    required String name,
+    required String? note,
+  }) {
+    return (_db.update(_db.accounts)..where((t) => t.id.equals(id))).write(
+      AccountsCompanion(
+        name: Value(name),
+        note: Value(note),
+        updatedAt: Value(DateTime.now()),
       ),
     );
   }
@@ -226,10 +243,26 @@ class AssetDao {
   }
 
   Stream<List<TransactionRow>> watchTransactionsByAccount(int accountId) {
-    return (_db.select(_db.transactions)
-          ..where((t) => t.accountId.equals(accountId))
-          ..orderBy([(t) => OrderingTerm.desc(t.occurredAt)]))
-        .watch();
+    final transactions = _db.transactions;
+    final source = _db.alias(_db.holdings, 'source_holding');
+    final target = _db.alias(_db.holdings, 'target_holding');
+    final query = _db.select(transactions).join([
+      leftOuterJoin(source, source.id.equalsExp(transactions.cashSourceId)),
+      leftOuterJoin(target, target.id.equalsExp(transactions.cashTargetId)),
+    ]);
+    query.where(
+      transactions.accountId.equals(accountId) |
+          (transactions.type.isIn([
+                TransactionType.transferIn.storageName,
+                TransactionType.transferOut.storageName,
+              ]) &
+              (source.accountId.equals(accountId) |
+                  target.accountId.equals(accountId))),
+    );
+    query.orderBy([OrderingTerm.desc(transactions.occurredAt)]);
+    return query.watch().map(
+          (rows) => rows.map((row) => row.readTable(transactions)).toList(),
+        );
   }
 
   /// Transactions where the holding is the subject (holdingId) or a transfer

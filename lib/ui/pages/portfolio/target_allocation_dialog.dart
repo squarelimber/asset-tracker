@@ -69,8 +69,7 @@ class _TargetAllocationDialogState
     super.dispose();
   }
 
-  String _format(double value) =>
-      value.toStringAsFixed(8).replaceFirst(RegExp(r'\.?0+$'), '');
+  String _format(double value) => value.toStringAsFixed(2);
 
   double? _value(AssetCategory category) {
     final input = _controllers[category]!.text.trim();
@@ -233,9 +232,7 @@ class _TargetAllocationDialogState
                   onChanged: _saving
                       ? null
                       : (value) => setState(() {
-                          _controllers[category]!.text = value
-                              .toStringAsFixed(1)
-                              .replaceFirst(RegExp(r'\.0$'), '');
+                          _controllers[category]!.text = _format(value);
                         }),
                 ),
               ),

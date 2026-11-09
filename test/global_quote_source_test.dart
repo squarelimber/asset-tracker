@@ -43,13 +43,25 @@ void main() {
     expect(ix.change, closeTo(26690.615 - 26534.6603, 1e-9));
   });
 
+  test('parses dollar sign in Dow Jones symbol alongside other quotes', () async {
+    final source = _sourceWith(
+      r'var hq_str_gb_$dji="DJI,43010.00,0.5,time,210.00,42800.00,42800.00";'
+      'var hq_str_gb_ixic="IXIC,26690.6150,1.30,time,342.2628,26534.6603,26712.616";',
+    );
+    final quotes = await source.fetch();
+    final dow = quotes.firstWhere((quote) => quote.code == r'gb_$dji');
+    expect(dow.price, 43010);
+    expect(dow.changePct, closeTo(210 / 42800, 1e-9));
+    expect(quotes.any((quote) => quote.code == 'gb_ixic'), isTrue);
+  });
+
   test('parses Nikkei (int_ prefix with change+pct fields)', () async {
     final source = _sourceWith('var hq_str_int_nikkei="N225,44946.64,-408.35,-0.90";');
     final quotes = await source.fetch();
     final nk = quotes.firstWhere((q) => q.code == 'int_nikkei');
     expect(nk.price, 44946.64);
     expect(nk.change, -408.35);
-    expect(nk.changePct, -0.9);
+    expect(nk.changePct, closeTo(-0.009, 1e-9));
   });
 
   test('parses commodity quotes (hf_ prefix)', () async {

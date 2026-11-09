@@ -8,6 +8,7 @@ import '../ui/pages/calendar/earnings_calendar_page.dart';
 import '../ui/pages/calendar/product_earnings_calendar_page.dart';
 import '../ui/pages/holdings/holdings_page.dart';
 import '../ui/pages/markets/markets_page.dart';
+import '../ui/pages/markets/kline_page.dart';
 import '../ui/pages/portfolio/portfolio_page.dart';
 import '../ui/pages/settings/settings_page.dart';
 import '../ui/shell/shell_page.dart';
@@ -57,6 +58,15 @@ final routerProvider = Provider<GoRouter>((ref) {
           GoRoute(
             path: '/markets',
             builder: (context, state) => const MarketsPage(),
+            routes: [
+              GoRoute(
+                path: 'kline',
+                builder: (context, state) => KlinePage(
+                  initialSymbol:
+                      state.uri.queryParameters['symbol'] ?? 'sh000001',
+                ),
+              ),
+            ],
           ),
           GoRoute(
             path: '/stats',

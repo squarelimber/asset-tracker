@@ -22,6 +22,8 @@ void main() {
     double latestPrice = 0,
     String? symbol,
     String? categoryOverride,
+    String currency = 'CNY',
+    String marketSource = 'manual',
   }) {
     return HoldingRow(
       costRecorded: false,
@@ -29,12 +31,12 @@ void main() {
       accountId: 1,
       name: name,
       assetType: assetType,
-      marketSource: 'manual',
+      marketSource: marketSource,
       symbol: symbol,
       quantity: quantity,
       costPrice: 0,
       latestPrice: latestPrice,
-      currency: 'CNY',
+      currency: currency,
       categoryOverride: categoryOverride,
       archived: false,
       createdAt: DateTime(2026, 1, 1),
@@ -70,10 +72,12 @@ void main() {
             ),
           ]),
         ),
-        holdingsByAccountProvider(1).overrideWith(
-          (ref) => Stream.value(holdings),
+        holdingsByAccountProvider(
+          1,
+        ).overrideWith((ref) => Stream.value(holdings)),
+        cnyRatesProvider.overrideWith(
+          (ref) => Future.value(const {'CNY': 1.0}),
         ),
-        cnyRatesProvider.overrideWith((ref) => Future.value(const {'CNY': 1.0})),
       ],
     );
     addTearDown(() async {
@@ -154,11 +158,9 @@ void main() {
   });
 
   testWidgets('隐藏金额时占比图例不显示金额段', (tester) async {
-    await pumpAccounts(
-      tester,
-      [holding(id: 1, name: '现金', assetType: 'savings', quantity: 10000)],
-      hide: true,
-    );
+    await pumpAccounts(tester, [
+      holding(id: 1, name: '现金', assetType: 'savings', quantity: 10000),
+    ], hide: true);
 
     expect(find.text('****'), findsOneWidget);
     expect(
@@ -167,5 +169,39 @@ void main() {
       ),
       findsNothing,
     );
+  });
+
+  testWidgets('缺少外币汇率时显示待折算', (tester) async {
+    await pumpAccounts(tester, [
+      holding(
+        id: 1,
+        name: '美元现金',
+        assetType: 'savings',
+        quantity: 100,
+        currency: 'USD',
+      ),
+    ]);
+
+    expect(find.textContaining('待折算'), findsOneWidget);
+    expect(find.textContaining('USD'), findsOneWidget);
+    expect(find.textContaining('¥100.00'), findsNothing);
+  });
+
+  testWidgets('汇率计价持仓不重复折算', (tester) async {
+    await pumpAccounts(tester, [
+      holding(
+        id: 1,
+        name: '美元理财',
+        assetType: 'bank_wealth',
+        quantity: 100,
+        latestPrice: 7,
+        currency: 'USD',
+        marketSource: 'forex',
+        symbol: 'USD',
+      ),
+    ]);
+
+    expect(find.text('¥700.00 · 1 项'), findsOneWidget);
+    expect(find.textContaining('待折算'), findsNothing);
   });
 }

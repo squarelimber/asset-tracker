@@ -1,4 +1,3 @@
-import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -11,7 +10,7 @@ import '../../../domain/daily_earnings.dart';
 import '../../../domain/trade_stats.dart';
 import '../../components/app_bar_actions.dart';
 import '../../components/error_state.dart';
-import '../../components/kpi_grid.dart';
+import '../../components/monthly_profit_chart.dart';
 import '../../components/section_header.dart';
 import '../../components/terminal_card.dart';
 import '../../tokens.dart';
@@ -19,8 +18,24 @@ import '../../tokens.dart';
 final statsProvider = FutureProvider<TradeStats>((ref) async {
   final txns = await ref.watch(transactionsProvider.future);
   final holdings = await ref.watch(holdingsProvider.future);
-  final rates = await ref.watch(cnyRatesProvider.future);
-  return const TradeStatsCalculator().compute(txns, holdings, cnyRates: rates);
+  final rates = Map<String, double>.of(
+    await ref.watch(cnyRatesProvider.future),
+  );
+  final missing = txns
+      .map((transaction) => transaction.currency.toUpperCase())
+      .where((currency) => currency != 'CNY' && (rates[currency] ?? 0) <= 0)
+      .toSet();
+  if (missing.isNotEmpty) {
+    rates.addAll(
+      await ref.read(marketServiceProvider).loadCnyRates(missing.toList()),
+    );
+  }
+  return const TradeStatsCalculator().compute(
+    txns,
+    holdings,
+    cnyRates: rates,
+    requireFxRates: true,
+  );
 });
 
 class StatsPage extends ConsumerWidget {
@@ -28,336 +43,255 @@ class StatsPage extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final snapshots = ref.watch(snapshotsProvider);
     final stats = ref.watch(statsProvider);
-    // Monthly investment profit derived from the daily net-worth snapshots:
-    // principal in/out moves the cost basis along with the balance, so these
-    // are true gains (cost-basis profit), not cash flows.
-    final snapshots = ref.watch(snapshotsProvider).value ?? const [];
-    final monthlyProfit = _monthlyProfitOf(snapshots);
+    final hide = ref.watch(hideAmountsProvider);
     return Scaffold(
       appBar: AppBar(
         title: const Text('统计'),
         actions: const [TerminalAppBarActions()],
       ),
       body: ResponsiveShell(
-        child: stats.when(
-          data: (s) => RefreshIndicator(
-            onRefresh: () async => ref.invalidate(statsProvider),
-            child: ListView(
-              physics: const AlwaysScrollableScrollPhysics(),
-              children: [
-                // 收益分析定位：两个收益入口置顶。
-                Row(
-                  children: [
-                    Expanded(
-                      child: _CalEntryTile(
-                        icon: Icons.calendar_month_outlined,
-                        label: '收益日历',
-                        sublabel: '每日收益 · 产品明细',
-                        onTap: () => context.push('/earnings-calendar'),
-                      ),
-                    ),
-                    const SizedBox(width: T.s3),
-                    Expanded(
-                      child: _CalEntryTile(
-                        icon: Icons.table_chart_outlined,
-                        label: '产品收益日历',
-                        sublabel: '各产品月度收益',
-                        onTap: () => context.push('/product-earnings'),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: T.s4),
-                const SectionHeader(label: '月度收益'),
-                if (monthlyProfit.isEmpty)
-                  const TerminalCard(
-                    child: Center(
-                      child: Padding(
-                        padding: EdgeInsets.all(T.s4),
-                        child: Text('暂无收益数据，每日打开 App 自动记录净值'),
-                      ),
-                    ),
-                  )
-                else
-                  TerminalCard(
-                    child: SizedBox(
-                      height: 220,
-                      // 只展示最近 12 个月：全历史月份一图塞下会把柱子
-                      // 挤成团、极端月把普通月压扁贴基线（就是那个
-                      // 「没法看」的团状图）。
-                      child: _MonthlyBarChart(
-                        months: _recentMonths(monthlyProfit, 12),
-                      ),
-                    ),
+        child: RefreshIndicator(
+          onRefresh: () async {
+            ref.invalidate(snapshotsProvider);
+            ref.invalidate(statsProvider);
+            ref.invalidate(cnyRatesProvider);
+          },
+          child: ListView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            children: [
+              Wrap(
+                spacing: T.s2,
+                runSpacing: T.s2,
+                children: [
+                  OutlinedButton.icon(
+                    onPressed: () => context.push('/earnings-calendar'),
+                    icon: const Icon(Icons.calendar_month_outlined, size: 18),
+                    label: const Text('收益日历'),
                   ),
-                const SizedBox(height: T.s3),
-                Text(
-                  '月度收益来自每日净值快照（当日收益 = 当日净增值 − 前日净增值，'
-                  '转入转出本金不计入）；盈利月份 = 当月收益为正。',
-                  style: T.label(),
-                ),
-                const SizedBox(height: T.s4),
-                // 其余指标弱化为折叠区：流水账汇总 + 交易量 + 月份最佳最差。
-                TerminalCard(
-                  child: ExpansionTile(
-                    tilePadding: EdgeInsets.zero,
-                    childrenPadding: EdgeInsets.zero,
-                    shape: const Border(),
-                    title: const Text(
-                      '交易与流水统计',
-                      style: TextStyle(fontSize: 14, color: T.text2),
-                    ),
+                  OutlinedButton.icon(
+                    onPressed: () => context.push('/product-earnings'),
+                    icon: const Icon(Icons.table_chart_outlined, size: 18),
+                    label: const Text('产品收益日历'),
+                  ),
+                ],
+              ),
+              const SizedBox(height: T.s4),
+              const SectionHeader(label: '收益概览'),
+              snapshots.when(
+                data: (list) {
+                  final months = _monthlyProfitOf(list);
+                  if (months.isEmpty) {
+                    return const TerminalCard(
+                      child: Text('暂无收益数据，每日打开 App 自动记录净值'),
+                    );
+                  }
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const SizedBox(height: T.s2),
-                      KpiGrid(
-                        tiles: [
-                          StatTile(
-                            label: '净现金流',
-                            value:
-                                '${s.cashflow >= 0 ? '+' : ''}${Formats.amount(s.cashflow)}',
-                            color: T.changeColor(s.cashflow),
-                          ),
-                          StatTile(
-                            label: '已落袋收益',
-                            value:
-                                '${s.realizedProfit >= 0 ? '+' : ''}${Formats.amount(s.realizedProfit)}',
-                            color: T.changeColor(s.realizedProfit),
-                          ),
-                          StatTile(
-                            label: '累计分红',
-                            value: Formats.amount(s.dividendTotal),
-                          ),
-                          StatTile(
-                            label: '累计买入',
-                            value: Formats.amount(s.boughtTotal),
-                          ),
-                          StatTile(
-                            label: '累计卖出',
-                            value: Formats.amount(s.soldTotal),
-                          ),
-                          StatTile(
-                            label: '累计收入',
-                            value: Formats.amount(s.incomeTotal),
-                          ),
-                          StatTile(
-                            label: '累计支出',
-                            value: Formats.amount(s.expenseTotal),
-                          ),
-                          if (monthlyProfit.isNotEmpty)
-                            ..._monthTiles(monthlyProfit),
-                        ],
+                      TerminalCard(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('月度收益', style: T.label(size: 12)),
+                            const SizedBox(height: T.s2),
+                            MonthlyProfitChart(
+                              months: months,
+                              hideAmounts: hide,
+                            ),
+                          ],
+                        ),
                       ),
-                      const SizedBox(height: T.s2),
                       Text(
-                        '已落袋收益为卖出（卖出价 − 当前成本价）× 数量 的估算；'
-                        '买入后成本变动时会略有偏差。',
+                        '月度收益根据净值快照计算，转入转出本金不计入。缺少快照的月份显示为无数据；快照不连续时，间隔收益归入下一条快照所在月份。',
                         style: T.label(),
                       ),
+                      const SizedBox(height: T.s3),
+                      TerminalCard(
+                        child: _MonthSummary(months: months, hide: hide),
+                      ),
                     ],
+                  );
+                },
+                loading: () => const TerminalCard(
+                  child: Center(child: CircularProgressIndicator()),
+                ),
+                error: (_, _) => TerminalCard(
+                  child: ErrorState(
+                    message: '收益数据加载失败，请重试',
+                    onRetry: () => ref.invalidate(snapshotsProvider),
                   ),
                 ),
-              ],
-            ),
-          ),
-          loading: () => const Center(child: CircularProgressIndicator()),
-          error: (e, _) => ErrorState(
-            message: '统计计算失败，请重试',
-            onRetry: () => ref.invalidate(statsProvider),
+              ),
+              const SizedBox(height: T.s3),
+              const SectionHeader(label: '交易流水'),
+              stats.when(
+                data: (value) => TerminalCard(
+                  child: _TradeSummary(stats: value, hide: hide),
+                ),
+                loading: () => const TerminalCard(
+                  child: Center(child: CircularProgressIndicator()),
+                ),
+                error: (_, _) => TerminalCard(
+                  child: ErrorState(
+                    message: '交易统计加载失败，请重试',
+                    onRetry: () => ref.invalidate(statsProvider),
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
       ),
     );
   }
-
-  /// Best / worst month and the share of profitable months, derived from the
-  /// monthly investment profit (a month is profitable when it actually made
-  /// money — cash flows have no bearing on profitability).
-  List<Widget> _monthTiles(Map<String, double> months) {
-    var bestKey = months.keys.first;
-    var worstKey = months.keys.first;
-    for (final k in months.keys) {
-      if (months[k]! > months[bestKey]!) bestKey = k;
-      if (months[k]! < months[worstKey]!) worstKey = k;
-    }
-    final positive = months.values.where((v) => v > 0).length;
-    return [
-      StatTile(
-        label: '最佳月份 $bestKey',
-        value:
-            '${months[bestKey]! >= 0 ? '+' : ''}${Formats.amount(months[bestKey]!)}',
-        color: T.changeColor(months[bestKey]!),
-      ),
-      StatTile(
-        label: '最差月份 $worstKey',
-        value: Formats.amount(months[worstKey]!),
-        color: T.changeColor(months[worstKey]!),
-      ),
-      StatTile(
-        label: '盈利月份占比',
-        value: '${(positive / months.length * 100).toStringAsFixed(0)}%',
-      ),
-    ];
-  }
-
-  /// 'yyyy-MM' -> sum of that month's daily asset profits, computed from the
-  /// daily net-worth snapshots. Principal in/out moves the cost basis along
-  /// with the balance, so these are gains (not cash flows).
-  Map<String, double> _monthlyProfitOf(List<SnapshotRow> snapshots) {
-    final earnings = const DailyEarningsCalculator().compute(snapshots);
-    final byMonth = <String, double>{};
-    for (final d in earnings) {
-      final key = d.date.substring(0, 7);
-      byMonth[key] = (byMonth[key] ?? 0) + d.profit;
-    }
-    return byMonth;
-  }
-
-  /// The most recent [n] months (sorted ascending) of the monthly map.
-  Map<String, double> _recentMonths(Map<String, double> months, int n) {
-    final keys = months.keys.toList()..sort();
-    if (keys.length <= n) return months;
-    final last = keys.sublist(keys.length - n);
-    return {for (final k in last) k: months[k]!};
-  }
 }
 
-/// Dark terminal-style bar chart of monthly values (investment profit).
-class _MonthlyBarChart extends StatelessWidget {
-  const _MonthlyBarChart({required this.months});
+Map<String, double> _monthlyProfitOf(List<SnapshotRow> snapshots) {
+  final earnings = const DailyEarningsCalculator().compute(snapshots);
+  final byMonth = <String, double>{};
+  for (final day in earnings) {
+    final key = day.date.substring(0, 7);
+    byMonth[key] = (byMonth[key] ?? 0) + day.profit;
+  }
+  return byMonth;
+}
 
+class _MonthSummary extends StatelessWidget {
+  const _MonthSummary({required this.months, required this.hide});
   final Map<String, double> months;
+  final bool hide;
 
   @override
   Widget build(BuildContext context) {
-    final keys = months.keys.toList()..sort();
-    final values = [for (final k in keys) months[k]!];
-    final n = keys.length;
-    var lo = values.fold(0.0, (m, v) => v < m ? v : m);
-    var hi = values.fold(0.0, (m, v) => v > m ? v : m);
-    if (hi <= lo) hi = lo + 1;
-    final pad = (hi - lo) * 0.15;
-    lo -= pad;
-    hi += pad;
-    return BarChart(
-      BarChartData(
-        minY: lo,
-        maxY: hi,
-        gridData: FlGridData(
-          drawHorizontalLine: true,
-          getDrawingHorizontalLine: (y) => FlLine(
-            color: T.borderSoft,
-            strokeWidth: 1,
-            dashArray: const [4, 4],
-          ),
-          drawVerticalLine: false,
+    var best = months.keys.first;
+    var worst = best;
+    for (final key in months.keys) {
+      if (months[key]! > months[best]!) best = key;
+      if (months[key]! < months[worst]!) worst = key;
+    }
+    final positive = months.values.where((value) => value > 0).length;
+    return Column(
+      children: [
+        _StatLine(label: '最佳月份 $best', value: months[best]!, hide: hide),
+        _StatLine(label: '最差月份 $worst', value: months[worst]!, hide: hide),
+        _StatLine(
+          label: '盈利月份占比',
+          text: '${(positive / months.length * 100).toStringAsFixed(0)}%',
         ),
-        borderData: FlBorderData(show: false),
-        barTouchData: BarTouchData(
-          touchTooltipData: BarTouchTooltipData(
-            getTooltipColor: (_) => T.surface2,
-            getTooltipItem: (group, groupIndex, rod, rodIndex) {
-              final v = values[groupIndex];
-              return BarTooltipItem(
-                '${keys[groupIndex]}  ${v >= 0 ? '+' : ''}${Formats.amount(v)}',
-                T.mono(size: 12, color: T.text1),
-              );
-            },
-          ),
-        ),
-        titlesData: FlTitlesData(
-          leftTitles: const AxisTitles(
-            sideTitles: SideTitles(showTitles: false),
-          ),
-          rightTitles: const AxisTitles(
-            sideTitles: SideTitles(showTitles: false),
-          ),
-          topTitles: const AxisTitles(
-            sideTitles: SideTitles(showTitles: false),
-          ),
-          bottomTitles: AxisTitles(
-            sideTitles: SideTitles(
-              showTitles: true,
-              reservedSize: 28,
-              // One title per bar: the axis spans 0..n-1 (the group x
-              // values), so a 1/n interval used to cluster every label
-              // inside the first bar's width.
-              interval: 1,
-              getTitlesWidget: (value, meta) {
-                final i = value.round();
-                if (i < 0 || i >= n) return const SizedBox.shrink();
-                return Padding(
-                  padding: const EdgeInsets.only(top: 6),
-                  child: Text(
-                    keys[i].substring(5),
-                    style: T.mono(size: 10, color: T.text3),
-                  ),
-                );
-              },
-            ),
-          ),
-        ),
-        barGroups: [
-          for (var i = 0; i < n; i++)
-            BarChartGroupData(
-              x: i,
-              barRods: [
-                BarChartRodData(
-                  toY: values[i],
-                  width: 14,
-                  borderRadius: BorderRadius.circular(3),
-                  color: T.changeColor(values[i]),
-                ),
-              ],
-            ),
-        ],
-      ),
+      ],
     );
   }
 }
 
-/// Entry card into a calendar page, top of the stats screen.
-class _CalEntryTile extends StatelessWidget {
-  const _CalEntryTile({
-    required this.icon,
-    required this.label,
-    required this.sublabel,
-    required this.onTap,
-  });
-
-  final IconData icon;
-  final String label;
-  final String sublabel;
-  final VoidCallback onTap;
+class _TradeSummary extends StatelessWidget {
+  const _TradeSummary({required this.stats, required this.hide});
+  final TradeStats stats;
+  final bool hide;
 
   @override
   Widget build(BuildContext context) {
-    return TerminalCard(
-      onTap: onTap,
-      padding: const EdgeInsets.symmetric(horizontal: T.s3, vertical: T.s3),
+    final missing = stats.missingCurrencies.toList()..sort();
+    final unavailable = missing.isNotEmpty;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (unavailable) ...[
+          Text(
+            '缺少 ${missing.join('、')} 汇率，交易统计待折算。',
+            style: T.label(color: T.warning),
+          ),
+          const SizedBox(height: T.s2),
+        ],
+        _StatLine(
+          label: '净现金流',
+          value: stats.cashflow,
+          hide: hide,
+          unavailable: unavailable,
+        ),
+        _StatLine(
+          label: '已落袋收益（估算）',
+          value: stats.realizedProfit,
+          hide: hide,
+          unavailable: unavailable,
+        ),
+        _StatLine(
+          label: '累计分红',
+          value: stats.dividendTotal,
+          hide: hide,
+          unavailable: unavailable,
+        ),
+        _StatLine(
+          label: '现金支付买入',
+          value: stats.boughtTotal,
+          hide: hide,
+          unavailable: unavailable,
+        ),
+        _StatLine(
+          label: '卖出入账现金',
+          value: stats.soldTotal,
+          hide: hide,
+          unavailable: unavailable,
+        ),
+        _StatLine(
+          label: '累计收入',
+          value: stats.incomeTotal,
+          hide: hide,
+          unavailable: unavailable,
+        ),
+        _StatLine(
+          label: '累计支出',
+          value: stats.expenseTotal,
+          hide: hide,
+          unavailable: unavailable,
+        ),
+        const SizedBox(height: T.s2),
+        Text(
+          '金额按当前或缓存汇率折合人民币。净现金流统计相关现金持仓的收支与买卖，不含内部转账。已落袋收益按当前成本估算。',
+          style: T.label(),
+        ),
+      ],
+    );
+  }
+}
+
+class _StatLine extends StatelessWidget {
+  const _StatLine({
+    required this.label,
+    this.value,
+    this.text,
+    this.hide = false,
+    this.unavailable = false,
+  });
+  final String label;
+  final double? value;
+  final String? text;
+  final bool hide;
+  final bool unavailable;
+
+  @override
+  Widget build(BuildContext context) {
+    final display =
+        text ??
+        (hide
+            ? '****'
+            : unavailable
+            ? '待折算'
+            : Formats.money(value!));
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: T.s2),
       child: Row(
         children: [
-          Icon(icon, color: T.accent, size: 22),
+          Expanded(child: Text(label, style: T.label(size: 12))),
           const SizedBox(width: T.s2),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  label,
-                  style: const TextStyle(fontSize: 13, color: T.text1),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  sublabel,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontSize: 11, color: T.text3),
-                ),
-              ],
+          Flexible(
+            child: Text(
+              display,
+              textAlign: TextAlign.right,
+              style: T.mono(size: 13),
             ),
           ),
-          const Icon(Icons.chevron_right, size: 18, color: T.text3),
         ],
       ),
     );

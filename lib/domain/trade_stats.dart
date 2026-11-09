@@ -11,6 +11,7 @@ class TradeStats {
     required this.dividendTotal,
     required this.realizedProfit,
     required this.monthlyCashflow,
+    this.missingCurrencies = const {},
   });
 
   final double boughtTotal;
@@ -24,6 +25,9 @@ class TradeStats {
 
   /// 'yyyy-MM' -> net cash flow for that month.
   final Map<String, double> monthlyCashflow;
+
+  /// Currencies omitted from strict CNY totals because no valid rate exists.
+  final Set<String> missingCurrencies;
 
   /// Net cash flow: money in minus money out. Only rows that actually move
   /// cash are counted (sells credited to a cash holding, buys funded from a
@@ -41,13 +45,17 @@ class TradeStats {
 class TradeStatsCalculator {
   const TradeStatsCalculator();
 
-  /// [cnyRates] converts each transaction's amount into CNY (default 1).
+  /// [cnyRates] converts each transaction's amount into CNY.
+  /// With [requireFxRates], unconvertible amounts are excluded and reported
+  /// in [TradeStats.missingCurrencies].
   TradeStats compute(
     List<TransactionRow> txns,
     List<HoldingRow> holdings, {
     Map<String, double> cnyRates = const {},
+    bool requireFxRates = false,
   }) {
     double rateOf(String currency) {
+      if (requireFxRates && currency.toUpperCase() == 'CNY') return 1;
       final rate = cnyRates[currency.toUpperCase()];
       return (rate == null || rate <= 0) ? 1 : rate;
     }
@@ -58,6 +66,7 @@ class TradeStatsCalculator {
     var expense = 0.0;
     var dividend = 0.0;
     final monthly = <String, double>{};
+    final missingCurrencies = <String>{};
 
     final costByHolding = <int, double>{
       for (final h in holdings) h.id: h.costPrice,
@@ -69,6 +78,30 @@ class TradeStatsCalculator {
 
     for (final t in txns) {
       final type = TransactionType.fromStorage(t.type);
+      if (requireFxRates) {
+        final holdingType =
+            t.holdingId == null ? null : typeByHolding[t.holdingId];
+        final contributes = switch (type) {
+          TransactionType.buy => t.cashSourceId != null,
+          TransactionType.sell =>
+            t.cashTargetId != null ||
+                (!t.internalMove &&
+                    holdingType != null &&
+                    !holdingType.isAmountBased),
+          TransactionType.income ||
+          TransactionType.expense ||
+          TransactionType.dividend => true,
+          _ => false,
+        };
+        if (!contributes) continue;
+        final currency = t.currency.toUpperCase();
+        final rate = cnyRates[currency];
+        if (currency != 'CNY' &&
+            (rate == null || !rate.isFinite || rate <= 0)) {
+          missingCurrencies.add(currency);
+          continue;
+        }
+      }
       final month = '${t.occurredAt.year}-${t.occurredAt.month.toString().padLeft(2, '0')}';
       final flow = monthly[month] ?? 0.0;
       final amount = t.amount * rateOf(t.currency);
@@ -130,6 +163,7 @@ class TradeStatsCalculator {
       dividendTotal: dividend,
       realizedProfit: realized,
       monthlyCashflow: monthly,
+      missingCurrencies: missingCurrencies,
     );
   }
 

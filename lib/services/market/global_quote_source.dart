@@ -117,7 +117,7 @@ class GlobalQuoteSource {
 
   Map<String, List<String>> _parseRaw(String text) {
     final map = <String, List<String>>{};
-    final regex = RegExp(r'var hq_str_(\w+)="(.*)";');
+    final regex = RegExp(r'var hq_str_([\w$]+)="([^"]*)";');
     for (final m in regex.allMatches(text)) {
       map[m.group(1)!] = m.group(2)!.split(',');
     }
@@ -163,7 +163,7 @@ class GlobalQuoteSource {
         group: def.group,
         price: price,
         change: change,
-        changePct: pct ?? 0,
+        changePct: (pct ?? 0) / 100,
         unit: def.unit,
         fxSymbol: def.fxSymbol,
       );

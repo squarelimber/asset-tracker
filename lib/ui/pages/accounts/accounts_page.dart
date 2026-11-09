@@ -8,6 +8,7 @@ import '../../../core/enums.dart';
 import '../../../core/formats.dart';
 import '../../../core/history_sync.dart';
 import '../../../core/responsive.dart';
+import '../../../core/symbols.dart';
 import '../../../data/database.dart';
 import '../../../domain/holding_category.dart';
 import '../../components/app_bar_actions.dart';
@@ -39,7 +40,14 @@ class AccountsPage extends ConsumerWidget {
             ? const EmptyState(message: '还没有账户\n点击右下角按钮创建第一个账户')
             : ResponsiveShell(
                 child: RefreshIndicator(
-                  onRefresh: () async => ref.invalidate(accountsProvider),
+                  onRefresh: () async {
+                    ref.invalidate(accountsProvider);
+                    ref.invalidate(cnyRatesProvider);
+                    for (final account in list) {
+                      ref.invalidate(holdingsByAccountProvider(account.id));
+                    }
+                    await ref.read(accountsProvider.future);
+                  },
                   child: ListView(
                     physics: const AlwaysScrollableScrollPhysics(),
                     children: [
@@ -60,13 +68,17 @@ class AccountsPage extends ConsumerWidget {
     );
   }
 
-  Future<void> _showAccountDialog(BuildContext context, WidgetRef ref) async {
-    final nameCtrl = TextEditingController();
-    final noteCtrl = TextEditingController();
+  static Future<void> _showAccountDialog(
+    BuildContext context,
+    WidgetRef ref, {
+    AccountRow? account,
+  }) async {
+    final nameCtrl = TextEditingController(text: account?.name);
+    final noteCtrl = TextEditingController(text: account?.note);
     await showDialog<void>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('添加账户'),
+        title: Text(account == null ? '添加账户' : '编辑账户'),
         content: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -90,18 +102,32 @@ class AccountsPage extends ConsumerWidget {
           FilledButton(
             onPressed: () async {
               final name = nameCtrl.text.trim();
-              if (name.isEmpty) return;
+              if (name.isEmpty) {
+                ScaffoldMessenger.of(
+                  context,
+                ).showSnackBar(const SnackBar(content: Text('请填写账户名称')));
+                return;
+              }
               final dao = ref.read(daoProvider);
-              await dao.createAccount(
-                AccountsCompanion.insert(
+              if (account == null) {
+                await dao.createAccount(
+                  AccountsCompanion.insert(
+                    name: name,
+                    type: 'general',
+                    currency: const Value('CNY'),
+                    note: noteCtrl.text.trim().isEmpty
+                        ? const Value.absent()
+                        : Value(noteCtrl.text.trim()),
+                  ),
+                );
+              } else {
+                final note = noteCtrl.text.trim();
+                await dao.updateAccountDetails(
+                  account.id,
                   name: name,
-                  type: 'general',
-                  currency: const Value('CNY'),
-                  note: noteCtrl.text.trim().isEmpty
-                      ? const Value.absent()
-                      : Value(noteCtrl.text.trim()),
-                ),
-              );
+                  note: note.isEmpty ? null : note,
+                );
+              }
               if (context.mounted) Navigator.pop(context);
             },
             child: const Text('保存'),
@@ -109,6 +135,8 @@ class AccountsPage extends ConsumerWidget {
         ],
       ),
     );
+    // Keep controllers alive until the dialog's exit animation completes.
+    await Future<void>.delayed(const Duration(milliseconds: 350));
     nameCtrl.dispose();
     noteCtrl.dispose();
   }
@@ -123,13 +151,44 @@ class _AccountCard extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final holdings = ref.watch(holdingsByAccountProvider(account.id));
     final hide = ref.watch(hideAmountsProvider);
-    final list = holdings.value ?? const <HoldingRow>[];
+    final rateState = ref.watch(cnyRatesProvider);
+    final list = holdings.valueOrNull;
+    final needsRates =
+        list?.any((h) => h.currency.toUpperCase() != 'CNY' && !isFxLinked(h)) ??
+        false;
+    final rates = rateState.valueOrNull ?? const <String, double>{};
+    final missing = list == null
+        ? <String>[]
+        : missingCnyRates(
+            list.where((h) => !isFxLinked(h)).map((h) => h.currency),
+            rates,
+          ).toSet().toList();
+    final String? status;
+    if (list == null) {
+      status = holdings.hasError ? '持仓加载失败' : '持仓加载中…';
+    } else if (needsRates &&
+        rateState.isLoading &&
+        rateState.valueOrNull == null) {
+      status = '汇率加载中…';
+    } else if (missing.isNotEmpty) {
+      status = '待折算（缺少 ${missing.join('、')} 汇率）';
+    } else {
+      status = null;
+    }
     return TerminalCard(
-      child: FutureBuilder<Map<String, double>>(
-        future: ref.watch(cnyRatesProvider.future),
-        builder: (context, snapshot) {
-          final rates = snapshot.data ?? const <String, double>{};
-          final total = _accountTotal(list, rates);
+      onTap: () => context.push('/accounts/${account.id}'),
+      child: Builder(
+        builder: (context) {
+          final total = status == null ? _accountTotal(list!, rates) : 0.0;
+          final liabilities = status == null
+              ? list!
+                    .where(
+                      (h) =>
+                          AssetType.fromStorage(h.assetType) ==
+                          AssetType.liability,
+                    )
+                    .fold(0.0, (double sum, h) => sum + _amountValue(h, rates))
+              : 0.0;
           return Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -148,48 +207,68 @@ class _AccountCard extends ConsumerWidget {
                       ),
                     ),
                   ),
-                  Text(
-                    // Formats.money already prefixes the currency symbol —
-                    // adding '¥' here printed it twice (¥¥640,109.86).
-                    hide
-                        ? '****'
-                        : '${Formats.money(total)} · ${list.length} 项',
-                    style: T.mono(size: 12, color: T.text2),
+                  Flexible(
+                    child: Text(
+                      // Formats.money already prefixes the currency symbol —
+                      // adding '¥' here printed it twice (¥¥640,109.86).
+                      status ??
+                          (hide
+                              ? '****'
+                              : '${Formats.money(total)} · ${list!.length} 项'),
+                      style: T.mono(size: 12, color: T.text2),
+                      textAlign: TextAlign.end,
+                    ),
                   ),
                   const SizedBox(width: T.s1),
                   PopupMenuButton<String>(
                     onSelected: (v) {
                       if (v == 'delete') _confirmDelete(context, ref);
+                      if (v == 'edit') {
+                        AccountsPage._showAccountDialog(
+                          context,
+                          ref,
+                          account: account,
+                        );
+                      }
                     },
                     itemBuilder: (_) => const [
+                      PopupMenuItem(value: 'edit', child: Text('编辑账户')),
                       PopupMenuItem(value: 'delete', child: Text('删除账户')),
                     ],
                   ),
                 ],
               ),
-              if (list.isNotEmpty) ...[
+              if (account.note != null && account.note!.trim().isNotEmpty)
+                Text(account.note!, style: T.label(size: 11, color: T.text3)),
+              if (status == null) ...[
+                Text('资产市值 · 折合人民币', style: T.label(size: 11, color: T.text3)),
+                if (liabilities != 0)
+                  Text(
+                    hide
+                        ? '负债 ****  ·  净资产 ****'
+                        : '负债 ${Formats.money(liabilities)}  ·  净资产 ${Formats.money(total - liabilities)}',
+                    style: T.mono(size: 11, color: T.text2),
+                  ),
+              ],
+              if (status == null && list!.isNotEmpty) ...[
                 const SizedBox(height: T.s2),
                 // 资产类型占比条（紧凑一行，替代逐持仓列表）。
                 _AccountTypeBar(holdings: list, rates: rates, hide: hide),
               ],
               const SizedBox(height: T.s1),
               // 「账户详情」入口（持仓明细与交易流水都收敛到这里）。
-              InkWell(
-                onTap: () => context.push('/accounts/${account.id}'),
-                borderRadius: BorderRadius.circular(4),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: T.s1),
-                  child: Row(
-                    children: [
-                      const Expanded(
-                        child: Text(
-                          '账户详情（持仓 · 流水）',
-                          style: TextStyle(fontSize: 12, color: T.text3),
-                        ),
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: T.s1),
+                child: Row(
+                  children: [
+                    const Expanded(
+                      child: Text(
+                        '账户详情（持仓 · 流水）',
+                        style: TextStyle(fontSize: 12, color: T.text3),
                       ),
-                      Icon(Icons.chevron_right, size: 16, color: T.text3),
-                    ],
-                  ),
+                    ),
+                    Icon(Icons.chevron_right, size: 16, color: T.text3),
+                  ],
                 ),
               ),
             ],
@@ -208,7 +287,7 @@ class _AccountCard extends ConsumerWidget {
         title: const Text('删除账户'),
         content: Text(
           '确定删除账户「${account.name}」吗？'
-          '${holdings.isEmpty ? '' : '账户内 ${holdings.length} 项持仓及交易流水将一并删除。'}'
+          '${holdings.isEmpty ? '账户内的持仓及交易流水将一并删除。' : '账户内 ${holdings.length} 项持仓及交易流水将一并删除。'}'
           '此操作无法撤销。',
         ),
         actions: [
@@ -326,7 +405,7 @@ class _AccountTypeBar extends StatelessWidget {
 /// Market value of a single holding in CNY (liabilities excluded by caller).
 double _amountValue(HoldingRow h, Map<String, double> rates) {
   final type = AssetType.fromStorage(h.assetType);
-  final rate = rates[h.currency.toUpperCase()] ?? 1;
+  final rate = valueRateOf(h, rates);
   return (type.isAmountBased ? h.quantity : h.quantity * h.latestPrice) * rate;
 }
 

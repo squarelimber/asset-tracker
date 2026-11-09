@@ -202,6 +202,39 @@ void main() {
     expect(stats.incomeTotal, closeTo(7200, 1e-6));
   });
 
+  test('strict CNY statistics report missing rates without treating them as 1:1', () {
+    final stats = calc.compute(
+      [
+        _txn(id: 1, type: 'income', amount: 100, currency: 'USD'),
+        _txn(id: 2, type: 'expense', amount: 50, currency: 'HKD'),
+        _txn(id: 3, type: 'income', amount: 70, currency: 'CNY'),
+        _txn(id: 4, type: 'transferOut', amount: 100, currency: 'EUR'),
+        _txn(id: 5, type: 'buy', amount: 100, currency: 'GBP'),
+      ],
+      const [],
+      cnyRates: {'HKD': double.nan, 'CNY': 3},
+      requireFxRates: true,
+    );
+    expect(stats.incomeTotal, 70);
+    expect(stats.expenseTotal, 0);
+    expect(stats.cashflow, 70);
+    expect(stats.missingCurrencies, {'USD', 'HKD'});
+  });
+
+  test('strict CNY statistics include transactions once their rates are available', () {
+    final stats = calc.compute(
+      [
+        _txn(id: 1, type: 'income', amount: 100, currency: 'usd'),
+        _txn(id: 2, type: 'expense', amount: 50, currency: 'CNY'),
+      ],
+      const [],
+      cnyRates: {'USD': 7.2},
+      requireFxRates: true,
+    );
+    expect(stats.missingCurrencies, isEmpty);
+    expect(stats.cashflow, closeTo(670, 1e-6));
+  });
+
   test('realizedProfitByHolding sums sells per holding', () {
     final byHolding = TradeStatsCalculator.realizedProfitByHolding([
       _txn(id: 1, type: 'sell', holdingId: 1, quantity: 50, price: 15),
