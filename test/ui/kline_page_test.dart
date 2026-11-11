@@ -8,6 +8,42 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
 void main() {
+  testWidgets('搜索到的证券保留代码和名称，不切换成指数', (tester) async {
+    final requests = <String>[];
+    final client = MockClient((request) async {
+      final param = request.url.queryParameters['param']!;
+      requests.add(param);
+      return http.Response(
+        jsonEncode({
+          'code': 0,
+          'data': {
+            'usAAPL.OQ': {
+              'day': [
+                ['2026-11-10', '200', '201', '202', '199', '100'],
+              ],
+            },
+          },
+        }),
+        200,
+      );
+    });
+    addTearDown(client.close);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: KlinePage(
+          initialSymbol: 'usAAPL.OQ',
+          initialName: '苹果',
+          source: KlineSource(client: client),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('苹果'), findsOneWidget);
+    expect(find.text('证券 K 线'), findsOneWidget);
+    expect(requests.single, startsWith('usAAPL.OQ,day,'));
+    expect(find.text('上证指数'), findsNothing);
+  });
+
   testWidgets('K 线加载并切换指数和周期', (tester) async {
     tester.view.physicalSize = const Size(390, 844);
     tester.view.devicePixelRatio = 1;
@@ -39,7 +75,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(find.textContaining('最新 K 线'), findsOneWidget);
+    expect(find.textContaining('最近 K 线'), findsOneWidget);
     expect(find.textContaining('2026-11-09'), findsWidgets);
     expect(requests.last, startsWith('sh000001,day,'));
 

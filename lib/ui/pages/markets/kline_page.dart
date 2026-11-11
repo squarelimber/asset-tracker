@@ -8,11 +8,17 @@ import '../../components/kline_chart.dart';
 import '../../components/terminal_choice.dart';
 import '../../tokens.dart';
 
-/// Historical candlesticks for the index catalog supported in this preview.
+/// Historical candlesticks for an index or a searched security.
 class KlinePage extends StatefulWidget {
-  const KlinePage({super.key, this.initialSymbol = 'sh000001', this.source});
+  const KlinePage({
+    super.key,
+    this.initialSymbol = 'sh000001',
+    this.initialName,
+    this.source,
+  });
 
   final String initialSymbol;
+  final String? initialName;
   final KlineSource? source;
 
   @override
@@ -35,9 +41,7 @@ class _KlinePageState extends State<KlinePage> {
   void initState() {
     super.initState();
     _source = widget.source ?? KlineSource();
-    _symbol = _symbols.containsKey(widget.initialSymbol)
-        ? widget.initialSymbol
-        : 'sh000001';
+    _symbol = widget.initialSymbol;
     _load();
   }
 
@@ -53,38 +57,45 @@ class _KlinePageState extends State<KlinePage> {
 
   @override
   Widget build(BuildContext context) {
+    final isIndex = _symbols.containsKey(_symbol);
+    final name = _symbols[_symbol] ?? widget.initialName ?? _symbol;
     return Scaffold(
-      appBar: AppBar(title: const Text('指数 K 线')),
+      appBar: AppBar(title: Text(isIndex ? '指数 K 线' : '证券 K 线')),
       body: ResponsiveShell(
         child: ListView(
           children: [
-            Wrap(
-              spacing: T.s2,
-              runSpacing: T.s1,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: [
-                for (final entry in _symbols.entries)
-                  TerminalChoice(
-                    label: entry.value,
-                    selected: _symbol == entry.key,
-                    onPressed: () {
-                      if (_symbol == entry.key) return;
-                      setState(() {
-                        _symbol = entry.key;
-                        _load();
-                      });
-                    },
-                  ),
-              ],
-            ),
-            const SizedBox(height: T.s3),
+            if (isIndex)
+              Wrap(
+                spacing: T.s2,
+                runSpacing: T.s1,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  for (final entry in _symbols.entries)
+                    TerminalChoice(
+                      label: entry.value,
+                      selected: _symbol == entry.key,
+                      onPressed: () {
+                        if (_symbol == entry.key) return;
+                        setState(() {
+                          _symbol = entry.key;
+                          _load();
+                        });
+                      },
+                    ),
+                ],
+              ),
+            if (isIndex) const SizedBox(height: T.s3),
             Row(
               children: [
-                Text(
-                  _symbols[_symbol]!,
-                  style: const TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w600,
+                Flexible(
+                  child: Text(
+                    name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ),
                 const SizedBox(width: T.s2),
@@ -146,7 +157,7 @@ class _KlinePageState extends State<KlinePage> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      '最新 K 线  ${Formats.num(latest.close)}',
+                      '最近 K 线  ${Formats.num(latest.close)}',
                       style: T.mono(size: 19, weight: FontWeight.w600),
                     ),
                     const SizedBox(height: T.s1),
@@ -154,6 +165,8 @@ class _KlinePageState extends State<KlinePage> {
                       '数据截至 ${Formats.date(latest.date)} · 腾讯行情',
                       style: T.label(),
                     ),
+                    if (DateTime.now().difference(latest.date).inDays > 14)
+                      Text('行情已较长时间未更新，证券可能已停牌或退市。', style: T.label()),
                     const SizedBox(height: T.s3),
                     KlineChart(bars: bars),
                   ],

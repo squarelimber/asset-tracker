@@ -5,10 +5,12 @@ import 'package:asset_tracker/app/app.dart';
 import 'package:asset_tracker/app/providers.dart';
 import 'package:asset_tracker/core/enums.dart';
 import 'package:asset_tracker/core/formats.dart';
+import 'package:asset_tracker/core/market_session.dart';
 import 'package:asset_tracker/data/asset_dao.dart';
 import 'package:asset_tracker/data/database.dart';
 import 'package:asset_tracker/domain/holding_valuation.dart';
 import 'package:asset_tracker/services/market/market_service.dart';
+import 'package:asset_tracker/services/market/kline_source.dart';
 import 'package:drift/drift.dart' show Value;
 import 'package:drift_flutter/drift_flutter.dart';
 import 'package:flutter/material.dart';
@@ -27,6 +29,7 @@ Future<void> main() async {
   );
   final dao = AssetDao(db);
   if ((await dao.getHoldings()).isEmpty) await _seed(dao);
+  await _seedKlineDemoTrades(dao);
   if (await dao.getSetting('preview_snapshot_v2') != '1') {
     await _writePreviewSnapshots(dao);
     await dao.setSetting('preview_snapshot_v2', '1');
@@ -51,6 +54,97 @@ Future<void> main() async {
       ),
     ),
   );
+}
+
+/// Add a balanced set of example trades only to an untouched preview holding.
+/// The trades use isolated sample data and keep the position's quantity and
+/// cost consistent with the sample ledger.
+Future<void> _seedKlineDemoTrades(AssetDao dao) async {
+  const setting = 'preview_kline_trades_v1';
+  if (await dao.getSetting(setting) == '1') return;
+
+  final holdings = await dao.getHoldings();
+  final candidates = holdings.where(
+    (h) => h.name == '沪深300ETF' && h.assetType == 'etf' && h.symbol == '510300',
+  );
+  if (candidates.length != 1) return;
+  final holding = candidates.single;
+  final existing = await dao.getTransactionsForHolding(holding.id);
+  if (existing.length != 1 ||
+      existing.single.type != 'buy' ||
+      existing.single.quantity != holding.quantity ||
+      existing.single.price != holding.costPrice) {
+    return;
+  }
+
+  final now = DateTime.now();
+  final days = <DateTime>[];
+  // Space the example days across the default 60-candle viewport. Separate
+  // dates remain individually tappable even on a narrow phone screen.
+  for (var offset = 1; days.length < 41 && offset <= 100; offset++) {
+    final day = DateTime(now.year, now.month, now.day - offset);
+    if (isTradingDay(day)) days.add(day);
+  }
+  if (days.length < 41) return;
+
+  // Use real candle prices for the demo points when available. These remain
+  // synthetic trades and are stored only in the isolated preview database.
+  final source = KlineSource();
+  var prices = List<double>.filled(4, holding.costPrice);
+  try {
+    final candles = await source
+        .fetch('sh510300', KlinePeriod.day, adjusted: false)
+        .timeout(const Duration(seconds: 5));
+    final byDate = {
+      for (final candle in candles) todayKey(candle.date): candle,
+    };
+    final first = byDate[todayKey(days[40])];
+    final middle = byDate[todayKey(days[20])];
+    final last = byDate[todayKey(days[0])];
+    if (first != null && middle != null && last != null) {
+      prices = [first.open, middle.close, last.open, last.close];
+    }
+  } catch (_) {
+    // The original example prices still provide date-only markers offline.
+  } finally {
+    source.close();
+  }
+
+  final trades = [
+    (day: days[40], hour: 10, type: 'buy', price: prices[0]),
+    (day: days[20], hour: 10, type: 'sell', price: prices[1]),
+    (day: days[0], hour: 10, type: 'sell', price: prices[2]),
+    (day: days[0], hour: 14, type: 'buy', price: prices[3]),
+  ];
+  await dao.transaction(() async {
+    for (final trade in trades) {
+      await dao.createTransaction(
+        TransactionsCompanion.insert(
+          accountId: holding.accountId,
+          holdingId: Value(holding.id),
+          type: trade.type,
+          amount: 100 * trade.price,
+          quantity: const Value(100),
+          price: Value(trade.price),
+          occurredAt: DateTime(
+            trade.day.year,
+            trade.day.month,
+            trade.day.day,
+            trade.hour,
+          ),
+          note: const Value('演示交易'),
+        ),
+      );
+    }
+    final costAfterFirstBuy =
+        (holding.quantity * holding.costPrice + 100 * prices[0]) /
+        (holding.quantity + 100);
+    final finalCost =
+        ((holding.quantity - 100) * costAfterFirstBuy + 100 * prices[3]) /
+        holding.quantity;
+    await dao.updateHolding(holding.copyWith(costPrice: finalCost));
+    await dao.setSetting(setting, '1');
+  });
 }
 
 double _value(HoldingRow h) =>

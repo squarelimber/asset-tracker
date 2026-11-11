@@ -95,6 +95,11 @@ class _MarketsPageState extends ConsumerState<MarketsPage> {
           title: const Text('行情'),
           actions: [
             IconButton(
+              tooltip: '搜索股票和 ETF',
+              icon: const Icon(Icons.search),
+              onPressed: () => context.push('/markets/search'),
+            ),
+            IconButton(
               tooltip: '指数 K 线',
               icon: const Icon(Icons.candlestick_chart_outlined),
               onPressed: () => context.push('/markets/kline'),

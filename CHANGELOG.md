@@ -2,6 +2,19 @@
 
 All notable changes to Asset Tracker. Entries are condensed from the commit history; dates follow the release tags.
 
+## [0.11.5] - 2026-11-11
+
+### Changed
+
+- 持仓详情整合日、周、月 K 线和原有持仓信息，支持股票及 ETF 的买入、卖出和同日买卖标记
+- 行情页新增证券搜索，可查询 A 股、港股、美股的股票及 ETF 并查看 K 线
+- 持仓 K 线使用未复权价格，交易标记按记录日期和成交价定位，金额隐藏时不显示成交价格
+
+### Notes
+
+- 行情和搜索依赖腾讯数据覆盖及网络可用性；北交所旧代码按交易所公布的对照表转换，未收录代码不会猜测
+- K 线日期为市场行情日期，交易标记使用本地记录日期；无对应 K 线的交易仍可在流水中查看
+
 ## [0.11.4] - 2026-11-09
 
 ### Changed

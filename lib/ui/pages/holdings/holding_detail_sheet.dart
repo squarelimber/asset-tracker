@@ -43,11 +43,15 @@ class HoldingDetailSheet extends ConsumerWidget {
   const HoldingDetailSheet({
     super.key,
     required this.holding,
-    required this.scrollController,
+    this.scrollController,
+    this.embedded = false,
+    this.showTransactionButton = false,
   });
 
   final HoldingRow holding;
-  final ScrollController scrollController;
+  final ScrollController? scrollController;
+  final bool embedded;
+  final bool showTransactionButton;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -100,6 +104,8 @@ class HoldingDetailSheet extends ConsumerWidget {
     final todayPct = todayChangePctOf(todayRow, source: source);
     return ListView(
       controller: scrollController,
+      shrinkWrap: embedded,
+      physics: embedded ? const NeverScrollableScrollPhysics() : null,
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 32),
       children: [
         Row(
@@ -109,9 +115,13 @@ class HoldingDetailSheet extends ConsumerWidget {
                 children: [
                   Flexible(
                     child: Text(
-                      holding.name,
+                      embedded ? '持仓信息' : holding.name,
                       overflow: TextOverflow.ellipsis,
-                      style: T.mono(size: 18, weight: FontWeight.w700, color: T.text1),
+                      style: T.mono(
+                        size: embedded ? 15 : 18,
+                        weight: embedded ? FontWeight.w600 : FontWeight.w700,
+                        color: T.text1,
+                      ),
                     ),
                   ),
                   if (isClosed) StatusChip(closedHoldingLabel(holding)),
@@ -147,12 +157,14 @@ class HoldingDetailSheet extends ConsumerWidget {
                 const PopupMenuItem(value: 'delete', child: Text('删除')),
               ],
             ),
-            const SizedBox(width: 8),
-            FilledButton.tonalIcon(
-              onPressed: () => showHoldingTransactionDialog(context, ref, holding),
-              icon: const Icon(Icons.edit_note, size: 18),
-              label: const Text('记一笔'),
-            ),
+            if (!embedded || showTransactionButton) ...[
+              const SizedBox(width: 8),
+              FilledButton.tonalIcon(
+                onPressed: () => showHoldingTransactionDialog(context, ref, holding),
+                icon: const Icon(Icons.edit_note, size: 18),
+                label: const Text('记一笔'),
+              ),
+            ],
           ],
         ),
         const SizedBox(height: 16),
@@ -256,7 +268,7 @@ class HoldingDetailSheet extends ConsumerWidget {
   }
 }
 
-class InfoRow extends StatelessWidget {
+class InfoRow extends ConsumerWidget {
   const InfoRow({super.key, required this.label, required this.value, this.valueColor});
 
   final String label;
@@ -264,7 +276,11 @@ class InfoRow extends StatelessWidget {
   final Color? valueColor;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final hide = ref.watch(hideAmountsProvider);
+    final sensitive = !const {
+      '状态', '币种', '清仓日期', '买入日期', '开卡日期', '持有时间', '最新单价',
+    }.contains(label);
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6),
       child: Row(
@@ -273,14 +289,14 @@ class InfoRow extends StatelessWidget {
           const SizedBox(width: 12),
           Expanded(
             child: Text(
-              value,
+              hide && sensitive ? '****' : value,
               textAlign: TextAlign.end,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: T.mono(
                 size: 13,
                 weight: FontWeight.w600,
-                color: valueColor ?? T.text1,
+                color: hide && sensitive ? T.text1 : (valueColor ?? T.text1),
               ),
             ),
           ),

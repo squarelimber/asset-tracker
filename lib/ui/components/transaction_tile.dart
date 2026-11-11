@@ -34,6 +34,7 @@ class TransactionTile extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final type = TransactionType.fromStorage(txn.type);
+    final hide = ref.watch(hideAmountsProvider);
     final isIn = type == TransactionType.buy ||
         type == TransactionType.transferIn ||
         type == TransactionType.income ||
@@ -41,7 +42,7 @@ class TransactionTile extends ConsumerWidget {
     final isSplit = type == TransactionType.split;
     final realized = type == TransactionType.sell &&
             costPrice != null &&
-            txn.quantity != null
+            txn.quantity != null && txn.price != null
         ? (txn.price! - costPrice!) * txn.quantity!
         : null;
     // Built with plain statements: the null-aware element syntax the
@@ -53,7 +54,7 @@ class TransactionTile extends ConsumerWidget {
     if (accountName != null) subtitleParts.add(accountName!);
     if (realized != null) {
       subtitleParts.add(
-          '落袋 ${realized >= 0 ? '+' : ''}${Formats.money(realized, txn.currency)}');
+          hide ? '落袋 ****' : '落袋 ${realized >= 0 ? '+' : ''}${Formats.money(realized, txn.currency)}');
     }
     return TerminalCard(
       margin: EdgeInsets.zero,
@@ -75,7 +76,9 @@ class TransactionTile extends ConsumerWidget {
             SizedBox(
               width: 110,
               child: Text(
-                isSplit
+                hide
+                    ? '****'
+                    : isSplit
                     ? '×${Formats.smartNum(txn.amount)}'
                     : '${isIn ? '+' : '-'}${Formats.money(txn.amount, txn.currency)}',
                 textAlign: TextAlign.end,
