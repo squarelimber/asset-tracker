@@ -152,10 +152,22 @@ void main() {
     ));
 
     await tester.pumpWidget(ProviderScope(
-      overrides: [databaseProvider.overrideWithValue(db)],
+      overrides: [
+        databaseProvider.overrideWithValue(db),
+        hideAmountsProvider.overrideWith((ref) => true),
+      ],
       child: const MaterialApp(home: TransactionsPage()),
     ));
     await tester.pumpAndSettle();
+
+    expect(find.text('当日 ****'), findsOneWidget);
+    expect(find.textContaining('99,001.95'), findsNothing);
+    await tester.tap(find.byTooltip('显示金额'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('99,001.95'), findsWidgets);
+    await tester.tap(find.byTooltip('隐藏金额'));
+    await tester.pumpAndSettle();
+    expect(find.text('当日 ****'), findsOneWidget);
 
     // 点流水项（tile 标题，避开顶部同名筛选 chip）→ 「修改日期」确认对话框。
     await tester.tap(find.descendant(

@@ -1,6 +1,9 @@
 /// 持久化的 UI 偏好：setting key、默认值与可选档位。
 library;
 
+/// Whether amounts start hidden when the app is opened.
+const String hideAmountsOnStartupKey = 'hide_amounts_on_startup';
+
 /// 总览页焦点滚轮卡每面停留的时长（毫秒）。
 ///
 /// 存进 `settings` 表（key-value），由 `spotlightHoldMsProvider` 监听，

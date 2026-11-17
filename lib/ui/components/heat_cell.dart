@@ -55,7 +55,7 @@ class HeatCell extends StatelessWidget {
                   label!,
                   style: T.mono(
                     size: labelSize,
-                    color: T.changeColor(value),
+                    color: value == 0 ? T.text2 : T.text1,
                     weight: FontWeight.w600,
                   ),
                 )),

@@ -71,7 +71,7 @@ class HoldingsTable extends ConsumerWidget {
       pair: (HoldingSort.quantityDesc, HoldingSort.quantityAsc),
     ),
     (
-      label: '成本',
+      label: '成本单价',
       flex: 2,
       align: Alignment.centerRight,
       pair: (HoldingSort.costDesc, HoldingSort.costAsc),
@@ -234,7 +234,13 @@ class _HeaderCell extends StatelessWidget {
     );
     if (onTap == null) return cell;
     return Tooltip(
-      message: active ? '$label（${ascending ? '升序' : '降序'}）' : '$label（点击排序）',
+      message: label == '市值'
+          ? '市值按折合人民币排序${active ? '（${ascending ? '升序' : '降序'}）' : ''}'
+          : label == '盈亏 / 收益率'
+          ? '按折合人民币盈亏排序${active ? '（${ascending ? '升序' : '降序'}）' : ''}'
+          : active
+          ? '$label（${ascending ? '升序' : '降序'}）'
+          : '$label（点击排序）',
       child: cell,
     );
   }
@@ -346,7 +352,7 @@ class _TableRow extends ConsumerWidget {
                     child: isAmount
                         ? dash
                         : Text(
-                            Formats.smartNum(h.quantity),
+                            hide ? '****' : Formats.smartNum(h.quantity),
                             style: T.mono(size: 13, color: T.text1),
                           ),
                   ),
@@ -358,7 +364,7 @@ class _TableRow extends ConsumerWidget {
                     child: isAmount
                         ? dash
                         : Text(
-                            Formats.smartNum(h.costPrice),
+                            hide ? '****' : Formats.smartNum(h.costPrice),
                             style: T.mono(size: 13, color: T.text1),
                           ),
                   ),

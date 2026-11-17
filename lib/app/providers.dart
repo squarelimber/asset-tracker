@@ -25,9 +25,16 @@ import '../services/snapshot_service.dart';
 /// App-wide database instance.
 final databaseProvider = Provider<AppDatabase>((ref) => AppDatabase());
 
-/// Privacy toggle: hides monetary amounts on the portfolio page.
-/// Defaults to hidden; resets on every launch (not persisted).
+/// Current session's privacy toggle. The app entry point initializes it from
+/// the saved startup preference, while the eye button only affects the session.
 final hideAmountsProvider = StateProvider<bool>((ref) => true);
+
+final hideAmountsOnStartupProvider = StreamProvider<bool>((ref) {
+  return ref
+      .watch(daoProvider)
+      .watchSetting(hideAmountsOnStartupKey)
+      .map((value) => value == 'true');
+});
 
 /// 总览页焦点滚轮卡的每面停留时长（毫秒），存在 settings 表里。
 ///

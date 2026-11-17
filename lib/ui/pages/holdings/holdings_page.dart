@@ -16,6 +16,7 @@ import '../../../domain/closed_holding.dart';
 import '../../../domain/holding_category.dart';
 import '../../../domain/holding_cost.dart';
 import '../../../domain/holding_kline.dart';
+import '../../../domain/trade_stats.dart';
 import '../../components/app_bar_actions.dart';
 import '../../components/data_row.dart';
 import '../../components/delta_text.dart';
@@ -38,20 +39,20 @@ final _refreshingProvider = StateProvider<bool>((ref) => false);
 /// pair so header clicks can toggle a direction.
 enum HoldingSort {
   defaultOrder('默认'),
-  amountDesc('市值从高到低'),
-  amountAsc('市值从低到高'),
+  amountDesc('市值折合人民币从高到低'),
+  amountAsc('市值折合人民币从低到高'),
   nameAsc('名称 A-Z'),
   nameDesc('名称 Z-A'),
   symbolAsc('代码 A-Z'),
   symbolDesc('代码 Z-A'),
   quantityDesc('数量从高到低'),
   quantityAsc('数量从低到高'),
-  costDesc('成本从高到低'),
-  costAsc('成本从低到高'),
+  costDesc('成本单价从高到低'),
+  costAsc('成本单价从低到高'),
   priceDesc('最新价从高到低'),
   priceAsc('最新价从低到高'),
-  profitDesc('盈亏从高到低'),
-  profitAsc('盈亏从低到高');
+  profitDesc('盈亏折合人民币从高到低'),
+  profitAsc('盈亏折合人民币从低到高');
 
   const HoldingSort(this.label);
 
@@ -231,7 +232,7 @@ class _HoldingsPageState extends ConsumerState<HoldingsPage> {
     }
   });
 
-  List<HoldingRow> _sorted(List<HoldingRow> list) {
+  List<HoldingRow> _sorted(List<HoldingRow> list, Map<String, double> rates) {
     list = list
         .where(
           (h) =>
@@ -244,6 +245,43 @@ class _HoldingsPageState extends ConsumerState<HoldingsPage> {
         ? [...list]
         : list.where((h) => _matchesQuery(h, q)).toList();
     filtered = filtered.where(_matchesFilter).toList();
+    double? converted(HoldingRow h, double value) {
+      if (h.currency.toUpperCase() == 'CNY' || isFxLinked(h)) return value;
+      final rate = rates[h.currency.toUpperCase()];
+      if (rate == null || !rate.isFinite || rate <= 0) return null;
+      return value * rate;
+    }
+
+    int compareValues(double? a, double? b, {required bool descending}) {
+      if (a == null) return b == null ? 0 : 1;
+      if (b == null) return -1;
+      return descending ? b.compareTo(a) : a.compareTo(b);
+    }
+
+    double? profit(HoldingRow h) {
+      var value = _holdingMarketValue(h) - _holdingCost(h);
+      if (isHoldingClosed(h) &&
+          AssetType.fromStorage(h.assetType) != AssetType.liability) {
+        final txns =
+            ref.watch(transactionsByHoldingProvider(h.id)).valueOrNull ??
+            const <TransactionRow>[];
+        final amountBased = AssetType.fromStorage(h.assetType).isAmountBased;
+        value =
+            TradeStatsCalculator.realizedProfitByHolding(txns, {
+              h.id: h.costPrice,
+            }, amountBasedHoldingIds: amountBased ? {h.id} : const {})[h.id] ??
+            0;
+      }
+      return converted(h, value);
+    }
+
+    final profitValues = <int, double?>{};
+    if (_sort == HoldingSort.profitDesc || _sort == HoldingSort.profitAsc) {
+      for (final holding in filtered) {
+        profitValues[holding.id] = profit(holding);
+      }
+    }
+
     switch (_sort) {
       case HoldingSort.defaultOrder:
         if (!_isAssets) {
@@ -257,11 +295,19 @@ class _HoldingsPageState extends ConsumerState<HoldingsPage> {
         return [...active, ...closed];
       case HoldingSort.amountDesc:
         filtered.sort(
-          (a, b) => _holdingMarketValue(b).compareTo(_holdingMarketValue(a)),
+          (a, b) => compareValues(
+            converted(a, _holdingMarketValue(a)),
+            converted(b, _holdingMarketValue(b)),
+            descending: true,
+          ),
         );
       case HoldingSort.amountAsc:
         filtered.sort(
-          (a, b) => _holdingMarketValue(a).compareTo(_holdingMarketValue(b)),
+          (a, b) => compareValues(
+            converted(a, _holdingMarketValue(a)),
+            converted(b, _holdingMarketValue(b)),
+            descending: false,
+          ),
         );
       case HoldingSort.nameAsc:
         filtered.sort((a, b) => a.name.compareTo(b.name));
@@ -276,23 +322,47 @@ class _HoldingsPageState extends ConsumerState<HoldingsPage> {
       case HoldingSort.quantityAsc:
         filtered.sort((a, b) => a.quantity.compareTo(b.quantity));
       case HoldingSort.costDesc:
-        filtered.sort((a, b) => _holdingCost(b).compareTo(_holdingCost(a)));
+        filtered.sort(
+          (a, b) => compareValues(
+            AssetType.fromStorage(a.assetType).isAmountBased
+                ? null
+                : a.costPrice,
+            AssetType.fromStorage(b.assetType).isAmountBased
+                ? null
+                : b.costPrice,
+            descending: true,
+          ),
+        );
       case HoldingSort.costAsc:
-        filtered.sort((a, b) => _holdingCost(a).compareTo(_holdingCost(b)));
+        filtered.sort(
+          (a, b) => compareValues(
+            AssetType.fromStorage(a.assetType).isAmountBased
+                ? null
+                : a.costPrice,
+            AssetType.fromStorage(b.assetType).isAmountBased
+                ? null
+                : b.costPrice,
+            descending: false,
+          ),
+        );
       case HoldingSort.priceDesc:
         filtered.sort((a, b) => b.latestPrice.compareTo(a.latestPrice));
       case HoldingSort.priceAsc:
         filtered.sort((a, b) => a.latestPrice.compareTo(b.latestPrice));
       case HoldingSort.profitDesc:
         filtered.sort(
-          (a, b) => (_holdingMarketValue(b) - _holdingCost(b)).compareTo(
-            _holdingMarketValue(a) - _holdingCost(a),
+          (a, b) => compareValues(
+            profitValues[a.id],
+            profitValues[b.id],
+            descending: true,
           ),
         );
       case HoldingSort.profitAsc:
         filtered.sort(
-          (a, b) => (_holdingMarketValue(a) - _holdingCost(a)).compareTo(
-            _holdingMarketValue(b) - _holdingCost(b),
+          (a, b) => compareValues(
+            profitValues[a.id],
+            profitValues[b.id],
+            descending: false,
           ),
         );
     }
@@ -373,8 +443,8 @@ class _HoldingsPageState extends ConsumerState<HoldingsPage> {
   }
 
   Widget _buildList(List<HoldingRow> list, bool desktop) {
-    final visible = _sorted(list);
-    final rates = ref.watch(cnyRatesProvider).value ?? const {};
+    final rates = ref.watch(cnyRatesProvider).value ?? const <String, double>{};
+    final visible = _sorted(list, rates);
     final hide = ref.watch(hideAmountsProvider);
     final total = _isAssets
         ? assetTotalOf(visible, rates)
@@ -547,8 +617,8 @@ class _HoldingsPageState extends ConsumerState<HoldingsPage> {
       labelFor: (value) {
         if (_isAssets) return value.label;
         return switch (value) {
-          HoldingSort.amountDesc => '余额从高到低',
-          HoldingSort.amountAsc => '余额从低到高',
+          HoldingSort.amountDesc => '余额折合人民币从高到低',
+          HoldingSort.amountAsc => '余额折合人民币从低到高',
           _ => value.label,
         };
       },
@@ -765,15 +835,15 @@ class _HoldingRowCard extends ConsumerWidget {
                     ),
                   ),
                   if (todayProfit == null)
-                    Text('--', style: T.mono(size: 12, color: T.text3))
+                    Text('今日 --', style: T.mono(size: 12, color: T.text3))
                   else
                     FittedBox(
                       fit: BoxFit.scaleDown,
                       child: DeltaText(
                         value: todayPct ?? 0,
                         text: hide
-                            ? '****'
-                            : '${todayProfit >= 0 ? '+' : ''}${Formats.money(todayProfit, holding.currency)}',
+                            ? '今日 ****'
+                            : '今日 ${todayProfit >= 0 ? '+' : ''}${Formats.money(todayProfit, holding.currency)}',
                         size: 12,
                       ),
                     ),

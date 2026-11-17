@@ -41,6 +41,10 @@ void main() {
     await tester.tap(find.text('全部'));
     await tester.pumpAndSettle();
     expect(find.byType(LineChart), findsOneWidget);
+    expect(
+      tester.getBottomLeft(find.text('全部')).dy,
+      lessThan(tester.getTopLeft(find.byType(LineChart)).dy),
+    );
     expect(tester.takeException(), isNull);
   });
 
@@ -62,6 +66,10 @@ void main() {
     await tester.pump(const Duration(seconds: 1));
     final chart = find.byType(LineChart);
     expect(chart, findsOneWidget);
+    expect(
+      tester.getBottomLeft(find.text('全部')).dy,
+      lessThan(tester.getTopLeft(chart).dy),
+    );
     expect(tester.widget<LineChart>(chart).data.lineTouchData.handleBuiltInTouches, isFalse);
     // The Y-axis consumes 48px on desktop, so the middle point is 24px
     // to the right of the widget's geometric center.

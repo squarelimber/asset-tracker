@@ -76,6 +76,14 @@ EarningsBreakdown earningsBreakdownOf(
   for (final id in {...before.keys, ...after.keys}) {
     final a = after[id];
     final b = before[id];
+    // Cached snapshots can keep a closed holding with zero value and cost.
+    // Keep the closing day's change, then stop listing the empty position.
+    if ((a?.value ?? 0) == 0 &&
+        (a?.cost ?? 0) == 0 &&
+        (b?.value ?? 0) == 0 &&
+        (b?.cost ?? 0) == 0) {
+      continue;
+    }
     final identity = a ?? b!;
     final profit = previous == null
         ? 0.0
@@ -126,7 +134,10 @@ List<ProductEarnings> productsFromSnapshots(List<SnapshotRow> snapshots) {
         closed:
             ordered.isNotEmpty &&
             !(decoded[ordered.last.date] ?? []).any(
-              (h) => h.holdingId == entry.key && h.value > 0,
+              (h) =>
+                  !h.liability &&
+                  h.holdingId == entry.key &&
+                  (h.value != 0 || h.cost != 0),
             ),
         days: [
           for (final snapshot in ordered)
@@ -137,7 +148,7 @@ List<ProductEarnings> productsFromSnapshots(List<SnapshotRow> snapshots) {
 }
 
 HoldingDay _holdingDay(String date, int id, List<DayHoldingValue> values) {
-  final value = values.where((v) => v.holdingId == id).firstOrNull;
+  final value = values.where((v) => v.holdingId == id && !v.liability).firstOrNull;
   return HoldingDay(
     date: date,
     value: value?.value ?? 0,

@@ -35,7 +35,9 @@ class SettingsPage extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     return Scaffold(
       appBar: AppBar(
-        leading: Responsive.isDesktop(context) ? null : const SecondaryPageBackButton(),
+        leading: Responsive.isDesktop(context)
+            ? null
+            : const SecondaryPageBackButton(),
         title: const Text('设置'),
         actions: const [TerminalAppBarActions()],
       ),
@@ -121,9 +123,12 @@ class SettingsPage extends ConsumerWidget {
               ),
               const SizedBox(height: T.s4),
               const SectionHeader(label: '显示'),
-              Text('移动端收益焦点的轮播节奏，桌面端并列展示。', style: T.label()),
               const SizedBox(height: T.s3),
-              const TerminalCard(child: _SpotlightHoldRow()),
+              const TerminalCard(
+                child: Column(
+                  children: [_AmountVisibilityRow(), _SpotlightHoldRow()],
+                ),
+              ),
               const SizedBox(height: T.s4),
               if (!kIsWeb) const _NotificationsSection(),
               if (!kIsWeb) const SizedBox(height: T.s4),
@@ -345,17 +350,49 @@ class SettingsPage extends ConsumerWidget {
   }
 }
 
+class _AmountVisibilityRow extends ConsumerWidget {
+  const _AmountVisibilityRow();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final preference = ref.watch(hideAmountsOnStartupProvider);
+    return DataRow(
+      leading: const Icon(Icons.visibility_outlined),
+      title: '启动时隐藏金额',
+      subtitle: const Text('关闭时打开应用默认显示金额，小眼睛可临时切换'),
+      trailing: Switch(
+        value: preference.valueOrNull ?? false,
+        onChanged: preference.hasValue
+            ? (hide) async {
+                try {
+                  await ref
+                      .read(daoProvider)
+                      .setSetting(hideAmountsOnStartupKey, '$hide');
+                  if (!context.mounted) return;
+                  ref.read(hideAmountsProvider.notifier).state = hide;
+                } catch (_) {
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(
+                      context,
+                    ).showSnackBar(const SnackBar(content: Text('保存设置失败，请重试')));
+                  }
+                }
+              }
+            : null,
+      ),
+    );
+  }
+}
+
 /// 焦点滚轮卡的停留时长选择器。
-///
-/// 写进 settings 表（跨启动保留）；卡片自己也监听同一个 provider，所以
-/// 改完回到总览页就是新节奏，不用重进页面、也不用重启。
 class _SpotlightHoldRow extends ConsumerWidget {
   const _SpotlightHoldRow();
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final ms =
-        ref.watch(spotlightHoldMsProvider).valueOrNull ?? defaultSpotlightHoldMs;
+        ref.watch(spotlightHoldMsProvider).valueOrNull ??
+        defaultSpotlightHoldMs;
     return DataRow(
       leading: const Icon(Icons.slow_motion_video_outlined),
       title: '滚动卡停留时间',

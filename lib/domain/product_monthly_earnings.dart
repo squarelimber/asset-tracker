@@ -10,6 +10,7 @@ class ProductMonthEarning {
     required this.profit,
     this.rate,
     required this.days,
+    this.dailyProfits = const [],
     this.closed,
   });
 
@@ -26,8 +27,10 @@ class ProductMonthEarning {
   /// Number of days with data in the month.
   final int days;
 
-  /// The product's last data day falls inside this month (it was fully
-  /// sold out during the month).
+  /// Profit for each day with a position or a closing valuation.
+  final List<double> dailyProfits;
+
+  /// The product's final closing valuation falls inside this month.
   final bool? closed;
 }
 
@@ -127,36 +130,47 @@ class ProductEarningsCalculator {
   /// series. The first available day has no previous baseline, so its
   /// profit is 0 (same convention as the earnings calendar).
   ProductMonthEarning monthOf(ProductEarnings p, int year, int month) {
-    final prefix = '$year-${month.toString().padLeft(2, '0')}';
-    final idxs = <int>[];
+    final prefix = '$year-${month.toString().padLeft(2, '0')}-';
+    final dailyProfits = <double>[];
+    double? base;
+    int? lastIndex;
     for (var i = 0; i < p.daily.length; i++) {
-      if (p.daily[i].date.startsWith(prefix)) idxs.add(i);
-    }
-    if (idxs.isEmpty) {
-      return ProductMonthEarning(year: year, month: month, profit: 0, days: 0);
-    }
-    var profit = 0.0;
-    for (var k = 0; k < idxs.length; k++) {
-      final i = idxs[k];
       final cur = p.daily[i];
+      if (!cur.date.startsWith(prefix) || !_hasObservation(p, i)) continue;
       final prev = i > 0 ? p.daily[i - 1] : null;
-      if (prev == null) continue;
-      profit += (cur.value - cur.cost) - (prev.value - prev.cost);
+      base ??= cur.value;
+      lastIndex = i;
+      dailyProfits.add(
+        prev == null ? 0.0 : (cur.value - cur.cost) - (prev.value - prev.cost),
+      );
     }
-    final base = p.daily[idxs.first].value;
-    final lastIdx = idxs.last;
-    final lastDate = p.daily[lastIdx].date;
-    final closedInMonth =
-        p.closed && lastIdx == p.daily.length - 1 && lastDate.startsWith(prefix);
+    final profit = dailyProfits.fold(0.0, (sum, profit) => sum + profit);
+    var closedInMonth = false;
+    if (p.closed && lastIndex != null) {
+      final lastPosition = p.daily.lastIndexWhere(_hasPosition);
+      final closeIndex = lastPosition == p.daily.length - 1
+          ? lastPosition
+          : lastPosition + 1;
+      closedInMonth = lastIndex == closeIndex;
+    }
     return ProductMonthEarning(
       year: year,
       month: month,
       profit: profit,
-      rate: base <= 0 ? null : profit / base,
-      days: idxs.length,
+      rate: base == null || base <= 0 ? null : profit / base,
+      days: dailyProfits.length,
+      dailyProfits: dailyProfits,
       closed: closedInMonth ? true : null,
     );
   }
+
+  static bool _hasPosition(({String date, double value, double cost}) day) =>
+      day.value != 0 || day.cost != 0;
+
+  // Snapshots can pad the series with zero balances. A transition from a
+  // real position to zero still belongs to the day it was recorded.
+  static bool _hasObservation(ProductEarnings p, int i) =>
+      _hasPosition(p.daily[i]) || (i > 0 && _hasPosition(p.daily[i - 1]));
 
   /// All months of [year] that have data, in ascending order.
   List<ProductMonthEarning> yearOf(ProductEarnings p, int year) {
@@ -177,8 +191,9 @@ class ProductEarningsCalculator {
     if (months.isEmpty) return null;
     final firstPrefix =
         '$year-${months.first.month.toString().padLeft(2, '0')}-';
-    for (final d in p.daily) {
-      if (d.date.startsWith(firstPrefix)) {
+    for (var i = 0; i < p.daily.length; i++) {
+      final d = p.daily[i];
+      if (d.date.startsWith(firstPrefix) && _hasObservation(p, i)) {
         return d.value <= 0 ? null : yearlyProfit(months) / d.value;
       }
     }
@@ -200,9 +215,8 @@ class ProductEarningsCalculator {
 ///
 /// The replay runs forwards on (quantity, unit cost). The initial unit cost
 /// before the first flow is reconstructed from the current state by
-/// reversing the flows; when the holding is sold out the unit cost of the
-/// final emptying sell is unknown (0/0) and the per-unit sale price is used
-/// as a fallback.
+/// reversing the flows. For a full sale, the recorded sold principal or
+/// retained unit cost can restore the cost of the position before the sale.
 typedef _ReplayEvent = (
   DateTime day,
   TransactionType type,
@@ -210,6 +224,7 @@ typedef _ReplayEvent = (
   double amount,
   double costBasis, // amount that enters/leaves the cost basis for this leg
   int txnId,
+  double? soldPrincipal,
 );
 
 class HoldingReplay {
@@ -235,8 +250,13 @@ class HoldingReplay {
     final fromDay = DateTime(from.year, from.month, from.day);
     final toDay = DateTime(to.year, to.month, to.day);
 
+    final orderedFlows = flows.where((t) => t.holdingId == h.id).toList()
+      ..sort((a, b) {
+        final time = a.occurredAt.compareTo(b.occurredAt);
+        return time == 0 ? a.id.compareTo(b.id) : time;
+      });
     final events = <_ReplayEvent>[];
-    for (final t in flows) {
+    for (final t in orderedFlows) {
       final type = TransactionType.fromStorage(t.type);
       if (type != TransactionType.buy &&
           type != TransactionType.sell &&
@@ -244,14 +264,13 @@ class HoldingReplay {
           type != TransactionType.split) {
         continue;
       }
-      // A buy funded from a tracked cash holding moves only the principal
-      // the cash leg actually travelled (costMovedAmount); an unfunded buy
-      // adds the full purchase price. Without this the cash account's
-      // unrealized gain is re-booked as new cost on every
-      // 卖出回款 → 现金 → 再买入 cycle (mirrors TransactionService._applyBuy).
-      final costBasis = type == TransactionType.buy && t.cashSourceId != null
-          ? (t.costMovedAmount ?? t.amount)
-          : t.amount;
+      // A cash-funded or redemption-funded buy receives the principal
+      // recorded on the flow, which can differ from the amount paid.
+      final fundedBuy = type == TransactionType.buy &&
+          (t.cashSourceId != null || t.internalMove);
+      final costBasis = fundedBuy ? (t.costMovedAmount ?? t.amount) : t.amount;
+      final keepsPrincipal = type == TransactionType.sell &&
+          (t.cashTargetId != null || t.internalMove);
       events.add((
         DateTime(t.occurredAt.year, t.occurredAt.month, t.occurredAt.day),
         type,
@@ -259,9 +278,9 @@ class HoldingReplay {
         t.amount,
         costBasis,
         t.id,
+        keepsPrincipal ? t.costMovedAmount : null,
       ));
     }
-    events.sort((a, b) => a.$1.compareTo(b.$1)); // oldest first
 
     // Reconstruct the initial (quantity, unit cost) before the earliest
     // flow by reversing the flows from the current state.
@@ -278,7 +297,14 @@ class HoldingReplay {
           q = qBefore;
         case TransactionType.sell:
           if (q <= 0 && e.$3 > 0) {
-            u = e.$4 / e.$3; // per-unit sale price fallback
+            final soldPrincipal = e.$7;
+            if (soldPrincipal != null) {
+              u = soldPrincipal / e.$3;
+            } else if (i == events.length - 1 && h.costPrice > 0) {
+              u = h.costPrice;
+            } else {
+              u = e.$4 / e.$3;
+            }
           }
           q += e.$3;
         case TransactionType.dividend:
@@ -301,33 +327,27 @@ class HoldingReplay {
     var i = 0;
     var curQ = q;
     var curU = u;
-    void captureIfSell(_ReplayEvent e, double qtyNow, double unitNow) {
+    void captureIfSell(_ReplayEvent e, double unitNow) {
       if (capturedSellPrincipal == null || e.$2 != TransactionType.sell) return;
       if (e.$3 <= 0) return;
       // Principal of the sold shares = qty x unit cost at sale time, so the
       // receiving cash account credits exactly this (not the full proceeds).
-      capturedSellPrincipal[e.$6] = e.$3 * unitNow;
+      capturedSellPrincipal[e.$6] = e.$7 ?? e.$3 * unitNow;
     }
 
-    while (day.isBefore(toDay)) {
+    while (!day.isAfter(toDay)) {
       while (i < events.length && !events[i].$1.isAfter(day)) {
-        captureIfSell(events[i], curQ, curU);
+        captureIfSell(events[i], curU);
         (curQ, curU) = _apply(events[i], curQ, curU);
         i++;
       }
-      result[todayKey(day)] = (curQ, curQ * curU);
-      day = day.add(const Duration(days: 1));
+      // Once the last flow is applied, the ledger confirms the position is
+      // empty. Floating-point roundoff can otherwise leave tiny shares.
+      result[todayKey(day)] = i == events.length && h.quantity == 0
+          ? (0.0, 0.0)
+          : (curQ, curQ * curU);
+      day = DateTime(day.year, day.month, day.day + 1);
     }
-    // The window's last day: apply only events that happen on [toDay] —
-    // events after the window must NOT leak in, otherwise the final day's
-    // position equals today's actual holdings and past years show phantom
-    // profits/losses on their last month.
-    while (i < events.length && !events[i].$1.isAfter(toDay)) {
-      captureIfSell(events[i], curQ, curU);
-      (curQ, curU) = _apply(events[i], curQ, curU);
-      i++;
-    }
-    result[todayKey(toDay)] = (curQ, curQ * curU);
     return result;
   }
 

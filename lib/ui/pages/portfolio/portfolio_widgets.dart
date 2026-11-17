@@ -550,6 +550,21 @@ class _NetWorthChartState extends ConsumerState<NetWorthChart> {
             ],
           ),
           const SizedBox(height: T.s2),
+          Wrap(
+            spacing: T.s1,
+            runSpacing: T.s1,
+            children: [
+              for (final option in RangeOption.values)
+                TerminalChoice(
+                  label: option.label,
+                  selected: _range == option,
+                  onPressed: option == RangeOption.custom
+                      ? _pickCustomRange
+                      : () => setState(() => _range = option),
+                ),
+            ],
+          ),
+          const SizedBox(height: T.s2),
           if (_range == RangeOption.custom)
             Padding(
               padding: const EdgeInsets.only(bottom: T.s2),
@@ -778,21 +793,6 @@ class _NetWorthChartState extends ConsumerState<NetWorthChart> {
                 ],
               ),
             ),
-          ),
-          const SizedBox(height: T.s2),
-          Wrap(
-            spacing: T.s1,
-            runSpacing: T.s1,
-            children: [
-              for (final option in RangeOption.values)
-                TerminalChoice(
-                  label: option.label,
-                  selected: _range == option,
-                  onPressed: option == RangeOption.custom
-                      ? _pickCustomRange
-                      : () => setState(() => _range = option),
-                ),
-            ],
           ),
         ],
       ),

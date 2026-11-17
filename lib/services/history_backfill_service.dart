@@ -159,6 +159,7 @@ class HistoryBackfillService {
   /// never revisits it, so every device rebuilds the whole window once.
   static const _tencentGatewayMarker = 'backfill_v11_tencent_history_gateway';
   static const _valuationMarker = 'backfill_v12_recorded_holding_values';
+  static const _transactionReplayMarker = 'backfill_v13_transaction_replay';
 
   /// Date (yyyy-MM-dd) of the previous successful run. A light run re-derives
   /// every day from this date through today, because any of them may have
@@ -415,7 +416,8 @@ class HistoryBackfillService {
         await _dao.getSetting(_smoothShareReplayMarker) == null ||
         await _dao.getSetting(_sinaHistoryEndpointMarker) == null ||
         await _dao.getSetting(_tencentGatewayMarker) == null ||
-        await _dao.getSetting(_valuationMarker) == null;
+        await _dao.getSetting(_valuationMarker) == null ||
+        await _dao.getSetting(_transactionReplayMarker) == null;
     // A type switch that crossed the amount-based boundary changes the
     // *meaning* of the stored numbers (see holding_type_conversion.dart); the
     // days written under the old semantics must not survive a light run (a
@@ -485,6 +487,8 @@ class HistoryBackfillService {
           final double value;
           if (type.isAmountBased) {
             value = smoothValues[h.id]?[key] ?? h.quantity;
+            // A fully withdrawn balance is still a valid valuation.
+            hasPrice = true;
           } else {
             final price = smoothCalc.sharePrice(h, day, windowStart, current);
             // The replayed quantity, so days held before a redemption keep
@@ -492,8 +496,8 @@ class HistoryBackfillService {
             final replayed = replays[h.id]?[key];
             final qty = replayed?.$1 ?? h.quantity;
             value = qty * price;
+            if (qty == 0 || value > 0) hasPrice = true;
           }
-          if (value > 0) hasPrice = true;
           assets += value * valueRateOf(h, cnyRates);
           // The historical cost is the replayed principal (not the current
           // costPrice), so days before a repayment/borrowing keep their
@@ -633,6 +637,10 @@ class HistoryBackfillService {
       );
       await _dao.setSetting(
         _valuationMarker,
+        '${current.millisecondsSinceEpoch}',
+      );
+      await _dao.setSetting(
+        _transactionReplayMarker,
         '${current.millisecondsSinceEpoch}',
       );
     }

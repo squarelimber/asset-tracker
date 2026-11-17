@@ -21,6 +21,7 @@ import '../../components/key_shortcuts.dart';
 import '../../components/rotating_spotlight_card.dart';
 import '../../components/session_chip.dart';
 import '../../tokens.dart';
+import 'day_detail_sheet.dart';
 import 'portfolio_widgets.dart';
 import 'portfolio_welcome.dart';
 
@@ -330,6 +331,12 @@ class _KpiRow extends ConsumerWidget {
       todayPct: todayEarning?.pct,
       onOpenEarnings: () => context.push(
         '/earnings-calendar?date=${Formats.date(DateTime.now())}',
+      ),
+      onOpenTodayDetail: () => showModalBottomSheet<void>(
+        context: context,
+        showDragHandle: true,
+        isScrollControlled: true,
+        builder: (context) => DayDetailSheet(date: DateTime.now()),
       ),
       hidden: hidden,
       onToggleHidden: () {

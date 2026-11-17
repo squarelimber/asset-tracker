@@ -1,6 +1,7 @@
 import 'package:drift/drift.dart';
 
 import '../core/enums.dart';
+import '../core/history_sync.dart';
 import '../data/asset_dao.dart';
 import '../data/database.dart';
 import 'holding_cost.dart';
@@ -176,9 +177,7 @@ class TransactionService {
         throw ArgumentError('发生日期不能晚于今天');
       }
       if (amount <= 0) throw ArgumentError('金额必须大于 0');
-      if ((type == TransactionType.buy ||
-              type == TransactionType.sell ||
-              type == TransactionType.split) &&
+      if ((type == TransactionType.buy || type == TransactionType.sell) &&
           (quantity == null || quantity <= 0)) {
         throw ArgumentError('数量必须大于 0');
       }
@@ -251,7 +250,9 @@ class TransactionService {
           occurredAt: occurredAt,
           note: note == null || note.isEmpty ? const Value.absent() : Value(note),
           costMovedAmount: Value(movedCost),
-          internalMove: const Value(false),
+          internalMove: Value(
+            type == TransactionType.sell && cashTargetId != null,
+          ),
         ));
       });
       return TransactionResult.okWith(movedCost);
@@ -259,6 +260,61 @@ class TransactionService {
       return TransactionResult.fail(_recordFailMessage(e));
     }
   }
+
+  /// Creates the position and its opening flows together. A rejected debit
+  /// must roll back the new position as well, so the user can safely retry.
+  Future<int> createHolding(
+    HoldingsCompanion draft, {
+    int? redemptionSourceId,
+    double redemptionAmount = 0,
+    double? price,
+  }) => _dao.transaction(() async {
+    final id = await _dao.createHolding(draft);
+    final holding = await _getHolding(id);
+    final type = AssetType.fromStorage(holding.assetType);
+    final when = holding.purchaseDate ?? holding.createdAt;
+    if (redemptionSourceId != null) {
+      if (type == AssetType.liability || holding.quantity <= 0) {
+        throw ArgumentError('赎回购买需指定有余额的资产持仓');
+      }
+      final result = await recordRedemption(
+        sourceHoldingId: redemptionSourceId,
+        amount: redemptionAmount,
+        currency: holding.currency,
+        occurredAt: when,
+        note: '赎回购买 ${holding.name}',
+        targetHoldingId: id,
+        targetQuantity: holding.quantity,
+        targetPrice: price,
+      );
+      if (!result.ok) throw ArgumentError(result.message);
+      await _dao.updateHolding(
+        holding.copyWith(
+          costPrice: type.isAmountBased
+              ? result.movedCost
+              : result.movedCost / holding.quantity,
+          costRecorded: true,
+        ),
+      );
+    } else if (holding.quantity > 0) {
+      final result = await recordHoldingCreation(
+        accountId: holding.accountId,
+        holdingId: id,
+        type: type,
+        quantity: holding.quantity,
+        price: price,
+        amount: type.isAmountBased
+            ? holding.quantity
+            : holding.quantity * holding.costPrice,
+        currency: holding.currency,
+        occurredAt: when,
+        note: '新建持仓：${holding.name}',
+      );
+      if (!result.ok) throw ArgumentError(result.message);
+    }
+    await _dao.setSetting(historySyncDirtyKey, historyDirtySet);
+    return id;
+  });
 
   /// Records the **initial** flow behind a newly created holding.
   ///
@@ -296,9 +352,12 @@ class TransactionService {
       if (quantity <= 0 && holding.quantity <= 0 && amount <= 0) {
         return TransactionResult.success;
       }
-      if (amount <= 0) throw ArgumentError('金额必须大于 0');
       final isAmountAsset = type.isAmountBased;
       final isLiability = type == AssetType.liability;
+      if (!amount.isFinite || amount < 0 ||
+          (amount == 0 && (isAmountAsset || isLiability))) {
+        throw ArgumentError('金额无效');
+      }
       final txnType = isLiability
           ? TransactionType.transferOut
           : (isAmountAsset ? TransactionType.income : TransactionType.buy);
@@ -318,7 +377,7 @@ class TransactionService {
         currency: Value(currency),
         occurredAt: occurredAt,
         note: note == null || note.isEmpty ? const Value.absent() : Value(note),
-        costMovedAmount: Value(amount),
+        costMovedAmount: Value(isAmountAsset ? effectiveCostOf(holding) : amount),
         internalMove: const Value(false),
       ));
       return TransactionResult.success;
@@ -355,20 +414,10 @@ class TransactionService {
       if (sourceHoldingId == targetHoldingId) {
         throw ArgumentError('资金来源与目标产品不能相同');
       }
-      if (amount <= 0) throw ArgumentError('金额必须大于 0');
-      if (targetQuantity <= 0) throw ArgumentError('买入数量必须大于 0');
-
-      final source = await _getHolding(sourceHoldingId);
-      final target = await _getHolding(targetHoldingId);
-      final sourceType = AssetType.fromStorage(source.assetType);
-      if (sourceType == AssetType.liability) {
-        throw ArgumentError('负债不能作为资金来源');
+      if (!amount.isFinite || amount <= 0) throw ArgumentError('金额必须大于 0');
+      if (!targetQuantity.isFinite || targetQuantity <= 0) {
+        throw ArgumentError('买入数量必须大于 0');
       }
-      if (source.currency != target.currency) {
-        throw ArgumentError('资金来源与目标产品币种不一致');
-      }
-
-      final (unit, sourceQty) = _redemptionOf(source, sourceType, amount);
 
       // The cost that leaves the source travels into the target: for a
       // share-based source it is the redeemed units' principal
@@ -382,6 +431,14 @@ class TransactionService {
       // estimates.
       double moved = 0;
       await _dao.transaction(() async {
+        final source = await _getHolding(sourceHoldingId);
+        final target = await _getHolding(targetHoldingId);
+        final sourceType = AssetType.fromStorage(source.assetType);
+        if (sourceType == AssetType.liability) {
+          throw ArgumentError('负债不能作为资金来源');
+        }
+        _assertSameCurrency(source, target);
+        final (unit, sourceQty) = _redemptionOf(source, sourceType, amount);
         moved = await _applyRedemption(source, sourceType, amount, sourceQty);
         await _applyBuy(
           holdingId: targetHoldingId,
@@ -452,17 +509,17 @@ class TransactionService {
     double? targetPrice,
   }) async {
     try {
-      if (amount <= 0) throw ArgumentError('金额必须大于 0');
-      final source = await _getHolding(sourceHoldingId);
-      final sourceType = AssetType.fromStorage(source.assetType);
-      if (sourceType == AssetType.liability) {
-        throw ArgumentError('负债不能赎回');
-      }
-      final (unit, sourceQty) = _redemptionOf(source, sourceType, amount);
+      if (!amount.isFinite || amount <= 0) throw ArgumentError('金额必须大于 0');
       final when = occurredAt ?? DateTime.now();
 
       double moved = 0;
       await _dao.transaction(() async {
+        final source = await _getHolding(sourceHoldingId);
+        final sourceType = AssetType.fromStorage(source.assetType);
+        if (sourceType == AssetType.liability) {
+          throw ArgumentError('负债不能赎回');
+        }
+        final (unit, sourceQty) = _redemptionOf(source, sourceType, amount);
         moved = await _applyRedemption(source, sourceType, amount, sourceQty);
         await _dao.createTransaction(TransactionsCompanion.insert(
           accountId: source.accountId,
@@ -484,6 +541,7 @@ class TransactionService {
         ));
         if (targetHoldingId != null && targetQuantity != null && targetQuantity > 0) {
           final target = await _getHolding(targetHoldingId);
+          _assertSameCurrency(source, target);
           await _dao.createTransaction(TransactionsCompanion.insert(
             accountId: target.accountId,
             holdingId: Value(targetHoldingId),
@@ -531,7 +589,9 @@ class TransactionService {
       throw ArgumentError(
           '资金来源「${source.name}」可用市值不足（可用 ${_fmt(available)}）');
     }
-    return (unit, amount / unit);
+    // Inverting quantity * unit can round down and leave a phantom holding.
+    final quantity = amount >= available ? source.quantity : amount / unit;
+    return (unit, quantity);
   }
 
   /// Applies the redemption to [source]: amount-based debits balance and
@@ -992,6 +1052,14 @@ class TransactionService {
         : txn.amount;
     if (qty > holding.quantity) {
       throw ArgumentError('当前持仓数量不足，无法撤销该买入');
+    }
+    if (AssetType.fromStorage(holding.assetType).isAmountBased) {
+      await _applyCashMove(
+        holdingId,
+        -txn.amount,
+        invested: true,
+        costCredit: -basis,
+      );
     } else {
       final newQty = holding.quantity - qty;
       // A full reversal keeps the unit cost (same invariant as a full

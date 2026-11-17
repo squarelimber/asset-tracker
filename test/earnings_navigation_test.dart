@@ -90,6 +90,17 @@ void main() {
           ),
           findsOneWidget,
         );
+        await tester.tap(find.text('今日盈亏'));
+        for (var i = 0; i < 3; i++) {
+          await tester.pump(const Duration(milliseconds: 300));
+        }
+        expect(find.byType(DayDetailSheet), findsOneWidget);
+        expect(find.text('${Formats.date(now)} 当日收益明细'), findsOneWidget);
+        expect(find.text('日历收益 +¥10.00'), findsOneWidget);
+        Navigator.of(tester.element(find.byType(DayDetailSheet))).pop();
+        for (var i = 0; i < 3; i++) {
+          await tester.pump(const Duration(milliseconds: 300));
+        }
         if (width < 1100) {
           await tester.tap(find.byTooltip('收益日历'));
         } else {
@@ -108,6 +119,43 @@ void main() {
       },
     );
   }
+
+  testWidgets('calendar distinguishes zero profit from missing snapshots', (
+    tester,
+  ) async {
+    final day = DateTime.now();
+    final snapshot = SnapshotRow(
+      date: Formats.date(day),
+      currency: 'CNY',
+      totalValue: 1000,
+      totalCost: 1000,
+      liabilities: 0,
+      createdAt: day,
+    );
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          snapshotsProvider.overrideWith((ref) => Stream.value([snapshot])),
+          historySyncProvider.overrideWith((ref) async => null),
+          hideAmountsProvider.overrideWith((ref) => false),
+        ],
+        child: const MaterialApp(home: EarningsCalendarPage()),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('+0.00'), findsOneWidget);
+
+    await tester.tap(find.byIcon(Icons.chevron_right));
+    await tester.pumpAndSettle();
+    expect(find.text('暂无快照'), findsOneWidget);
+    expect(find.text('+0.00'), findsNothing);
+    await tester.tap(find.text('年'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byIcon(Icons.chevron_right));
+    await tester.pumpAndSettle();
+    expect(find.text('暂无快照'), findsOneWidget);
+    expect(find.text('+0.00'), findsNothing);
+  });
 
   testWidgets(
     'trend sheet shows daily change, and masks the whole explanation',

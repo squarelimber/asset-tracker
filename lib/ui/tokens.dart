@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 /// Terminal design tokens (dark only).
@@ -73,11 +75,14 @@ class T {
   static Color changeColor(double value) =>
       value == 0 ? text2 : (value > 0 ? up : down);
 
-  /// Heatmap fill for [value] within [min, max]; zero or degenerate range
-  /// is transparent.
+  /// Uses a common scale on both sides of zero so equally large gains and
+  /// losses have the same intensity. Keep fills dark enough for light text.
   static Color heat(double value, double min, double max) {
-    if (value == 0 || max <= min) return Colors.transparent;
-    final t = ((value - min) / (max - min)).clamp(0.0, 1.0);
-    return (value >= 0 ? up : down).withValues(alpha: 0.12 + 0.55 * t);
+    final scale = math.max(min.abs(), max.abs());
+    if (value == 0 || !value.isFinite || !scale.isFinite || scale == 0) {
+      return Colors.transparent;
+    }
+    final intensity = (value.abs() / scale).clamp(0.0, 1.0);
+    return (value > 0 ? up : down).withValues(alpha: 0.12 + 0.22 * intensity);
   }
 }

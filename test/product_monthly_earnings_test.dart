@@ -39,6 +39,8 @@ TransactionRow _txn({
   double amount = 0,
   double? quantity,
   int holdingId = 1,
+  double? costMovedAmount,
+  bool internalMove = false,
 }) {
   return TransactionRow(
     id: id,
@@ -54,7 +56,8 @@ TransactionRow _txn({
     occurredAt: at,
     note: null,
     costMoved: true,
-    internalMove: false,
+    internalMove: internalMove,
+    costMovedAmount: costMovedAmount,
     updatedAt: at,
   );
 }
@@ -64,6 +67,70 @@ void main() {
   const calc = ProductEarningsCalculator();
 
   group('HoldingReplay', () {
+    test('same-day liquidation and repurchase follow transaction timestamps', () {
+      final captured = <int, double>{};
+      final history = replay.replay(
+        _holding(quantity: 20, costPrice: 4),
+        [
+          _txn(id: 1, type: 'buy', at: DateTime(2026, 1, 1), amount: 100, quantity: 100),
+          _txn(id: 2, type: 'buy', at: DateTime(2026, 1, 3, 15), amount: 80, quantity: 20),
+          _txn(id: 3, type: 'sell', at: DateTime(2026, 1, 3, 10), amount: 150, quantity: 100),
+        ],
+        from: DateTime(2026, 1, 1),
+        to: DateTime(2026, 1, 4),
+        capturedSellPrincipal: captured,
+      );
+      expect(history['2026-01-02'], (100.0, 100.0));
+      expect(history['2026-01-03'], (20.0, 80.0));
+      expect(captured[3], 100);
+    });
+
+    test('cashless funded buy replays the transferred principal, including zero', () {
+      for (final principal in [0.0, 120.0]) {
+        final history = replay.replay(
+          _holding(quantity: 10, costPrice: principal / 10),
+          [
+            _txn(id: 1, type: 'buy', at: DateTime(2026, 1, 3), amount: 150,
+                quantity: 10, costMovedAmount: principal, internalMove: true),
+          ],
+          from: DateTime(2026, 1, 2),
+          to: DateTime(2026, 1, 4),
+        );
+        expect(history['2026-01-02'], (0.0, 0.0));
+        expect(history['2026-01-03'], (10.0, principal));
+      }
+    });
+
+    test('legacy full sale uses the stored cost of an opening position', () {
+      final captured = <int, double>{};
+      final history = replay.replay(
+        _holding(quantity: 0, costPrice: 9),
+        [_txn(id: 1, type: 'sell', at: DateTime(2026, 1, 3), amount: 1200, quantity: 100)],
+        from: DateTime(2026, 1, 2),
+        to: DateTime(2026, 1, 4),
+        capturedSellPrincipal: captured,
+      );
+      expect(history['2026-01-02'], (100.0, 900.0));
+      expect(history['2026-01-03'], (0.0, 0.0));
+      expect(captured[1], 900);
+    });
+
+    test('full sale removes replay residue once the closing flow is included', () {
+      const buys = [8863.74899101498, 9371.783504209357, 7110.385593650861];
+      final flows = [
+        for (final (index, qty) in buys.indexed)
+          _txn(id: index + 1, type: 'buy', at: DateTime(2026, 1, index + 1),
+              amount: qty, quantity: qty),
+        _txn(id: 4, type: 'sell', at: DateTime(2026, 1, 4),
+            amount: 30000, quantity: 25345.918088875198),
+      ];
+      final history = replay.replay(_holding(), flows,
+          from: DateTime(2026, 1, 3), to: DateTime(2026, 1, 5));
+      expect(history['2026-01-03']!.$1, closeTo(25345.918088875198, 1e-9));
+      expect(history['2026-01-04'], (0.0, 0.0));
+      expect(history['2026-01-05'], (0.0, 0.0));
+    });
+
     test('simple buy keeps the position across the window', () {
       final h = _holding(quantity: 100, costPrice: 10);
       final r = replay.replay(

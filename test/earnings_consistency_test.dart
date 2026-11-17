@@ -98,6 +98,27 @@ void main() {
     expect(detail.verified, isTrue);
   });
 
+  test('daily detail stops listing a closed ETF after its closing day', () {
+    final snapshots = [
+      _snapshot('2026-11-11', [_holding(1, 1100, 1000), _holding(2, 900, 900)]),
+      _snapshot('2026-11-12', [_holding(1, 0, 0), _holding(2, 2040, 1900)]),
+      _snapshot('2026-11-13', [_holding(1, 0, 0), _holding(2, 2040, 1900)]),
+      _snapshot('2026-11-14', [_holding(1, 0, 0), _holding(2, 2050, 1900)]),
+    ];
+    final closingDay = earningsBreakdownOf(snapshots, '2026-11-12');
+    expect(closingDay.rows.singleWhere((row) => row.holdingId == 1).profit, -100);
+    expect(closingDay.detailTotal, 40);
+    expect(closingDay.verified, isTrue);
+
+    for (final (date, profit) in [('2026-11-13', 0), ('2026-11-14', 10)]) {
+      final detail = earningsBreakdownOf(snapshots, date);
+      expect(detail.rows.single.holdingId, 2);
+      expect(detail.rows.single.profit, profit);
+      expect(detail.detailTotal, detail.profit);
+      expect(detail.verified, isTrue);
+    }
+  });
+
   test('transfers move value and cost together without creating earnings', () {
     final detail = earningsBreakdownOf([
       _snapshot('2026-11-04', [_holding(1, 1000, 900), _holding(2, 0, 0)]),
@@ -143,6 +164,58 @@ void main() {
       products.fold(0.0, (v, p) => v + calc.yearlyProfit(calc.yearOf(p, 2026))),
       const DailyEarningsCalculator().yearOf(daily, 2026).total,
     );
+  });
+
+  test('product calendar keeps closing month and skips inactive months', () {
+    final snapshots = [
+      _snapshot('2026-01-31', [_holding(1, 0, 0), _holding(2, 900, 900)]),
+      _snapshot('2026-02-01', [_holding(1, 0, 0), _holding(2, 900, 900)]),
+      _snapshot('2026-02-02', [_holding(1, 1000, 1000), _holding(2, 900, 900)]),
+      _snapshot('2026-02-28', [_holding(1, 1120, 1000), _holding(2, 900, 900)]),
+      _snapshot('2026-03-01', [_holding(1, 0, 0), _holding(2, 2030, 1900)]),
+      _snapshot('2026-03-02', [_holding(1, 0, 0), _holding(2, 2030, 1900)]),
+      _snapshot('2026-04-01', [_holding(2, 2030, 1900)]),
+    ];
+    const calc = ProductEarningsCalculator();
+    final products = productsFromSnapshots(snapshots);
+    final etf = products.firstWhere((p) => p.name == '产品1');
+    expect(etf.closed, isTrue);
+    expect(calc.yearOf(etf, 2026).map((m) => m.month), [2, 3]);
+    final holdingMonth = calc.monthOf(etf, 2026, 2);
+    expect(holdingMonth.dailyProfits, [0, 120]);
+    expect(holdingMonth.rate, 0.12);
+    expect(holdingMonth.closed, isNull);
+    final closingMonth = calc.monthOf(etf, 2026, 3);
+    expect(closingMonth.dailyProfits, [-120]);
+    expect(closingMonth.closed, isTrue);
+    expect(calc.yearlyRate(calc.yearOf(etf, 2026), etf, 2026), 0);
+    final marchProfit = products.fold(
+      0.0,
+      (sum, p) => sum + calc.monthOf(p, 2026, 3).profit,
+    );
+    expect(marchProfit, 10);
+    expect(marchProfit, earningsBreakdownOf(snapshots, '2026-03-01').profit);
+
+    final reopened = productsFromSnapshots([
+      ...snapshots,
+      _snapshot('2026-05-01', [_holding(1, 520, 500), _holding(2, 2030, 1900)]),
+    ]).firstWhere((p) => p.name == '产品1');
+    expect(reopened.closed, isFalse);
+    expect(calc.yearOf(reopened, 2026).map((m) => m.month), [2, 3, 5]);
+    expect(calc.monthOf(reopened, 2026, 5).profit, 20);
+  });
+
+  test('product earnings exclude a holding after reclassification as debt', () {
+    final snapshots = [
+      _snapshot('2026-03-01', [_holding(1, 110, 100)]),
+      _snapshot('2026-03-02', [_holding(1, 180, 0, debt: true)]),
+      _snapshot('2026-03-03', [_holding(1, 300, 0, debt: true)]),
+    ];
+    final product = productsFromSnapshots(snapshots).single;
+    final month = const ProductEarningsCalculator().monthOf(product, 2026, 3);
+    expect(product.closed, isTrue);
+    expect(month.dailyProfits, [0, -10]);
+    expect(month.profit, earningsBreakdownOf(snapshots, '2026-03-02').profit);
   });
 
   test(

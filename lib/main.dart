@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'app/app.dart';
 import 'app/providers.dart';
+import 'core/ui_prefs.dart';
 import 'data/asset_dao.dart';
 import 'data/database.dart';
 import 'services/alert_notification_service.dart';
@@ -15,9 +16,12 @@ import 'sync/sync_service.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   AppDatabase db;
+  bool hideAmountsOnStartup;
   try {
     db = AppDatabase();
     await DataMigrationService(db).run();
+    hideAmountsOnStartup =
+        await AssetDao(db).getSetting(hideAmountsOnStartupKey) == 'true';
   } catch (e) {
     // A corrupt or unreadable database must not leave a dead app: show a
     // recoverable error screen instead of crashing before the first frame.
@@ -30,7 +34,10 @@ Future<void> main() async {
   await _autoSyncIfConfigured(AssetDao(db));
   runApp(
     ProviderScope(
-      overrides: [databaseProvider.overrideWithValue(db)],
+      overrides: [
+        databaseProvider.overrideWithValue(db),
+        hideAmountsProvider.overrideWith((ref) => hideAmountsOnStartup),
+      ],
       child: const AssetTrackerApp(),
     ),
   );
@@ -42,6 +49,7 @@ Future<void> main() async {
     unawaited(_checkAlerts(AssetDao(db)));
   });
 }
+
 /// Minimal error screen shown when the database cannot be opened or
 /// migrated. The user can clear app data to start fresh.
 class _FatalStartupErrorApp extends StatelessWidget {

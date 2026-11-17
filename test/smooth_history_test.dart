@@ -1,3 +1,4 @@
+import 'package:drift/drift.dart' show Value;
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:asset_tracker/data/database.dart';
@@ -55,6 +56,49 @@ TransactionRow _income({
 
 void main() {
   const calc = SmoothHistoryCalculator();
+
+  test('full redemption preserves realized balance on the transfer date', () {
+    final from = DateTime(2026, 1, 1);
+    final tradeDay = DateTime(2026, 1, 5);
+    final to = DateTime(2026, 1, 8);
+    for (final amount in [80.0, 120.0]) {
+      final buy = _income(id: 1, at: tradeDay, amount: amount, targetId: 1)
+          .copyWith(
+            holdingId: const Value(1),
+            cashTargetId: const Value(null),
+            type: 'buy',
+            internalMove: true,
+            costMovedAmount: const Value(100),
+          );
+      final sell = buy.copyWith(type: 'sell');
+      final source = _amountHolding(quantity: 0, cost: 0);
+      final target = _amountHolding(quantity: amount, cost: 100);
+      final sourceValues = calc.amountHistory(source, [sell], from: from, to: to, today: to);
+      final targetValues = calc.amountHistory(target, [buy], from: from, to: to, today: to);
+      final targetCost = calc.amountPrincipal(target, [buy], from: from, to: to, today: to);
+      expect(targetValues['2026-01-04'], 0);
+      expect(targetCost['2026-01-04'], 0);
+      for (final day in ['2026-01-05', '2026-01-06', '2026-01-08']) {
+        expect(sourceValues[day], closeTo(0, 1e-9));
+        expect(targetValues[day], closeTo(amount, 1e-9));
+        expect(targetCost[day], 100);
+      }
+    }
+  });
+
+  test('cash dividend appears on its recorded day and needs no opening principal', () {
+    final tradeDay = DateTime(2026, 1, 5);
+    final to = DateTime(2026, 1, 8);
+    final holding = _amountHolding(quantity: 100, cost: 0).copyWith(costRecorded: true);
+    final dividend = _income(id: 1, at: tradeDay, amount: 100, targetId: 1)
+        .copyWith(type: 'dividend');
+    final history = calc.amountHistory(
+      holding, [dividend], from: DateTime(2026, 1, 1), to: to, today: to,
+    );
+    expect(history['2026-01-04'], 0);
+    expect(history['2026-01-05'], 100);
+    expect(history['2026-01-06'], 100);
+  });
 
   test('geometric interpolate hits start, middle and end', () {
     expect(geometricInterpolate(100, 121, 0, 10), closeTo(100, 1e-9));

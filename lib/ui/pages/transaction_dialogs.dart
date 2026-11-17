@@ -30,6 +30,7 @@ Future<void> showHoldingTransactionDialog(
   WidgetRef ref,
   HoldingRow holding,
 ) async {
+  final hidden = ref.read(hideAmountsProvider);
   final holdings = ref.read(holdingsProvider).value ?? const [];
   final type = AssetType.fromStorage(holding.assetType);
   // Share-like holdings trade by quantity × unit price (stocks, funds,
@@ -148,7 +149,7 @@ Future<void> showHoldingTransactionDialog(
             final amount = double.tryParse(amountCtrl.text.trim()) ?? 0;
             if (h.quantity + 1e-6 < amount) {
               return '资金来源「${h.name}」余额不足'
-                  '（可用 ${Formats.amount(h.quantity)}）';
+                  '（可用 ${hidden ? '****' : Formats.amount(h.quantity)}）';
             }
             return null;
           }
@@ -163,7 +164,7 @@ Future<void> showHoldingTransactionDialog(
           final amount = double.tryParse(amountCtrl.text.trim()) ?? 0;
           if (unit > 0 && h.quantity * unit + 1e-6 < amount) {
             return '资金来源「${h.name}」可用市值不足'
-                '（可用 ${Formats.amount(h.quantity * unit)}）';
+                '（可用 ${hidden ? '****' : Formats.amount(h.quantity * unit)}）';
           }
           return null;
         }
@@ -172,356 +173,347 @@ Future<void> showHoldingTransactionDialog(
     return null;
   }
 
+  var saving = false;
+  String? saveError;
   await showDialog<void>(
     context: context,
     builder: (context) => StatefulBuilder(
-      builder: (context, setState) => AlertDialog(
-      constraints: _dialogConstraints(context),
-      title: Text('记一笔 · ${holding.name}'),
-      content: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ValueListenableBuilder<TransactionType>(
-              valueListenable: txnType,
-              builder: (context, value, _) => SegmentedButton<TransactionType>(
-                segments: [
-                  for (final t in available)
-                    ButtonSegment(value: t, label: Text(t.label)),
-                ],
-                selected: {value},
-                onSelectionChanged: (s) => setState(() {
-                  final next = s.first;
-                  if (isShare && next != TransactionType.buy &&
-                      !cashHoldings.any((h) => h.id == cashId.value)) {
-                    // A share-based funding source is valid for a purchase,
-                    // but cannot receive a sale or dividend.
-                    cashId.value = null;
-                  }
-                  txnType.value = next;
-                }),
-              ),
-            ),
-            const SizedBox(height: 16),
-            if (isShare &&
-                txnType.value != TransactionType.dividend &&
-                txnType.value != TransactionType.split) ...[
-              if (txnType.value == TransactionType.sell) ...[
-                ValueListenableBuilder<TransactionType>(
-                  valueListenable: txnType,
-                  builder: (context, t, _) => Align(
-                    alignment: Alignment.centerRight,
-                    child: TextButton.icon(
-                      onPressed: () {
-                        // 全部卖出：数量 = 当前持仓，单价 = 最新价（无则成本价）。
-                        // 省去赎回大额份额时手动查净值/份额的麻烦。
-                        final unit = holding.latestPrice > 0
-                            ? holding.latestPrice
-                            : holding.costPrice;
-                        qtyCtrl.text = Formats.num(holding.quantity);
-                        priceCtrl.text = Formats.smartNum(unit);
-                        syncAmount(qtyCtrl, priceCtrl, amountCtrl);
-                      },
-                      icon: const Icon(Icons.select_all, size: 18),
-                      label: const Text('全部卖出'),
-                      style: TextButton.styleFrom(
-                        visualDensity: VisualDensity.compact,
-                        padding: const EdgeInsets.symmetric(horizontal: 8),
-                      ),
+      builder: (context, setState) => PopScope(
+        canPop: !saving,
+        child: AlertDialog(
+          constraints: _dialogConstraints(context),
+          title: Text('记一笔 · ${holding.name}'),
+          content: AbsorbPointer(
+            absorbing: saving,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  ValueListenableBuilder<TransactionType>(
+                    valueListenable: txnType,
+                    builder: (context, value, _) => SegmentedButton<TransactionType>(
+                      segments: [
+                        for (final t in available)
+                          ButtonSegment(value: t, label: Text(t.label)),
+                      ],
+                      selected: {value},
+                      onSelectionChanged: (s) => setState(() {
+                        final next = s.first;
+                        if (isShare && next != TransactionType.buy &&
+                            !cashHoldings.any((h) => h.id == cashId.value)) {
+                          // A share-based funding source is valid for a purchase,
+                          // but cannot receive a sale or dividend.
+                          cashId.value = null;
+                        }
+                        txnType.value = next;
+                      }),
                     ),
                   ),
-                ),
-                const SizedBox(height: 4),
-              ],
-              TerminalTextField(
-                controller: qtyCtrl,
-                label: '数量 / 份额 / 克数',
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                onChanged: (_) => syncAmount(qtyCtrl, priceCtrl, amountCtrl),
-              ),
-              const SizedBox(height: 12),
-              TerminalTextField(
-                controller: priceCtrl,
-                label: '单价',
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                onChanged: (_) => syncAmount(qtyCtrl, priceCtrl, amountCtrl),
-              ),
-              const SizedBox(height: 12),
-              TerminalTextField(
-                controller: amountCtrl,
-                label: '金额（自动 = 数量 × 单价，可改）',
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              ),
-              if (txnType.value == TransactionType.sell) ...[
-                const SizedBox(height: 8),
-                ValueListenableBuilder<TransactionType>(
-                  valueListenable: txnType,
-                  builder: (context, _, _) => Align(
-                    alignment: Alignment.centerLeft,
-                    child: Text(
-                      '预计落袋收益：${sellProfitText(qtyCtrl, priceCtrl, holding)}',
-                      style: T.label(size: 12, color: T.text2),
-                    ),
-                  ),
-                ),
-              ],
-            ] else ...[
-              ValueListenableBuilder<TransactionType>(
-                valueListenable: txnType,
-                builder: (context, t, _) => TerminalTextField(
-                  controller: amountCtrl,
-                  label: switch (t) {
-                    TransactionType.dividend => '分红金额',
-                    TransactionType.income => '收入金额',
-                    TransactionType.expense => '支出金额',
-                    TransactionType.transferIn => '转入金额',
-                    TransactionType.transferOut => '转出金额',
-                    TransactionType.consume => '消费金额',
-                    TransactionType.split => '折算比例',
-                    _ => '金额',
-                  },
-                  hint: t == TransactionType.split
-                      ? '如 2 = 1 份拆成 2 份'
-                      : null,
-                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                ),
-              ),
-            ],
-            const SizedBox(height: 12),
-            ValueListenableBuilder<TransactionType>(
-              valueListenable: txnType,
-              builder: (context, t, _) {
-                // Counterparty picker: only transfer-type rows have a source
-                // / destination. Income / expense (and consume / split) are
-                // sourceless — the amount simply moves in or out of the
-                // holding itself — so no dropdown is shown for them.
-                final dropdownHoldings = isShare
-                    ? (t == TransactionType.buy ? fundSources : cashHoldings)
-                    : (t == TransactionType.transferIn ||
-                            t == TransactionType.transferOut
-                        ? moneyHoldings
-                        : <HoldingRow>[]);
-                if (dropdownHoldings.isEmpty ||
-                    t == TransactionType.consume ||
-                    t == TransactionType.split) {
-                  return const SizedBox.shrink();
-                }
-                return Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    ValueListenableBuilder<int?>(
-                      valueListenable: cashId,
-                      builder: (context, value, _) => DropdownButtonFormField<int>(
-                        key: ValueKey(t),
-                        initialValue: value,
-                        decoration: terminalDecoration(counterpartyLabel(t, isShare)),
-                        items: [
-                          if (isShare &&
-                              (t == TransactionType.buy || t == TransactionType.sell))
-                            const DropdownMenuItem<int>(
-                              value: null,
-                              child: Text('不关联持仓'),
-                            ),
-                          for (final c in dropdownHoldings)
-                            DropdownMenuItem(
-                              value: c.id,
-                              child: Text(
-                                _sourceItemLabel(c),
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                        ],
-                        onChanged: (v) => cashId.value = v,
-                      ),
-                    ),
-                    if (isShare)
-                      ListenableBuilder(
-                        listenable: Listenable.merge([cashId, amountCtrl]),
-                        builder: (context, _) => Align(
-                          alignment: Alignment.centerLeft,
-                          child: Padding(
-                            padding: const EdgeInsets.only(top: 8),
-                            child: Text(
-                              t == TransactionType.buy
-                                  ? _buySourceHint(
-                                      cashId.value, holdings, amountCtrl.text)
-                                  : '不选则卖出回款不入账',
-                              style: T.label(size: 12, color: T.text2),
+                  const SizedBox(height: 16),
+                  if (isShare &&
+                      txnType.value != TransactionType.dividend &&
+                      txnType.value != TransactionType.split) ...[
+                    if (txnType.value == TransactionType.sell) ...[
+                      ValueListenableBuilder<TransactionType>(
+                        valueListenable: txnType,
+                        builder: (context, t, _) => Align(
+                          alignment: Alignment.centerRight,
+                          child: TextButton.icon(
+                            onPressed: () {
+                              // 全部卖出：数量 = 当前持仓，单价 = 最新价（无则成本价）。
+                              // 省去赎回大额份额时手动查净值/份额的麻烦。
+                              final unit = holding.latestPrice > 0
+                                  ? holding.latestPrice
+                                  : holding.costPrice;
+                              // Keep the exact quantity so selling all leaves no fractional balance.
+                              qtyCtrl.text = holding.quantity.toString();
+                              priceCtrl.text = unit.toString();
+                              syncAmount(qtyCtrl, priceCtrl, amountCtrl);
+                            },
+                            icon: const Icon(Icons.select_all, size: 18),
+                            label: const Text('全部卖出'),
+                            style: TextButton.styleFrom(
+                              visualDensity: VisualDensity.compact,
+                              padding: const EdgeInsets.symmetric(horizontal: 8),
                             ),
                           ),
                         ),
                       ),
+                      const SizedBox(height: 4),
+                    ],
+                    TerminalTextField(
+                      controller: qtyCtrl,
+                      label: '数量 / 份额 / 克数',
+                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      onChanged: (_) => syncAmount(qtyCtrl, priceCtrl, amountCtrl),
+                    ),
+                    const SizedBox(height: 12),
+                    TerminalTextField(
+                      controller: priceCtrl,
+                      label: '单价',
+                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      onChanged: (_) => syncAmount(qtyCtrl, priceCtrl, amountCtrl),
+                    ),
+                    const SizedBox(height: 12),
+                    TerminalTextField(
+                      controller: amountCtrl,
+                      label: '金额（自动 = 数量 × 单价，可改）',
+                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    ),
+                    if (txnType.value == TransactionType.sell) ...[
+                      const SizedBox(height: 8),
+                      ValueListenableBuilder<TransactionType>(
+                        valueListenable: txnType,
+                        builder: (context, _, _) => Align(
+                          alignment: Alignment.centerLeft,
+                          child: Text(
+                            '预计落袋收益：${hidden ? '****' : sellProfitText(qtyCtrl, priceCtrl, holding)}',
+                            style: T.label(size: 12, color: T.text2),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ] else ...[
+                    ValueListenableBuilder<TransactionType>(
+                      valueListenable: txnType,
+                      builder: (context, t, _) => TerminalTextField(
+                        controller: amountCtrl,
+                        label: switch (t) {
+                          TransactionType.dividend => '分红金额',
+                          TransactionType.income => '收入金额',
+                          TransactionType.expense => '支出金额',
+                          TransactionType.transferIn => '转入金额',
+                          TransactionType.transferOut => '转出金额',
+                          TransactionType.consume => '消费金额',
+                          TransactionType.split => '折算比例',
+                          _ => '金额',
+                        },
+                        hint: t == TransactionType.split
+                            ? '如 2 = 1 份拆成 2 份'
+                            : null,
+                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      ),
+                    ),
                   ],
-                );
-              },
+                  const SizedBox(height: 12),
+                  ValueListenableBuilder<TransactionType>(
+                    valueListenable: txnType,
+                    builder: (context, t, _) {
+                      // Counterparty picker: only transfer-type rows have a source
+                      // / destination. Income / expense (and consume / split) are
+                      // sourceless — the amount simply moves in or out of the
+                      // holding itself — so no dropdown is shown for them.
+                      final dropdownHoldings = isShare
+                          ? (t == TransactionType.buy ? fundSources : cashHoldings)
+                          : (t == TransactionType.transferIn ||
+                                  t == TransactionType.transferOut
+                              ? moneyHoldings
+                              : <HoldingRow>[]);
+                      if (dropdownHoldings.isEmpty ||
+                          t == TransactionType.consume ||
+                          t == TransactionType.split) {
+                        return const SizedBox.shrink();
+                      }
+                      return Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          ValueListenableBuilder<int?>(
+                            valueListenable: cashId,
+                            builder: (context, value, _) => DropdownButtonFormField<int>(
+                              key: ValueKey(t),
+                              initialValue: value,
+                              decoration: terminalDecoration(counterpartyLabel(t, isShare)),
+                              items: [
+                                if (isShare &&
+                                    (t == TransactionType.buy || t == TransactionType.sell))
+                                  const DropdownMenuItem<int>(
+                                    value: null,
+                                    child: Text('不关联持仓'),
+                                  ),
+                                for (final c in dropdownHoldings)
+                                  DropdownMenuItem(
+                                    value: c.id,
+                                    child: Text(
+                                      _sourceItemLabel(c, hidden),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                              ],
+                              onChanged: (v) => cashId.value = v,
+                            ),
+                          ),
+                          if (isShare)
+                            ListenableBuilder(
+                              listenable: Listenable.merge([cashId, amountCtrl]),
+                              builder: (context, _) => Align(
+                                alignment: Alignment.centerLeft,
+                                child: Padding(
+                                  padding: const EdgeInsets.only(top: 8),
+                                  child: Text(
+                                    t == TransactionType.buy
+                                        ? _buySourceHint(
+                                            cashId.value, holdings, amountCtrl.text)
+                                        : '不选则卖出回款不入账',
+                                    style: T.label(size: 12, color: T.text2),
+                                  ),
+                                ),
+                              ),
+                            ),
+                        ],
+                      );
+                    },
+                  ),
+                  const SizedBox(height: 12),
+                  _TransactionDateField(value: occurredAt),
+                  const SizedBox(height: 12),
+                  TerminalTextField(
+                    controller: noteCtrl,
+                    label: '备注（可选）',
+                  ),
+                  if (saveError != null) ...[
+                    const SizedBox(height: 12),
+                    Text(saveError!, style: T.label(color: T.up)),
+                  ],
+                ],
+              ),
             ),
-            const SizedBox(height: 12),
-            _TransactionDateField(value: occurredAt),
-            const SizedBox(height: 12),
-            TerminalTextField(
-              controller: noteCtrl,
-              label: '备注（可选）',
+          ),
+          actions: [
+            TextButton(onPressed: saving ? null : () => Navigator.pop(context), child: const Text('取消')),
+            FilledButton(
+              onPressed: saving ? null : () async {
+                final error = validate();
+                if (error != null) {
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error)));
+                  return;
+                }
+                final amount = double.tryParse(amountCtrl.text.trim()) ?? 0;
+                final qty = double.tryParse(qtyCtrl.text.trim());
+                final price = double.tryParse(priceCtrl.text.trim());
+                final t = txnType.value;
+                if (t == TransactionType.split && amount <= 0) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('折算比例必须大于 0')),
+                  );
+                  return;
+                }
+                final service = ref.read(transactionServiceProvider);
+                final sourceId = cashId.value;
+                HoldingRow? source;
+                if (sourceId != null) {
+                  for (final h in holdings) {
+                    if (h.id == sourceId) {
+                      source = h;
+                      break;
+                    }
+                  }
+                }
+                final fundedByHolding = isShare &&
+                    t == TransactionType.buy &&
+                    source != null &&
+                    !AssetType.fromStorage(source.assetType).isAmountBased;
+                // 补录历史日期的流水同样更新当前持仓并校验当前余额；
+                // 日期用于后续历史回放。
+                final when = occurredAt.value;
+                final now = DateTime.now();
+                final backdated =
+                    when.year != now.year ||
+                        when.month != now.month ||
+                        when.day != now.day;
+                setState(() {
+                  saving = true;
+                  saveError = null;
+                });
+                try {
+                  final record = backdated ? service.recordHistorical : service.record;
+                  final result = fundedByHolding
+                      ? await service.recordBuyFundedByHolding(
+                          sourceHoldingId: source.id,
+                          targetHoldingId: holding.id,
+                          targetQuantity: qty ?? 0,
+                          targetPrice: price,
+                          amount: amount,
+                          currency: holding.currency,
+                          occurredAt: when,
+                          note: noteCtrl.text.trim(),
+                        )
+                      : await record(
+                          accountId: holding.accountId,
+                          holdingId: (isShare || t == TransactionType.consume)
+                              ? holding.id
+                              : null,
+                          type: t,
+                          quantity: isShare &&
+                                  t != TransactionType.dividend &&
+                                  t != TransactionType.split
+                              ? qty
+                              : null,
+                          price: isShare &&
+                                  t != TransactionType.dividend &&
+                                  t != TransactionType.split
+                              ? price
+                              : null,
+                          amount: amount,
+                          cashSourceId: switch (t) {
+                            TransactionType.buy => cashId.value,
+                            TransactionType.transferIn => cashId.value,
+                            TransactionType.transferOut => holding.id,
+                            _ => null,
+                          },
+                          cashTargetId: switch (t) {
+                            TransactionType.sell ||
+                            TransactionType.dividend =>
+                              cashId.value,
+                            TransactionType.income ||
+                            TransactionType.expense =>
+                              holding.id,
+                            TransactionType.transferIn => holding.id,
+                            TransactionType.transferOut => cashId.value,
+                            _ => null,
+                          },
+                          note: noteCtrl.text.trim(),
+                          currency: holding.currency,
+                          occurredAt: when,
+                        );
+                  if (!context.mounted) return;
+                  if (!result.ok) {
+                    setState(() {
+                      saving = false;
+                      saveError = _transactionError(result.message, hidden);
+                    });
+                    return;
+                  }
+                  final messenger = ScaffoldMessenger.of(context);
+                  setState(() => saving = false);
+                  Navigator.pop(context);
+                  if (result.ok) {
+                    ref.read(daoProvider).setSetting(historySyncDirtyKey, historyDirtySet);
+                    // 补录历史日期的流水会同时改变过去每一天的历史本金/收益
+                    // （金额型回放、产品收益日历都按流水日期重算），light 窗口
+                    // 覆盖不到更早的日子 —— 必须全量重建。
+                    if (backdated) {
+                      // Fire-and-forget, mirroring the dirty flag: keeps the save
+                      // callback free of post-await BuildContext uses.
+                      ref
+                          .read(daoProvider)
+                          .setSetting(historyFullRebuildKey, '1');
+                    }
+                  }
+                  messenger.showSnackBar(const SnackBar(content: Text('已记录')));
+                } catch (_) {
+                  if (!context.mounted) return;
+                  setState(() {
+                    saving = false;
+                    saveError = '记录失败，请重试';
+                  });
+                }
+              },
+              child: Text(saving ? '保存中…' : '保存'),
             ),
           ],
         ),
       ),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(context), child: const Text('取消')),
-        FilledButton(
-          onPressed: () async {
-            final error = validate();
-            if (error != null) {
-              ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error)));
-              return;
-            }
-            final amount = double.tryParse(amountCtrl.text.trim()) ?? 0;
-            final qty = double.tryParse(qtyCtrl.text.trim());
-            final price = double.tryParse(priceCtrl.text.trim());
-            final t = txnType.value;
-            if (t == TransactionType.split && amount <= 0) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('折算比例必须大于 0')),
-              );
-              return;
-            }
-            final service = ref.read(transactionServiceProvider);
-            final sourceId = cashId.value;
-            HoldingRow? source;
-            if (sourceId != null) {
-              for (final h in holdings) {
-                if (h.id == sourceId) {
-                  source = h;
-                  break;
-                }
-              }
-            }
-            final fundedByHolding = isShare &&
-                t == TransactionType.buy &&
-                source != null &&
-                !AssetType.fromStorage(source.assetType).isAmountBased;
-            // 补录历史日期的流水同样更新当前持仓并校验当前余额；
-            // 日期用于后续历史回放。
-            final when = occurredAt.value;
-            final now = DateTime.now();
-            final backdated =
-                when.year != now.year ||
-                    when.month != now.month ||
-                    when.day != now.day;
-            final result = backdated
-                ? await service.recordHistorical(
-                    accountId: holding.accountId,
-                    holdingId: (isShare || t == TransactionType.consume)
-                        ? holding.id
-                        : null,
-                    type: t,
-                    quantity: isShare &&
-                            t != TransactionType.dividend &&
-                            t != TransactionType.split
-                        ? qty
-                        : null,
-                    price: isShare &&
-                            t != TransactionType.dividend &&
-                            t != TransactionType.split
-                        ? price
-                        : null,
-                    amount: amount,
-                    cashSourceId: switch (t) {
-                      TransactionType.buy => cashId.value,
-                      TransactionType.transferIn => cashId.value,
-                      TransactionType.transferOut => holding.id,
-                      _ => null,
-                    },
-                    cashTargetId: switch (t) {
-                      TransactionType.sell ||
-                      TransactionType.dividend =>
-                        cashId.value,
-                      TransactionType.income ||
-                      TransactionType.expense =>
-                        holding.id,
-                      TransactionType.transferIn => holding.id,
-                      TransactionType.transferOut => cashId.value,
-                      _ => null,
-                    },
-                    note: noteCtrl.text.trim(),
-                    currency: holding.currency,
-                    occurredAt: when,
-                  )
-                : fundedByHolding
-                    ? await service.recordBuyFundedByHolding(
-                        sourceHoldingId: source.id,
-                        targetHoldingId: holding.id,
-                        targetQuantity: qty ?? 0,
-                        targetPrice: price,
-                        amount: amount,
-                        currency: holding.currency,
-                        occurredAt: when,
-                        note: noteCtrl.text.trim(),
-                      )
-                    : await service.record(
-                        accountId: holding.accountId,
-                        holdingId: (isShare || t == TransactionType.consume)
-                            ? holding.id
-                            : null,
-                        type: t,
-                        quantity: isShare &&
-                                t != TransactionType.dividend &&
-                                t != TransactionType.split
-                            ? qty
-                            : null,
-                        price: isShare &&
-                                t != TransactionType.dividend &&
-                                t != TransactionType.split
-                            ? price
-                            : null,
-                        amount: amount,
-                        cashSourceId: switch (t) {
-                          TransactionType.buy => cashId.value,
-                          TransactionType.transferIn => cashId.value,
-                          TransactionType.transferOut => holding.id,
-                          _ => null,
-                        },
-                        cashTargetId: switch (t) {
-                          TransactionType.sell ||
-                          TransactionType.dividend =>
-                            cashId.value,
-                          TransactionType.income ||
-                          TransactionType.expense =>
-                            holding.id,
-                          TransactionType.transferIn => holding.id,
-                          TransactionType.transferOut => cashId.value,
-                          _ => null,
-                        },
-                        note: noteCtrl.text.trim(),
-                        currency: holding.currency,
-                        occurredAt: when,
-                      );
-            if (!context.mounted) return;
-            Navigator.pop(context);
-            if (result.ok) {
-              ref.read(daoProvider).setSetting(historySyncDirtyKey, historyDirtySet);
-              // 补录历史日期的流水会同时改变过去每一天的历史本金/收益
-              // （金额型回放、产品收益日历都按流水日期重算），light 窗口
-              // 覆盖不到更早的日子 —— 必须全量重建。
-              if (backdated) {
-                // Fire-and-forget, mirroring the dirty flag: keeps the save
-                // callback free of post-await BuildContext uses.
-                ref
-                    .read(daoProvider)
-                    .setSetting(historyFullRebuildKey, '1');
-              }
-            }
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text(result.ok ? '已记录' : (result.message ?? '记录失败')),
-                backgroundColor: result.ok ? null : T.up,
-              ),
-            );
-          },
-          child: const Text('保存'),
-        ),
-      ],
-    ),
     ),
   );
   // Wait for the dialog's exit animation before releasing controllers,
@@ -533,6 +525,11 @@ Future<void> showHoldingTransactionDialog(
   amountCtrl.dispose();
   noteCtrl.dispose();
   occurredAt.dispose();
+}
+
+String _transactionError(String? message, bool hidden) {
+  final text = message ?? '记录失败';
+  return hidden ? text.replaceAll(RegExp(r'（可用 [^）]*）'), '（可用 ****）') : text;
 }
 
 /// Date picker for the transaction's 发生日期 (defaults to today; change it
@@ -604,7 +601,7 @@ String counterpartyLabel(TransactionType t, bool isShare) {
 
 /// Dropdown label for a funding source: cash shows its balance,
 /// share-based holdings show their current market value.
-String _sourceItemLabel(HoldingRow h) {
+String _sourceItemLabel(HoldingRow h, bool hidden) {
   final t = AssetType.fromStorage(h.assetType);
   // Same fallback chain as the save-time deduction check
   // (transaction_service: latestPrice -> costPrice -> 1.0), so a share-based
@@ -614,7 +611,7 @@ String _sourceItemLabel(HoldingRow h) {
       ? h.latestPrice
       : (h.costPrice > 0 ? h.costPrice : 1.0);
   final available = t.isAmountBased ? h.quantity : h.quantity * unit;
-  return '${h.name} (${t.label}) · 可用 ${Formats.amount(available)}';
+  return '${h.name} (${t.label}) · 可用 ${hidden ? '****' : Formats.amount(available)}';
 }
 
 /// Hint under the buy funding-source dropdown: what will happen on save.
@@ -696,183 +693,212 @@ Future<void> showAccountTransactionDialog(
     return;
   }
 
+  final hidden = ref.read(hideAmountsProvider);
   final txnType = ValueNotifier<TransactionType>(TransactionType.transferOut);
   final sourceId = ValueNotifier<int?>(accountHoldings.first.id);
   final targetId = ValueNotifier<int?>(null);
   final amountCtrl = TextEditingController();
   final noteCtrl = TextEditingController();
 
+  var saving = false;
+  String? saveError;
   await showDialog<void>(
     context: context,
     builder: (context) => StatefulBuilder(
-      builder: (context, setState) => AlertDialog(
-      constraints: _dialogConstraints(context),
-      title: const Text('记流水'),
-      content: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ValueListenableBuilder<TransactionType>(
-              valueListenable: txnType,
-              builder: (context, value, _) => SegmentedButton<TransactionType>(
-                segments: const [
-                  ButtonSegment(value: TransactionType.transferOut, label: Text('转账/还款')),
-                  ButtonSegment(value: TransactionType.income, label: Text('收入')),
-                  ButtonSegment(value: TransactionType.expense, label: Text('支出')),
-                ],
-                selected: {value},
-                onSelectionChanged: (s) => setState(() => txnType.value = s.first),
-              ),
-            ),
-            const SizedBox(height: 16),
-            ValueListenableBuilder<TransactionType>(
-              valueListenable: txnType,
-              builder: (context, value, _) {
-                if (value == TransactionType.transferOut) {
-                  return Column(
-                    children: [
-                      MoneyDropdown(
-                        label: '资金来源（现金转出 / 负债还款）',
+      builder: (context, setState) => PopScope(
+        canPop: !saving,
+        child: AlertDialog(
+          constraints: _dialogConstraints(context),
+          title: const Text('记流水'),
+          content: AbsorbPointer(
+            absorbing: saving,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  ValueListenableBuilder<TransactionType>(
+                    valueListenable: txnType,
+                    builder: (context, value, _) => SegmentedButton<TransactionType>(
+                      segments: const [
+                        ButtonSegment(value: TransactionType.transferOut, label: Text('转账/还款')),
+                        ButtonSegment(value: TransactionType.income, label: Text('收入')),
+                        ButtonSegment(value: TransactionType.expense, label: Text('支出')),
+                      ],
+                      selected: {value},
+                      onSelectionChanged: (s) => setState(() => txnType.value = s.first),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  ValueListenableBuilder<TransactionType>(
+                    valueListenable: txnType,
+                    builder: (context, value, _) {
+                      if (value == TransactionType.transferOut) {
+                        return Column(
+                          children: [
+                            MoneyDropdown(
+                              label: '资金来源（现金转出 / 负债还款）',
+                              holdings: accountHoldings,
+                              accountNames: accountNames,
+                              value: sourceId,
+                            ),
+                            const SizedBox(height: 12),
+                            MoneyDropdown(
+                              label: '资金去向（现金转入 / 负债还款）',
+                              holdings: moneyHoldings,
+                              accountNames: accountNames,
+                              value: targetId,
+                            ),
+                            const SizedBox(height: 8),
+                            Align(
+                              alignment: Alignment.centerLeft,
+                              child: Text(
+                                '从现金转到负债 = 还款；从负债转到现金 = 借款',
+                                style: T.label(size: 12, color: T.text2),
+                              ),
+                            ),
+                          ],
+                        );
+                      }
+                      return MoneyDropdown(
+                        label: value == TransactionType.income ? '收入入账持仓' : '支出扣款持仓',
                         holdings: accountHoldings,
                         accountNames: accountNames,
                         value: sourceId,
-                      ),
-                      const SizedBox(height: 12),
-                      MoneyDropdown(
-                        label: '资金去向（现金转入 / 负债还款）',
-                        holdings: moneyHoldings,
-                        accountNames: accountNames,
-                        value: targetId,
-                      ),
-                      const SizedBox(height: 8),
-                      Align(
-                        alignment: Alignment.centerLeft,
-                        child: Text(
-                          '从现金转到负债 = 还款；从负债转到现金 = 借款',
-                          style: T.label(size: 12, color: T.text2),
-                        ),
-                      ),
-                    ],
+                      );
+                    },
+                  ),
+                  const SizedBox(height: 12),
+                  TerminalTextField(
+                    controller: amountCtrl,
+                    label: '金额',
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  ),
+                  const SizedBox(height: 12),
+                  TerminalTextField(
+                    controller: noteCtrl,
+                    label: '备注（可选）',
+                  ),
+                  if (saveError != null) ...[
+                    const SizedBox(height: 12),
+                    Text(saveError!, style: T.label(color: T.up)),
+                  ],
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: saving ? null : () => Navigator.pop(context), child: const Text('取消')),
+            FilledButton(
+              onPressed: saving ? null : () async {
+                final amount = double.tryParse(amountCtrl.text.trim());
+                if (amount == null || amount <= 0) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('请填写有效金额')),
                   );
+                  return;
                 }
-                return MoneyDropdown(
-                  label: value == TransactionType.income ? '收入入账持仓' : '支出扣款持仓',
-                  holdings: accountHoldings,
-                  accountNames: accountNames,
-                  value: sourceId,
-                );
+                final txnTypeValue = txnType.value;
+                if (txnTypeValue == TransactionType.transferOut && targetId.value == null) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('请选择资金去向')),
+                  );
+                  return;
+                }
+                if (txnTypeValue == TransactionType.transferOut &&
+                    sourceId.value == targetId.value) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('资金来源和去向不能相同')),
+                  );
+                  return;
+                }
+                // Upfront transfer checks (mirrors the service assertions so the
+                // user gets a precise message before anything is written):
+                // same-currency only, and a cash source cannot be overdrawn.
+                if (txnTypeValue == TransactionType.transferOut) {
+                  HoldingRow? src;
+                  HoldingRow? tgt;
+                  for (final h in holdings) {
+                    if (h.id == sourceId.value) src = h;
+                    if (h.id == targetId.value) tgt = h;
+                  }
+                  if (src != null && tgt != null && src.currency != tgt.currency) {
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                        content: Text(
+                            '转账币种不一致：「${src.name}」(${src.currency}) 与「${tgt.name}」(${tgt.currency})'),
+                        backgroundColor: T.up,
+                      ));
+                    }
+                    return;
+                  }
+                  if (src != null) {
+                    final st = AssetType.fromStorage(src.assetType);
+                    if (st.isAmountBased && src.quantity + 1e-6 < amount) {
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                          content: Text('「${src.name}」余额不足'
+                              '（可用 ${hidden ? '****' : Formats.amount(src.quantity)}）'),
+                          backgroundColor: T.up,
+                        ));
+                      }
+                      return;
+                    }
+                  }
+                }
+                // Record the flow in the source holding's currency so foreign
+                // income/expense rows no longer enter the stats as CNY amounts.
+                HoldingRow? srcHolding;
+                for (final h in holdings) {
+                  if (h.id == sourceId.value) {
+                    srcHolding = h;
+                    break;
+                  }
+                }
+                setState(() {
+                  saving = true;
+                  saveError = null;
+                });
+                try {
+                  final result = await ref.read(transactionServiceProvider).record(
+                    accountId: accountId,
+                    type: txnTypeValue,
+                    amount: amount,
+                    cashSourceId:
+                        txnTypeValue == TransactionType.transferOut ? sourceId.value : null,
+                    cashTargetId: txnTypeValue == TransactionType.transferOut
+                        ? targetId.value
+                        : sourceId.value,
+                    note: noteCtrl.text.trim(),
+                    currency: srcHolding?.currency ?? 'CNY',
+                  );
+                  if (!context.mounted) return;
+                  if (!result.ok) {
+                    setState(() {
+                      saving = false;
+                      saveError = _transactionError(result.message, hidden);
+                    });
+                    return;
+                  }
+                  final messenger = ScaffoldMessenger.of(context);
+                  setState(() => saving = false);
+                  Navigator.pop(context);
+                  if (result.ok) {
+                    ref.read(daoProvider).setSetting(historySyncDirtyKey, historyDirtySet);
+                  }
+                  messenger.showSnackBar(const SnackBar(content: Text('已记录')));
+                } catch (_) {
+                  if (!context.mounted) return;
+                  setState(() {
+                    saving = false;
+                    saveError = '记录失败，请重试';
+                  });
+                }
               },
-            ),
-            const SizedBox(height: 12),
-            TerminalTextField(
-              controller: amountCtrl,
-              label: '金额',
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            ),
-            const SizedBox(height: 12),
-            TerminalTextField(
-              controller: noteCtrl,
-              label: '备注（可选）',
+              child: Text(saving ? '保存中…' : '保存'),
             ),
           ],
         ),
       ),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(context), child: const Text('取消')),
-        FilledButton(
-          onPressed: () async {
-            final amount = double.tryParse(amountCtrl.text.trim());
-            if (amount == null || amount <= 0) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('请填写有效金额')),
-              );
-              return;
-            }
-            final txnTypeValue = txnType.value;
-            if (txnTypeValue == TransactionType.transferOut && targetId.value == null) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('请选择资金去向')),
-              );
-              return;
-            }
-            if (txnTypeValue == TransactionType.transferOut &&
-                sourceId.value == targetId.value) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('资金来源和去向不能相同')),
-              );
-              return;
-            }
-            // Upfront transfer checks (mirrors the service assertions so the
-            // user gets a precise message before anything is written):
-            // same-currency only, and a cash source cannot be overdrawn.
-            if (txnTypeValue == TransactionType.transferOut) {
-              HoldingRow? src;
-              HoldingRow? tgt;
-              for (final h in holdings) {
-                if (h.id == sourceId.value) src = h;
-                if (h.id == targetId.value) tgt = h;
-              }
-              if (src != null && tgt != null && src.currency != tgt.currency) {
-                if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                    content: Text(
-                        '转账币种不一致：「${src.name}」(${src.currency}) 与「${tgt.name}」(${tgt.currency})'),
-                    backgroundColor: T.up,
-                  ));
-                }
-                return;
-              }
-              if (src != null) {
-                final st = AssetType.fromStorage(src.assetType);
-                if (st.isAmountBased && src.quantity + 1e-6 < amount) {
-                  if (context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                      content: Text('「${src.name}」余额不足'
-                          '（可用 ${Formats.amount(src.quantity)}）'),
-                      backgroundColor: T.up,
-                    ));
-                  }
-                  return;
-                }
-              }
-            }
-            // Record the flow in the source holding's currency so foreign
-            // income/expense rows no longer enter the stats as CNY amounts.
-            HoldingRow? srcHolding;
-            for (final h in holdings) {
-              if (h.id == sourceId.value) {
-                srcHolding = h;
-                break;
-              }
-            }
-            final result = await ref.read(transactionServiceProvider).record(
-              accountId: accountId,
-              type: txnTypeValue,
-              amount: amount,
-              cashSourceId:
-                  txnTypeValue == TransactionType.transferOut ? sourceId.value : null,
-              cashTargetId: txnTypeValue == TransactionType.transferOut
-                  ? targetId.value
-                  : sourceId.value,
-              note: noteCtrl.text.trim(),
-              currency: srcHolding?.currency ?? 'CNY',
-            );
-            if (!context.mounted) return;
-            Navigator.pop(context);
-            if (result.ok) {
-              ref.read(daoProvider).setSetting(historySyncDirtyKey, historyDirtySet);
-            }
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text(result.ok ? '已记录' : (result.message ?? '记录失败')),
-                backgroundColor: result.ok ? null : T.up,
-              ),
-            );
-          },
-          child: const Text('保存'),
-        ),
-      ],
-    ),
     ),
   );
   // Same exit-animation guard as above (see showHoldingTransactionDialog).

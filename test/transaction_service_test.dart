@@ -1161,6 +1161,27 @@ void main() {
       expect(r.movedCost, closeTo(500, 1e-6));
     });
 
+    test('a full-value redemption uses the exact stored share quantity', () async {
+      const quantity = 1900.123449;
+      const price = 1.23456;
+      final accountId = await addAccount('A');
+      final holdingId = await addHolding(
+        accountId: accountId,
+        name: 'ETF',
+        type: AssetType.etf,
+        quantity: quantity,
+        costPrice: 1,
+        latestPrice: price,
+      );
+      final result = await service.recordRedemption(
+        sourceHoldingId: holdingId,
+        amount: quantity * price,
+      );
+      expect(result.ok, isTrue);
+      expect((await dao.getHolding(holdingId))!.quantity, 0);
+      expect((await dao.getTransactions()).single.quantity, quantity);
+    });
+
     test('rejects liability', () async {
       final acc = await addAccount('A');
       final loan = await addHolding(
@@ -1231,6 +1252,32 @@ void main() {
   });
 
   group('recordHistorical（补录历史流水）', () {
+    test('backdated split uses its ratio and cash-funded sales are internal', () async {
+      final account = await addAccount('A');
+      final etf = await addHolding(
+        accountId: account, name: 'ETF', type: AssetType.etf,
+        quantity: 100, costPrice: 2, latestPrice: 3,
+      );
+      final cash = await addHolding(
+        accountId: account, name: '现金', type: AssetType.cash,
+        quantity: 0, costPrice: 0, latestPrice: 1,
+      );
+      final date = DateTime(2026, 1, 2);
+      expect((await service.recordHistorical(
+        accountId: account, holdingId: etf, type: TransactionType.split,
+        amount: 2, occurredAt: date,
+      )).ok, isTrue);
+      expect((await dao.getHolding(etf))!.quantity, 200);
+      expect((await service.recordHistorical(
+        accountId: account, holdingId: etf, type: TransactionType.sell,
+        quantity: 200, price: 1.5, amount: 300, cashTargetId: cash,
+        occurredAt: date.add(const Duration(days: 1)),
+      )).ok, isTrue);
+      final sell = (await dao.getTransactions()).singleWhere((t) => t.type == 'sell');
+      expect(sell.internalMove, isTrue);
+      expect(sell.costMovedAmount, 200);
+    });
+
     test('backdated buy settles balances like an ordinary record', () async {
       final acc = await addAccount('A');
       final cash = await addHolding(
@@ -1572,6 +1619,53 @@ void main() {
   });
 
   group('recordHoldingCreation（新建持仓初始化流水）', () {
+    test('funded holding creation rolls back a failed redemption and retries safely',
+        () async {
+      final account = await addAccount('A');
+      final source = await addHolding(
+        accountId: account,
+        name: '现金',
+        type: AssetType.bankDeposit,
+        quantity: 100,
+        costPrice: 80,
+        latestPrice: 1,
+      );
+      final draft = HoldingsCompanion.insert(
+        accountId: account,
+        name: '新产品',
+        assetType: AssetType.bankDeposit.storageName,
+        quantity: const Value(100),
+        costPrice: const Value(100),
+        latestPrice: const Value(1),
+      );
+      await expectLater(
+        service.createHolding(draft, redemptionSourceId: source, redemptionAmount: 150),
+        throwsArgumentError,
+      );
+      expect((await dao.getHoldings()).single.quantity, 100);
+      expect(await dao.getTransactions(), isEmpty);
+
+      final id = await service.createHolding(
+        draft,
+        redemptionSourceId: source,
+        redemptionAmount: 100,
+      );
+      expect((await dao.getHolding(source))!.quantity, 0);
+      expect((await dao.getHolding(id))!.costPrice, 80);
+      final transactions = await dao.getTransactions();
+      expect(transactions, hasLength(2));
+      final buy = transactions.singleWhere((t) => t.holdingId == id);
+      final sell = transactions.singleWhere((t) => t.holdingId == source);
+      expect((await service.remove(buy.id)).ok, isTrue);
+      final reversedTarget = (await dao.getHolding(id))!;
+      expect(reversedTarget.quantity, 0);
+      expect(reversedTarget.costPrice, 0);
+      expect((await service.remove(sell.id)).ok, isTrue);
+      final restoredSource = (await dao.getHolding(source))!;
+      expect(restoredSource.quantity, 100);
+      expect(restoredSource.costPrice, 80);
+    });
+
     test('direct share holding creation writes a buy flow without double '
         'booking', () async {
       final acc = await addAccount('A');

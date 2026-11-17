@@ -50,7 +50,18 @@ class SmoothHistoryCalculator {
     final result = <String, double>{};
     final current = h.quantity; // current amount (as of [today])
     final currentCost = effectiveCostOf(h);
-    final totalGain = current - currentCost;
+    final movedGainByDay = <DateTime, double>{};
+    var totalMovedGain = 0.0;
+    for (final flow in flows) {
+      final delta = _movedGainOf(h, flow);
+      if (delta == 0) continue;
+      final day = _dayOf(flow.occurredAt);
+      movedGainByDay.update(day, (value) => value + delta, ifAbsent: () => delta);
+      totalMovedGain += delta;
+    }
+    // Only interpolate gain earned by this holding. Gain that travelled with
+    // an internal flow belongs to the day of the transfer or redemption.
+    final totalGain = current - currentCost - totalMovedGain;
 
     final dayTo = _dayOf(to);
     final dayToday = _dayOf(today ?? DateTime.now());
@@ -71,6 +82,9 @@ class SmoothHistoryCalculator {
       if (s.principal > 0) weightSum += s.principal * s.days;
     }
     var cumGain = 0.0;
+    var cumulativeMovedGain = 0.0;
+    final movementDays = movedGainByDay.keys.toList()..sort();
+    var movementIndex = 0;
     for (final s in segments) {
       final positive = s.principal > 0;
       final segGain = weightSum <= 0 || !positive
@@ -79,20 +93,23 @@ class SmoothHistoryCalculator {
       final startValue = s.principal + cumGain;
       final endValue = s.principal + cumGain + segGain;
       cumGain += segGain;
-      // A span with no principal holds no money, so its days are zero. An
-      // emptied account must not be handed the value it held before the
-      // withdrawal (interpolating would do exactly that, and for a
-      // zero-length span it would hand it the whole accrued gain).
-      final empty = s.principal <= 0;
       for (
         var d = s.start;
         !d.isAfter(s.end) && !d.isAfter(dayTo);
         d = d.add(const Duration(days: 1))
       ) {
+        while (movementIndex < movementDays.length &&
+            !movementDays[movementIndex].isAfter(d)) {
+          cumulativeMovedGain += movedGainByDay[movementDays[movementIndex]]!;
+          movementIndex++;
+        }
         final index = d.difference(s.start).inDays;
-        result[todayKey(d)] = empty
-            ? 0
-            : geometricInterpolate(startValue, endValue, index, s.days);
+        // With recorded gain movements, a zero-principal span can still
+        // carry gain, such as the proceeds of a fully amortized position.
+        final estimate = positive
+            ? geometricInterpolate(startValue, endValue, index, s.days)
+            : (s.principal == 0 && movementDays.isNotEmpty ? cumGain : 0.0);
+        result[todayKey(d)] = max(0.0, estimate + cumulativeMovedGain);
       }
     }
     // When [to] is today (or later), the final day is exactly the current
@@ -334,6 +351,7 @@ class SmoothHistoryCalculator {
         // Buy linkage debits the funding cash holding's invested amount
         // (the "record buy with a funding source" flow).
         if (t.cashSourceId == h.id) return -moved;
+        if (t.internalMove && t.holdingId == h.id) return moved;
       case TransactionType.sell:
         // Sell proceeds credited to a cash holding move its invested
         // amount by the *sold principal* (legacy rows without
@@ -354,6 +372,35 @@ class SmoothHistoryCalculator {
           TransactionType.consume ||
           TransactionType.split:
         return 0;
+    }
+    return 0;
+  }
+
+  static double _movedGainOf(HoldingRow h, TransactionRow t) {
+    final type = TransactionType.fromStorage(t.type);
+    if (type == TransactionType.dividend && t.cashTargetId == h.id) {
+      return t.amount;
+    }
+    final principal = t.costMovedAmount;
+    if (principal == null) return 0;
+    final gain = t.amount - principal;
+    switch (type) {
+      case TransactionType.transferIn || TransactionType.transferOut:
+        if (!t.costMoved) return 0;
+        if (t.cashSourceId == h.id) return -gain;
+        if (t.cashTargetId == h.id) return gain;
+      case TransactionType.buy:
+        if (t.cashSourceId == h.id) return -gain;
+        if (t.internalMove && t.holdingId == h.id) return gain;
+      case TransactionType.sell:
+        if (t.cashTargetId == h.id) return gain;
+        if (t.internalMove && t.holdingId == h.id) return -gain;
+      case TransactionType.income:
+        if (t.cashTargetId == h.id) return gain;
+      case TransactionType.expense:
+        if (t.cashTargetId == h.id) return -gain;
+      default:
+        break;
     }
     return 0;
   }

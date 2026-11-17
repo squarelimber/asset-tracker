@@ -273,6 +273,7 @@ class _TransactionsPageState extends ConsumerState<TransactionsPage> {
         ? null
         : () => _exportCsv(filtered, holdings, accountName);
     final isPhone = Responsive.isPhone(context);
+    final hideAmounts = ref.watch(hideAmountsProvider);
 
     return Scaffold(
       appBar: AppBar(
@@ -281,6 +282,14 @@ class _TransactionsPageState extends ConsumerState<TransactionsPage> {
             : const SecondaryPageBackButton(),
         title: const Text('交易流水'),
         actions: [
+          IconButton(
+            tooltip: hideAmounts ? '显示金额' : '隐藏金额',
+            isSelected: hideAmounts,
+            icon: const Icon(Icons.visibility_outlined, size: 18),
+            selectedIcon: const Icon(Icons.visibility_off_outlined, size: 18),
+            onPressed: () =>
+                ref.read(hideAmountsProvider.notifier).state = !hideAmounts,
+          ),
           IconButton(
             tooltip: _exporting ? '正在导出' : '导出 CSV（当前筛选）',
             icon: _exporting
@@ -470,14 +479,15 @@ class _TransactionsPageState extends ConsumerState<TransactionsPage> {
   );
 }
 
-class _SummaryCard extends StatelessWidget {
+class _SummaryCard extends ConsumerWidget {
   const _SummaryCard({required this.stats, required this.count});
 
   final TradeStats stats;
   final int count;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final hide = ref.watch(hideAmountsProvider);
     return TerminalCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -489,7 +499,9 @@ class _SummaryCard extends StatelessWidget {
               Text('净现金流', style: T.label()),
               const SizedBox(width: 8),
               Text(
-                '${stats.cashflow >= 0 ? '+' : ''}${Formats.money(stats.cashflow)}',
+                hide
+                    ? '****'
+                    : '${stats.cashflow >= 0 ? '+' : ''}${Formats.money(stats.cashflow)}',
                 style: T.mono(
                   size: 13,
                   weight: FontWeight.w700,
@@ -516,20 +528,21 @@ class _SummaryCard extends StatelessWidget {
   }
 }
 
-class _StatItem extends StatelessWidget {
+class _StatItem extends ConsumerWidget {
   const _StatItem({required this.label, required this.value});
 
   final String label;
   final double value;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final hide = ref.watch(hideAmountsProvider);
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
         Text('$label ', style: T.label()),
         Text(
-          '${value >= 0 ? '+' : ''}${Formats.money(value)}',
+          hide ? '****' : '${value >= 0 ? '+' : ''}${Formats.money(value)}',
           style: T.mono(
             size: 12,
             weight: FontWeight.w600,
@@ -541,14 +554,15 @@ class _StatItem extends StatelessWidget {
   }
 }
 
-class _DayHeader extends StatelessWidget {
+class _DayHeader extends ConsumerWidget {
   const _DayHeader({required this.day, required this.net});
 
   final DateTime day;
   final double net;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final hide = ref.watch(hideAmountsProvider);
     final now = DateTime.now();
     final isToday =
         day.year == now.year && day.month == now.month && day.day == now.day;
@@ -562,7 +576,7 @@ class _DayHeader extends StatelessWidget {
           ),
           const Spacer(),
           Text(
-            '当日 ${net >= 0 ? '+' : ''}${Formats.money(net)}',
+            hide ? '当日 ****' : '当日 ${net >= 0 ? '+' : ''}${Formats.money(net)}',
             style: T.mono(
               size: 12,
               weight: FontWeight.w600,

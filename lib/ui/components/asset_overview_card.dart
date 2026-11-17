@@ -15,6 +15,7 @@ class AssetOverviewCard extends StatelessWidget {
     this.hidden = false,
     this.onToggleHidden,
     this.onOpenEarnings,
+    this.onOpenTodayDetail,
   });
 
   final double totalAssets;
@@ -25,6 +26,9 @@ class AssetOverviewCard extends StatelessWidget {
   final bool hidden;
   final VoidCallback? onToggleHidden;
   final VoidCallback? onOpenEarnings;
+  final VoidCallback? onOpenTodayDetail;
+
+  VoidCallback? get _todayAction => onOpenTodayDetail ?? onOpenEarnings;
 
   String _amount(double value) =>
       hidden ? Formats.masked() : Formats.amount(value);
@@ -96,7 +100,7 @@ class AssetOverviewCard extends StatelessWidget {
                   _profit,
                   color: _profitColor,
                   detail: _percentage,
-                  opensDetails: onOpenEarnings != null,
+                  opensDetails: _todayAction != null,
                 ),
               ),
             ),
@@ -136,7 +140,7 @@ class AssetOverviewCard extends StatelessWidget {
       _earningsAction(
         Row(
           children: [
-            _metricLabel('今日盈亏', opensDetails: onOpenEarnings != null),
+            _metricLabel('今日盈亏', opensDetails: _todayAction != null),
             const SizedBox(width: T.s2),
             Flexible(child: _number(_profit, size: 14, color: _profitColor)),
             if (_percentage != null) ...[
@@ -180,12 +184,12 @@ class AssetOverviewCard extends StatelessWidget {
     child: VerticalDivider(width: 1, color: T.borderSoft),
   );
 
-  Widget _earningsAction(Widget child) => onOpenEarnings == null
+  Widget _earningsAction(Widget child) => _todayAction == null
       ? child
       : Material(
           color: Colors.transparent,
           child: InkWell(
-            onTap: onOpenEarnings,
+            onTap: _todayAction,
             borderRadius: BorderRadius.circular(T.rInput),
             child: Tooltip(
               message: '查看当日收益明细',

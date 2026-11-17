@@ -41,6 +41,7 @@ class TransactionTile extends ConsumerWidget {
         type == TransactionType.dividend;
     final isSplit = type == TransactionType.split;
     final realized = type == TransactionType.sell &&
+            !txn.internalMove &&
             costPrice != null &&
             txn.quantity != null && txn.price != null
         ? (txn.price! - costPrice!) * txn.quantity!

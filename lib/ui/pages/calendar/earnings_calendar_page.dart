@@ -342,7 +342,7 @@ class _DayCell extends ConsumerWidget {
             style: T.mono(
               size: 11,
               weight: isToday ? FontWeight.w700 : FontWeight.w400,
-              color: isToday ? T.accent : T.text2,
+              color: hasEarning ? T.text1 : (isToday ? T.accent : T.text2),
             ),
           ),
           const SizedBox(height: T.s1),
@@ -358,7 +358,7 @@ class _DayCell extends ConsumerWidget {
             overflow: TextOverflow.ellipsis,
             style: T.mono(
               size: 10,
-              color: hasEarning ? T.changeColor(profit) : T.text3,
+              color: hasEarning ? T.text1 : T.text3,
             ),
           ),
         ],
@@ -392,7 +392,9 @@ class _MonthSummary extends ConsumerWidget {
                 Text('本月收益', style: T.label()),
                 const SizedBox(height: T.s1),
                 Text(
-                  hidden
+                  month.days == 0
+                      ? '暂无快照'
+                      : hidden
                       ? Formats.masked()
                       : '${month.total >= 0 ? '+' : ''}${Formats.amount(month.total)}',
                   maxLines: 1,
@@ -447,7 +449,9 @@ class _YearSummary extends ConsumerWidget {
                 Text('本年收益', style: T.label()),
                 const SizedBox(height: T.s1),
                 Text(
-                  hidden
+                  year.months.isEmpty
+                      ? '暂无快照'
+                      : hidden
                       ? Formats.masked()
                       : '${year.total >= 0 ? '+' : ''}${Formats.amount(year.total)}',
                   maxLines: 1,

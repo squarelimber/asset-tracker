@@ -111,6 +111,45 @@ void main() {
     expect(snapshots.first.totalValue, closeTo(260, 1e-6));
   });
 
+  test('backfill retains dated zero snapshots after the last balance is withdrawn', () async {
+    final purchase = DateTime(2026, 7, 1);
+    final withdrawal = DateTime(2026, 7, 3);
+    final today = DateTime(2026, 7, 5);
+    final accountId = await dao.createAccount(
+      AccountsCompanion.insert(name: '测试账户', type: 'general'),
+    );
+    final holdingId = await dao.createHolding(
+      HoldingsCompanion.insert(
+        accountId: accountId,
+        name: '现金',
+        assetType: AssetType.cash.storageName,
+        purchaseDate: Value(purchase),
+      ),
+    );
+    await dao.createTransaction(
+      TransactionsCompanion.insert(
+        accountId: accountId,
+        cashTargetId: Value(holdingId),
+        type: TransactionType.expense.storageName,
+        amount: 100,
+        costMovedAmount: const Value(100),
+        occurredAt: withdrawal,
+      ),
+    );
+
+    final result = await HistoryBackfillService(dao, sources: {}).backfill(now: today);
+
+    expect(result.wroteToday, isTrue);
+    expect(result.days, 5);
+    final snapshots = {for (final row in await dao.getSnapshots()) row.date: row};
+    expect(snapshots['2026-07-02']!.totalValue, 100);
+    for (final day in ['2026-07-03', '2026-07-04', '2026-07-05']) {
+      expect(snapshots[day]!.totalValue, 0);
+      expect(snapshots[day]!.totalCost, 0);
+    }
+    expect(await dao.getSetting('backfill_v13_transaction_replay'), isNotNull);
+  });
+
   test(
     'the window includes today so the live and history paths agree',
     () async {
@@ -738,6 +777,7 @@ void main() {
         await dao.setSetting('backfill_v10_sina_history_endpoint', '1');
         await dao.setSetting('backfill_v11_tencent_history_gateway', '1');
         await dao.setSetting('backfill_v12_recorded_holding_values', '1');
+        await dao.setSetting('backfill_v13_transaction_replay', '1');
         await seedFundHolding(purchaseDate: DateTime(2026, 7, 1), latest: 2.9);
         final fake = _FakeHistorySource();
         fake.data['110022'] = {
@@ -801,6 +841,7 @@ void main() {
     // v11 已跑，所以下面这次全量重建是由「缺 v10」单独触发的。
     await dao.setSetting('backfill_v11_tencent_history_gateway', '1');
     await dao.setSetting('backfill_v12_recorded_holding_values', '1');
+    await dao.setSetting('backfill_v13_transaction_replay', '1');
     await dao.setSetting('backfill_last_run', '2026-07-16');
     await seedFundHolding(purchaseDate: DateTime(2026, 7, 1), latest: 2.9);
     final fake = _FakeHistorySource();

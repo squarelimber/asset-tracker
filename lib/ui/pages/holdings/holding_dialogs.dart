@@ -70,7 +70,7 @@ Value<double?> _editFxRateValue(
 }
 
 /// Label for a funding-source option: available balance / market value.
-String _fundingSourceLabel(HoldingRow h) {
+String _fundingSourceLabel(HoldingRow h, {required bool hidden}) {
   final t = AssetType.fromStorage(h.assetType);
   // Mirror the save-time deduction check: latestPrice -> costPrice -> 1.0, so
   // the label never shows "可用 0" while the save would move the balance.
@@ -78,7 +78,7 @@ String _fundingSourceLabel(HoldingRow h) {
       ? h.latestPrice
       : (h.costPrice > 0 ? h.costPrice : 1.0);
   final available = t.isAmountBased ? h.quantity : h.quantity * unit;
-  return '${h.name} (${t.label}) · 可用 ${Formats.amount(available)}';
+  return '${h.name} (${t.label}) · 可用 ${hidden ? '****' : Formats.amount(available)}';
 }
 
 /// Asset types offered for one category in the add-holding picker. The two
@@ -164,11 +164,16 @@ Future<void> showAddHoldingDialog(BuildContext context, WidgetRef ref) async {
       })
       .toList();
   final fundingSourceId = ValueNotifier<int?>(null);
+  final saving = ValueNotifier(false);
 
   if (!context.mounted) return;
   await showDialog<void>(
     context: context,
-    builder: (context) => AlertDialog(
+    builder: (context) => ValueListenableBuilder<bool>(
+      valueListenable: saving,
+      builder: (context, isSaving, _) => PopScope(
+      canPop: !isSaving,
+      child: AlertDialog(
       constraints: _dialogConstraints(context),
       title: const Text('添加持仓'),
       content: SingleChildScrollView(
@@ -478,7 +483,7 @@ Future<void> showAddHoldingDialog(BuildContext context, WidgetRef ref) async {
                             DropdownMenuItem(
                               value: h.id,
                               child: Text(
-                                _fundingSourceLabel(h),
+                                _fundingSourceLabel(h, hidden: ref.read(hideAmountsProvider)),
                                 overflow: TextOverflow.ellipsis,
                               ),
                             ),
@@ -502,9 +507,12 @@ Future<void> showAddHoldingDialog(BuildContext context, WidgetRef ref) async {
         ),
       ),
       actions: [
-        TextButton(onPressed: () => Navigator.pop(context), child: const Text('取消')),
-        FilledButton(
-          onPressed: () async {
+        TextButton(onPressed: isSaving ? null : () => Navigator.pop(context), child: const Text('取消')),
+        ValueListenableBuilder<bool>(
+          valueListenable: saving,
+          builder: (context, isSaving, _) => FilledButton(
+          onPressed: isSaving ? null : () async {
+            if (saving.value) return;
             final name = nameCtrl.text.trim();
             var type = assetType.value;
             final qty = double.tryParse(quantityCtrl.text.trim());
@@ -592,7 +600,8 @@ Future<void> showAddHoldingDialog(BuildContext context, WidgetRef ref) async {
             // leaves a half state.
             int? redemptionSourceId;
             double redemptionAmount = 0;
-            final selectedSource = fundingSourceId.value;
+            final selectedSource =
+                type == AssetType.liability ? null : fundingSourceId.value;
             if (selectedSource != null) {
               for (final h in holdings) {
                 if (h.id != selectedSource) continue;
@@ -622,10 +631,10 @@ Future<void> showAddHoldingDialog(BuildContext context, WidgetRef ref) async {
                 break;
               }
             }
-            int createdId;
-            try {
-              final fx = double.tryParse(fxRateCtrl.text.trim());
-              createdId = await dao.createHolding(HoldingsCompanion.insert(
+            final transactionService = ref.read(transactionServiceProvider);
+            final marketService = ref.read(marketServiceProvider);
+            final fx = double.tryParse(fxRateCtrl.text.trim());
+            final draft = HoldingsCompanion.insert(
                 accountId: accountId.value!,
                 name: name,
                 assetType: type.storageName,
@@ -655,95 +664,30 @@ Future<void> showAddHoldingDialog(BuildContext context, WidgetRef ref) async {
                     ? const Value.absent()
                     : Value(riskLevel.value),
                 currency: Value(finalCurrency),
-              ));
-            } catch (e) {
-              if (context.mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('保存失败：$e')),
-                );
-              }
+              );
+            int createdId;
+            saving.value = true;
+            try {
+              createdId = await transactionService.createHolding(
+                draft,
+                redemptionSourceId: redemptionSourceId,
+                redemptionAmount: redemptionAmount,
+                price: userPrice,
+              );
+            } catch (error) {
+              if (!context.mounted) return;
+              final message = error is ArgumentError
+                  ? error.message
+                  : '请重试';
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text('保存失败：$message')),
+              );
+              saving.value = false;
               return;
             }
-            if (redemptionSourceId != null) {
-              final redemption = await ref
-                  .read(transactionServiceProvider)
-                  .recordRedemption(
-                sourceHoldingId: redemptionSourceId,
-                amount: redemptionAmount,
-                currency: finalCurrency,
-                note: '赎回购买 $name',
-                // 使用用户在对话框里选的买入日期，而不是默认今天：
-                // 补录历史「赎回购买」时日期必须落在发生日，否则历史回放
-                // 会把今天才记的流水放到错误的日子（净值当天凭空跳变）。
-                occurredAt: purchaseDate.value,
-                // Write the matching buy leg too, so the new holding has a
-                // real historical purchase flow (the holding row itself was
-                // just created with its quantity and cost). Before this, a
-                // redeem-to-create left no buy row and the history replay
-                // saw the position appear from nowhere (e.g. 五年国债ETF
-                // 2026-09-24), doubling the cost on that day.
-                targetHoldingId: createdId,
-                targetQuantity: qty,
-                targetPrice: userPrice,
-              );
-              if (!redemption.ok) {
-                if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text(
-                          '持仓已创建，但来源赎回记录失败：${redemption.message ?? ''}'),
-                      backgroundColor: T.up,
-                    ),
-                  );
-                }
-                return;
-              }
-              // Cost-basis conservation: the money that entered this new
-              // holding is the principal that left the source (a
-              // redeem-to-fund is an internal move, like a transfer). For a
-              // share-based target the recorded unit cost is the moved
-              // principal per share — never the market purchase price —
-              // otherwise the redeemed gain is re-booked as new principal,
-              // total cost climbs and the day shows a loss of that size
-              // (2026-09-24「月月宝 → 五年国债ETF」report).
-              if (!isAmount && redemption.movedCost > 0 && qty > 0) {
-                final created = await dao.getHolding(createdId);
-                if (created != null) {
-                  await dao.updateHolding(
-                    created.copyWith(costPrice: redemption.movedCost / qty),
-                  );
-                }
-              }
-            } else {
-              // 直接新增（无赎回来源）：写一条初始化流水，让资产的出现有据
-              // 可查（share→买、现金类→收入、负债→借款）。否则历史回放把
-              // 新建持仓当"凭空出现"，净值在购入日虚增。
-              final initAmount = isAmount
-                  ? (investedResult ?? qty).toDouble()
-                  : (invested ?? qty * (userPrice ?? 0));
-              if (initAmount > 0 && qty > 0) {
-                final created = await ref
-                    .read(transactionServiceProvider)
-                    .recordHoldingCreation(
-                  accountId: accountId.value!,
-                  holdingId: createdId,
-                  type: type,
-                  quantity: qty,
-                  price: userPrice,
-                  amount: initAmount,
-                  currency: finalCurrency,
-                  occurredAt: purchaseDate.value!,
-                  note: '新建持仓：$name',
-                );
-                if (context.mounted && !created.ok) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('持仓已创建，但初始化流水记录失败：'
-                        '${created.message ?? ''}')),
-                  );
-                }
-              }
+            if (context.mounted && ModalRoute.of(context)?.isCurrent == true) {
+              Navigator.pop(context);
             }
-            if (context.mounted) Navigator.pop(context);
 
             // Auto-fetch the latest price for holdings that actually have a
             // live source, unless the user already entered one.
@@ -760,8 +704,7 @@ Future<void> showAddHoldingDialog(BuildContext context, WidgetRef ref) async {
                   (AssetType.fromStorage(created.assetType).isMarketLinked ||
                       isFxLinked(created));
               if (refreshable) {
-                final quote =
-                    await ref.read(marketServiceProvider).refreshHolding(created);
+                final quote = await marketService.refreshHolding(created);
                 if (!context.mounted) return;
                 ScaffoldMessenger.of(context).showSnackBar(
                   quote != null
@@ -776,13 +719,13 @@ Future<void> showAddHoldingDialog(BuildContext context, WidgetRef ref) async {
                 );
               }
             }
-            // Mark history sync dirty; the portfolio page rebuilds the
-            // snapshots when opened next.
-            ref.read(daoProvider).setSetting(historySyncDirtyKey, historyDirtySet);
           },
-          child: const Text('保存'),
+          child: Text(isSaving ? '保存中…' : '保存'),
+          ),
         ),
       ],
+      ),
+      ),
     ),
   );
   // Wait for the dialog's exit animation to finish before releasing the
@@ -796,6 +739,7 @@ Future<void> showAddHoldingDialog(BuildContext context, WidgetRef ref) async {
   latestPriceCtrl.dispose();
   currencyCtrl.dispose();
   fxRateCtrl.dispose();
+  saving.dispose();
 }
 
 Future<void> showUpdatePriceDialog(

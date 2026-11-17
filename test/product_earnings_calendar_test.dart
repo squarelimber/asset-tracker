@@ -42,6 +42,7 @@ Future<void> _pump(
   final nowYear = DateTime.now().year;
   await tester.pumpWidget(ProviderScope(
     overrides: [
+      hideAmountsProvider.overrideWith((ref) => false),
       alertEventsProvider.overrideWith((ref) => Stream.value(<AlertEventRow>[])),
       // The page starts on the current year; keep it empty so the real
       // provider (and its DB access) is never evaluated. Sync overrides skip
@@ -56,6 +57,27 @@ Future<void> _pump(
 }
 
 void main() {
+  testWidgets('privacy masks earnings in year and month views', (tester) async {
+    final year = DateTime.now().year;
+    await _pump(tester, [
+      _product('产品甲', List.filled(12, 100), year),
+    ], year: year);
+    final container = ProviderScope.containerOf(
+      tester.element(find.byType(ProductEarningsCalendarPage)),
+    );
+    expect(find.text('+${Formats.amountCompact(100)}'), findsWidgets);
+    container.read(hideAmountsProvider.notifier).state = true;
+    await tester.pump();
+    expect(find.text('+${Formats.amountCompact(100)}'), findsNothing);
+    expect(find.text('****'), findsWidgets);
+    await tester.tap(find.text('月', findRichText: true).last);
+    await tester.pumpAndSettle();
+    expect(find.text('收益 ****'), findsOneWidget);
+    container.read(hideAmountsProvider.notifier).state = false;
+    await tester.pump();
+    expect(find.text('收益 ${Formats.signedAmount(100)}'), findsOneWidget);
+  });
+
   testWidgets('name column stays pinned while the grid scrolls horizontally',
       (tester) async {
     await _pump(tester, [

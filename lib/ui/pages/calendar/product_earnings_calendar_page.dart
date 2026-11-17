@@ -135,7 +135,10 @@ class _PEBody extends StatelessWidget {
     final calc = const ProductEarningsCalculator();
 
     final rows =
-        _filtered.map((p) => (p: p, months: calc.yearOf(p, year))).toList()
+        _filtered
+            .map((p) => (p: p, months: calc.yearOf(p, year)))
+            .where((row) => row.months.isNotEmpty)
+            .toList()
           ..sort((a, b) {
             final ra = calc.yearlyRate(a.months, a.p, year);
             final rb = calc.yearlyRate(b.months, b.p, year);
@@ -270,7 +273,7 @@ class _PEBody extends StatelessWidget {
           ),
           const SizedBox(height: T.s3),
           Text(
-            '收益为成本法口径：已剔除申赎等本金进出影响；已清仓产品按流水回放保留完整历史，清仓月收益为已实现收益。',
+            '收益按历史快照中的市值减成本的变化计算，已剔除本金进出影响。清仓月份仍可查看产品收益。',
             style: T.label(),
           ),
         ],
@@ -553,7 +556,7 @@ class _HeaderDelegate extends SliverPersistentHeaderDelegate {
   ) => child;
 }
 
-class _MatrixCell extends StatelessWidget {
+class _MatrixCell extends ConsumerWidget {
   const _MatrixCell({
     required this.agg,
     required this.isBest,
@@ -567,7 +570,8 @@ class _MatrixCell extends StatelessWidget {
   final VoidCallback? onTap;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final hide = ref.watch(hideAmountsProvider);
     final hasData = agg != null && agg!.days > 0;
     final rate = agg?.rate;
     final hasRate = hasData && rate != null;
@@ -576,7 +580,7 @@ class _MatrixCell extends StatelessWidget {
     final bg = hasRate
         ? T.heat(rate, -0.10, 0.10)
         : (hasData ? T.surface2 : T.surface);
-    final fg = hasRate ? T.changeColor(rate) : T.text3;
+    final fg = hasRate && rate != 0 ? T.text1 : T.text3;
     return Padding(
       padding: const EdgeInsets.all(T.s1),
       child: InkWell(
@@ -595,6 +599,8 @@ class _MatrixCell extends StatelessWidget {
                     ? Text(
                         !hasData
                             ? '--'
+                            : hide
+                            ? '****'
                             : hasProfit
                             ? '${profit >= 0 ? '+' : ''}${Formats.amountCompact(profit)}'
                             : '0',
@@ -631,14 +637,15 @@ class _MatrixCell extends StatelessWidget {
   }
 }
 
-class _YearlyCell extends StatelessWidget {
+class _YearlyCell extends ConsumerWidget {
   const _YearlyCell({required this.profit, required this.rate});
 
   final double profit;
   final double? rate;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final hide = ref.watch(hideAmountsProvider);
     final hasRate = rate != null;
     return Padding(
       padding: const EdgeInsets.all(T.s1),
@@ -660,7 +667,7 @@ class _YearlyCell extends StatelessWidget {
               ),
             ),
             Text(
-              Formats.amountCompact(profit),
+              hide ? '****' : Formats.amountCompact(profit),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: T.mono(size: 10, color: T.text3),
@@ -698,7 +705,7 @@ class _ClosedBadge extends StatelessWidget {
   }
 }
 
-class _MonthList extends StatelessWidget {
+class _MonthList extends ConsumerWidget {
   const _MonthList({
     required this.rows,
     required this.year,
@@ -710,7 +717,8 @@ class _MonthList extends StatelessWidget {
   final int month;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final hide = ref.watch(hideAmountsProvider);
     if (rows.isEmpty) {
       return const TerminalCard(
         child: Center(
@@ -767,14 +775,16 @@ class _MonthList extends StatelessWidget {
                       ),
                       const SizedBox(height: T.s1),
                       Text(
-                        '收益 ${Formats.signedAmount(row.m.profit)}',
+                        hide
+                            ? '收益 ****'
+                            : '收益 ${Formats.signedAmount(row.m.profit)}',
                         style: T.mono(size: 11, color: T.text2),
                       ),
                     ],
                   ),
                 ),
                 Sparkline(
-                  values: _netSeries(row.p),
+                  values: row.m.dailyProfits,
                   color: T.changeColor(row.m.profit),
                   width: 84,
                   height: 36,
@@ -784,23 +794,5 @@ class _MonthList extends StatelessWidget {
           ),
       ],
     );
-  }
-
-  List<double> _netSeries(ProductEarnings p) {
-    final prefix = '$year-${month.toString().padLeft(2, '0')}';
-    final nets = <double>[];
-    double? prevNet;
-    for (final d in p.daily) {
-      if (!d.date.startsWith(prefix)) {
-        if (d.date.compareTo(prefix) < 0) {
-          prevNet = d.value - d.cost;
-        }
-        continue;
-      }
-      final net = d.value - d.cost;
-      if (prevNet != null) nets.add(net - prevNet);
-      prevNet = net;
-    }
-    return nets;
   }
 }
