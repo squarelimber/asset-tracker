@@ -1,5 +1,6 @@
 import 'package:asset_tracker/app/providers.dart';
 import 'package:asset_tracker/data/database.dart';
+import 'package:asset_tracker/ui/pages/portfolio/portfolio_intraday.dart';
 import 'package:asset_tracker/ui/pages/portfolio/portfolio_widgets.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/gestures.dart';
@@ -14,7 +15,7 @@ void main() {
     tester.view.physicalSize = const Size(320, 700);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
-    final now = DateTime.now();
+    final now = DateTime.utc(2026, 11, 18, 8);
     final previousYear = DateTime(now.year - 1, 6, 15);
     await tester.pumpWidget(
       ProviderScope(
@@ -32,7 +33,9 @@ void main() {
             ]),
           ),
         ],
-        child: const MaterialApp(home: Scaffold(body: NetWorthChart())),
+        child: MaterialApp(
+          home: Scaffold(body: NetWorthChart(clock: () => now)),
+        ),
       ),
     );
     await tester.pumpAndSettle();
@@ -48,20 +51,37 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('trend chart responds to mouse and touch with a single overlay', (tester) async {
+  testWidgets('trend chart responds to mouse and touch with a single overlay', (
+    tester,
+  ) async {
     tester.view.physicalSize = const Size(1000, 900);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
-    final now = DateTime.now();
-    final rows = List.generate(3, (i) => SnapshotRow(
-      date: now.subtract(Duration(days: 2 - i)).toIso8601String().substring(0, 10),
-      currency: 'CNY', totalValue: 1100 + i * 100,
-      totalCost: 1000, liabilities: 0, createdAt: now,
-    ));
-    await tester.pumpWidget(ProviderScope(
-      overrides: [snapshotsProvider.overrideWith((ref) => Stream.value(rows))],
-      child: const MaterialApp(home: Scaffold(body: NetWorthChart())),
-    ));
+    final now = DateTime.utc(2026, 11, 18, 8);
+    final rows = List.generate(
+      3,
+      (i) => SnapshotRow(
+        date: now
+            .subtract(Duration(days: 2 - i))
+            .toIso8601String()
+            .substring(0, 10),
+        currency: 'CNY',
+        totalValue: 1100 + i * 100,
+        totalCost: 1000,
+        liabilities: 0,
+        createdAt: now,
+      ),
+    );
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          snapshotsProvider.overrideWith((ref) => Stream.value(rows)),
+        ],
+        child: MaterialApp(
+          home: Scaffold(body: NetWorthChart(clock: () => now)),
+        ),
+      ),
+    );
     await tester.pump();
     await tester.pump(const Duration(seconds: 1));
     final chart = find.byType(LineChart);
@@ -70,7 +90,10 @@ void main() {
       tester.getBottomLeft(find.text('全部')).dy,
       lessThan(tester.getTopLeft(chart).dy),
     );
-    expect(tester.widget<LineChart>(chart).data.lineTouchData.handleBuiltInTouches, isFalse);
+    expect(
+      tester.widget<LineChart>(chart).data.lineTouchData.handleBuiltInTouches,
+      isFalse,
+    );
     // The Y-axis consumes 48px on desktop, so the middle point is 24px
     // to the right of the widget's geometric center.
     final center = tester.getCenter(chart) + const Offset(24, 0);
@@ -78,7 +101,8 @@ void main() {
     await mouse.addPointer(location: center);
     await mouse.moveTo(center + const Offset(1, 0));
     await tester.pump();
-    dynamic overlay() => tester.widgetList<CustomPaint>(find.byType(CustomPaint))
+    dynamic overlay() => tester
+        .widgetList<CustomPaint>(find.byType(CustomPaint))
         .map((w) => w.painter)
         .firstWhere((p) => p.runtimeType.toString() == '_TrendOverlayPainter');
     expect(overlay().hoverIndex, isNotNull);
@@ -93,5 +117,35 @@ void main() {
     await touch.cancel();
     await tester.pump();
     expect(overlay().hoverIndex, isNull);
+  });
+
+  testWidgets('auto range changes at the close and keeps a manual choice', (
+    tester,
+  ) async {
+    var now = DateTime.utc(2026, 11, 18, 6, 59);
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          snapshotsProvider.overrideWith((ref) => Stream.value([])),
+          portfolioIntradayProvider.overrideWith(
+            (ref, day) => Stream.value([]),
+          ),
+        ],
+        child: MaterialApp(
+          home: Scaffold(body: NetWorthChart(clock: () => now)),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('今日盈亏走势'), findsOneWidget);
+
+    now = DateTime.utc(2026, 11, 18, 7);
+    await tester.pump(const Duration(seconds: 15));
+    expect(find.text('净值趋势'), findsOneWidget);
+
+    await tester.tap(find.text('今日'));
+    await tester.pumpAndSettle();
+    await tester.pump(const Duration(seconds: 15));
+    expect(find.text('今日盈亏走势'), findsOneWidget);
   });
 }

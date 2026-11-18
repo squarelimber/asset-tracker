@@ -330,18 +330,21 @@ class AllocationCard extends ConsumerWidget {
 
 /// Net worth and return trends with range statistics and benchmark overlays.
 class NetWorthChart extends ConsumerStatefulWidget {
-  const NetWorthChart({super.key});
+  const NetWorthChart({super.key, this.clock = DateTime.now});
+
+  final DateTime Function() clock;
 
   @override
   ConsumerState<NetWorthChart> createState() => _NetWorthChartState();
 }
 
 class _PortfolioIntradayTrend extends ConsumerWidget {
-  const _PortfolioIntradayTrend();
+  const _PortfolioIntradayTrend({required this.day});
+
+  final String day;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final day = todayKey(chinaMarketTime(DateTime.now()));
     final samples = ref.watch(portfolioIntradayProvider(day));
     final hidden = ref.watch(hideAmountsProvider);
     return samples.when(
@@ -398,11 +401,11 @@ class _NetWorthChartState extends ConsumerState<NetWorthChart> {
   @override
   void initState() {
     super.initState();
-    final now = DateTime.now();
+    final now = widget.clock();
     _autoToday = prefersTodayTrend(now);
     _marketDay = todayKey(chinaMarketTime(now));
     _sessionTimer = Timer.periodic(const Duration(seconds: 15), (_) {
-      final now = DateTime.now();
+      final now = widget.clock();
       final today = prefersTodayTrend(now);
       final day = todayKey(chinaMarketTime(now));
       if (day != _marketDay || (_manualRange == null && today != _autoToday)) {
@@ -544,7 +547,7 @@ class _NetWorthChartState extends ConsumerState<NetWorthChart> {
         .where((code) => !_benchData.containsKey(code))
         .toList();
     if (missing.isEmpty) return;
-    final now = DateTime.now();
+    final now = widget.clock();
     // Sina K-lines have no CORS support; the web build uses Tencent's.
     final HistoryDataSource source = kIsWeb
         ? TencentHistorySource()
@@ -570,7 +573,7 @@ class _NetWorthChartState extends ConsumerState<NetWorthChart> {
   }
 
   Future<void> _pickCustomRange() async {
-    final now = DateTime.now();
+    final now = widget.clock();
     final from = await showDatePicker(
       context: context,
       initialDate: _customFrom ?? now.subtract(const Duration(days: 90)),
@@ -665,11 +668,11 @@ class _NetWorthChartState extends ConsumerState<NetWorthChart> {
               ),
             ),
           if (_range == RangeOption.today)
-            const _PortfolioIntradayTrend()
+            _PortfolioIntradayTrend(day: _marketDay)
           else
             snapshots.when(
               data: (all) {
-                final now = DateTime.now();
+                final now = widget.clock();
                 final startDate = _range == RangeOption.custom
                     ? _customFrom
                     : _range.startDate(now);
