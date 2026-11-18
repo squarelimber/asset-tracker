@@ -8,12 +8,14 @@ import 'package:asset_tracker/domain/holding_valuation.dart';
 import 'package:asset_tracker/services/market/market_service.dart';
 import 'package:asset_tracker/ui/components/asset_overview_card.dart';
 import 'package:asset_tracker/ui/pages/calendar/earnings_calendar_page.dart';
+import 'package:asset_tracker/ui/pages/holdings/holding_kline_page.dart';
 import 'package:asset_tracker/ui/pages/portfolio/day_detail_sheet.dart';
 import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
 
 class _NoMarket extends MarketService {
   _NoMarket(super.dao);
@@ -97,6 +99,24 @@ void main() {
         expect(find.byType(DayDetailSheet), findsOneWidget);
         expect(find.text('${Formats.date(now)} 当日收益明细'), findsOneWidget);
         expect(find.text('日历收益 +¥10.00'), findsOneWidget);
+        await tester.tap(
+          find.descendant(
+            of: find.byType(DayDetailSheet),
+            matching: find.text('测试产品'),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(find.byType(HoldingKlinePage), findsOneWidget);
+        expect(
+          GoRouter.of(
+            tester.element(find.byType(HoldingKlinePage)),
+          ).state.uri.path,
+          '/holdings/$id',
+        );
+        expect(find.text('持仓信息'), findsOneWidget);
+        await tester.binding.handlePopRoute();
+        await tester.pumpAndSettle();
+        expect(find.byType(DayDetailSheet), findsOneWidget);
         Navigator.of(tester.element(find.byType(DayDetailSheet))).pop();
         for (var i = 0; i < 3; i++) {
           await tester.pump(const Duration(milliseconds: 300));
@@ -113,6 +133,32 @@ void main() {
         expect(find.text('${Formats.date(now)} 当日收益明细'), findsOneWidget);
         expect(find.text('日历收益 +¥10.00'), findsOneWidget);
         expect(find.textContaining('明细合计 +¥10.00'), findsOneWidget);
+        final router = GoRouter.of(
+          tester.element(find.byType(EarningsCalendarPage)),
+        );
+        if (width < 1100) {
+          await tester.tap(find.byTooltip('设置'));
+          await tester.pumpAndSettle();
+          expect(router.state.uri.path, '/settings');
+          await tester.binding.handlePopRoute();
+          await tester.pumpAndSettle();
+          expect(router.state.uri.path, '/earnings-calendar');
+        }
+        await tester.tap(find.byTooltip('返回'));
+        for (var i = 0; i < 3; i++) {
+          await tester.pump(const Duration(milliseconds: 300));
+        }
+        expect(router.state.uri.path, '/portfolio');
+
+        router.go('/earnings-calendar');
+        for (var i = 0; i < 3; i++) {
+          await tester.pump(const Duration(milliseconds: 300));
+        }
+        await tester.binding.handlePopRoute();
+        for (var i = 0; i < 3; i++) {
+          await tester.pump(const Duration(milliseconds: 300));
+        }
+        expect(router.state.uri.path, '/stats');
         expect(tester.takeException(), isNull);
         await tester.pumpWidget(const SizedBox.shrink());
         await tester.pump(const Duration(milliseconds: 1));

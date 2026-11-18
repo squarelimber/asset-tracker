@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/providers.dart';
 import '../../core/formats.dart';
+import '../pages/holdings/open_holding_details.dart';
 import '../tokens.dart';
 import 'terminal_card.dart';
 
@@ -86,38 +87,46 @@ class DayEarningsPanel extends ConsumerWidget {
               ),
               const Divider(height: 24),
               for (final row in data.rows)
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 7),
-                  child: Row(
-                    children: [
-                      Icon(row.type.icon, size: 16, color: row.type.color),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              row.name,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(fontSize: 13),
-                            ),
-                            Text(
-                              '市值 ${money(row.value)}',
-                              style: T.mono(size: 11, color: T.text3),
-                            ),
-                          ],
+                InkWell(
+                  onTap: () => openHoldingDetails(context, row.holdingId),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 7),
+                    child: Row(
+                      children: [
+                        Icon(row.type.icon, size: 16, color: row.type.color),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                row.name,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(fontSize: 13),
+                              ),
+                              Text(
+                                '市值 ${money(row.value)}',
+                                style: T.mono(size: 11, color: T.text3),
+                              ),
+                            ],
+                          ),
                         ),
-                      ),
-                      const SizedBox(width: 10),
-                      Text(
-                        signed(row.profit),
-                        style: T.mono(
-                          size: 13,
-                          color: T.changeColor(row.profit),
+                        const SizedBox(width: 10),
+                        Text(
+                          signed(row.profit),
+                          style: T.mono(
+                            size: 13,
+                            color: T.changeColor(row.profit),
+                          ),
                         ),
-                      ),
-                    ],
+                        const Icon(
+                          Icons.chevron_right,
+                          size: 18,
+                          color: T.text3,
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               const SizedBox(height: 12),

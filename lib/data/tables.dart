@@ -25,6 +25,7 @@ class Holdings extends Table {
   RealColumn get quantity => real().withDefault(const Constant(0))();
   RealColumn get costPrice => real().withDefault(const Constant(0))();
   RealColumn get latestPrice => real().withDefault(const Constant(0))();
+  TextColumn get manualNavHistory => text().nullable()();
   TextColumn get currency => text().withDefault(const Constant('CNY'))();
 
   /// Foreign-currency -> CNY exchange rate recorded at purchase time, used

@@ -232,11 +232,13 @@ final historySyncProvider = FutureProvider<BackfillResult?>((ref) async {
   final result = await ref
       .read(historyBackfillServiceProvider)
       .backfill(forceRebuild: dirty == historyDirtySet || firstRun);
-  if (dirty == historyDirtySet) {
-    await dao.setSetting(historySyncDirtyKey, historyDirtyClear);
-  }
-  if (firstRun) {
-    await dao.setSetting(historySyncV6Key, '1');
+  if (!result.historyUnavailable) {
+    if (dirty == historyDirtySet) {
+      await dao.setSetting(historySyncDirtyKey, historyDirtyClear);
+    }
+    if (firstRun) {
+      await dao.setSetting(historySyncV6Key, '1');
+    }
   }
   // Today is covered by the backfill itself, with replay rules identical to
   // every earlier day (today priced at the refreshed live quote), so its

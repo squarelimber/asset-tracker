@@ -135,6 +135,83 @@ void main() {
     await tester.pumpAndSettle();
     expect(router.state.uri.path, '/portfolio');
   });
+
+  testWidgets('phone tabs and detail return one page at a time', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(390, 850);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final router = GoRouter(
+      initialLocation: '/portfolio',
+      routes: [
+        ShellRoute(
+          builder: (context, state, child) => ShellPage(child: child),
+          routes: [
+            GoRoute(path: '/portfolio', builder: (_, _) => const Scaffold()),
+            GoRoute(
+              path: '/holdings',
+              builder: (_, _) => Scaffold(
+                appBar: AppBar(title: const Text('持仓列表')),
+                body: const TextField(),
+              ),
+            ),
+            GoRoute(
+              path: '/accounts',
+              builder: (context, _) => Scaffold(
+                appBar: AppBar(title: const Text('账户列表')),
+                body: TextButton(
+                  onPressed: () => context.push('/accounts/7'),
+                  child: const Text('账户七'),
+                ),
+              ),
+              routes: [
+                GoRoute(
+                  path: ':id',
+                  builder: (_, _) =>
+                      Scaffold(appBar: AppBar(title: const Text('账户详情'))),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ],
+    );
+    addTearDown(router.dispose);
+    await tester.pumpWidget(app(router));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.widgetWithText(NavigationDestination, '持仓'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), 'ETF');
+    await tester.tap(find.widgetWithText(NavigationDestination, '账户'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(NavigationDestination, '账户'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('账户七'));
+    await tester.pumpAndSettle();
+    expect(router.state.uri.path, '/accounts/7');
+
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    expect(router.state.uri.path, '/accounts');
+    await tester.tap(find.byType(BackButton));
+    await tester.pumpAndSettle();
+    expect(router.state.uri.path, '/holdings');
+    expect(
+      tester.widget<EditableText>(find.byType(EditableText)).controller.text,
+      'ETF',
+    );
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    expect(router.state.uri.path, '/portfolio');
+
+    router.go('/accounts/7');
+    await tester.pumpAndSettle();
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    expect(router.state.uri.path, '/accounts');
+  });
 }
 
 class _SecondaryAppBar extends StatelessWidget implements PreferredSizeWidget {

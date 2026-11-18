@@ -197,12 +197,22 @@ class _PortfolioPageState extends ConsumerState<PortfolioPage> {
     ref.watch(historySyncProvider);
     ref.listen<AsyncValue<BackfillResult?>>(historySyncProvider, (prev, next) {
       final result = next.value;
-      if (result == null || !result.ok) return;
+      if (result == null || (!result.ok && !result.historyUnavailable)) return;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text(result.message ?? '历史净值已是最新')));
+        ).showSnackBar(SnackBar(
+          content: Text(result.message ?? '历史净值已是最新'),
+          action: result.historyUnavailable
+              ? SnackBarAction(
+                  label: '重试',
+                  onPressed: () {
+                    if (mounted) ref.invalidate(historySyncProvider);
+                  },
+                )
+              : null,
+        ));
       });
     });
     return KeyShortcuts(

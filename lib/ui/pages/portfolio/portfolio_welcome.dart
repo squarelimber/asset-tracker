@@ -37,7 +37,7 @@ class PortfolioWelcome extends StatelessWidget {
               children: [
                 FilledButton.icon(
                   onPressed: () =>
-                      context.go(hasAccounts ? '/holdings' : '/accounts'),
+                      context.push(hasAccounts ? '/holdings' : '/accounts'),
                   icon: const Icon(Icons.add, size: 17),
                   label: Text(hasAccounts ? '添加第一笔持仓' : '创建第一个账户'),
                 ),
@@ -115,8 +115,7 @@ class PortfolioWelcome extends StatelessWidget {
   ) => Material(
     color: Colors.transparent,
     child: InkWell(
-      onTap: () =>
-          path == '/transactions' ? context.push(path) : context.go(path),
+      onTap: () => context.push(path),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 18),
         child: Row(

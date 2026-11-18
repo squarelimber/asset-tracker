@@ -8,7 +8,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../app/providers.dart';
 import '../../../core/enums.dart';
 import '../../../core/formats.dart';
-import '../../../core/history_sync.dart';
 import '../../../core/responsive.dart';
 import '../../../data/database.dart';
 import '../../../domain/trade_stats.dart';
@@ -214,8 +213,7 @@ class _TransactionsPageState extends ConsumerState<TransactionsPage> {
       builder: (context) => AlertDialog(
         title: const Text('修改流水日期'),
         content: const Text(
-          '将更改这笔流水在历史净值中的归属日期，'
-          '保存后会自动全量重算历史。',
+          '保存后会重算历史净值。若这笔流水属于同一笔赎回出资，关联的赎回和买入会一起调整日期。',
         ),
         actions: [
           TextButton(
@@ -230,30 +228,21 @@ class _TransactionsPageState extends ConsumerState<TransactionsPage> {
       ),
     );
     if (confirm != true || !mounted) return;
-    final local = t.occurredAt;
+    final local = DateUtils.dateOnly(t.occurredAt.toLocal());
+    final today = DateUtils.dateOnly(DateTime.now());
+    final earliest = DateTime(2020);
     final picked = await showDatePicker(
       context: context,
-      initialDate: local,
-      firstDate: DateTime(2020),
-      lastDate: DateTime.now(),
+      initialDate: local.isAfter(today) ? today : local,
+      firstDate: local.isBefore(earliest) ? local : earliest,
+      lastDate: today,
     );
-    if (picked == null || !mounted) return;
-    final when = DateTime(
-      picked.year,
-      picked.month,
-      picked.day,
-      local.hour,
-      local.minute,
-      local.second,
-    );
-    final dao = ref.read(daoProvider);
-    await dao.updateTransaction(t.copyWith(occurredAt: when));
-    await dao.setSetting(historySyncDirtyKey, historyDirtySet);
-    await dao.setSetting(historyFullRebuildKey, '1');
+    if (picked == null || picked == local || !mounted) return;
+    final result = await ref.read(transactionServiceProvider).reschedule(t.id, picked);
     if (mounted) {
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(const SnackBar(content: Text('流水日期已更新，将重建全部历史净值')));
+      ).showSnackBar(SnackBar(content: Text(result.message ?? '流水日期已更新')));
     }
   }
 
@@ -278,9 +267,7 @@ class _TransactionsPageState extends ConsumerState<TransactionsPage> {
 
     return Scaffold(
       appBar: AppBar(
-        leading: Responsive.isDesktop(context)
-            ? null
-            : const SecondaryPageBackButton(),
+        leading: const SecondaryPageBackButton(),
         title: const Text('交易流水'),
         actions: [
           IconButton(

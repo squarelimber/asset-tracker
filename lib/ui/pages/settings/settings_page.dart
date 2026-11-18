@@ -35,9 +35,7 @@ class SettingsPage extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     return Scaffold(
       appBar: AppBar(
-        leading: Responsive.isDesktop(context)
-            ? null
-            : const SecondaryPageBackButton(),
+        leading: const SecondaryPageBackButton(),
         title: const Text('设置'),
         actions: const [TerminalAppBarActions()],
       ),

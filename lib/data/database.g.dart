@@ -555,6 +555,17 @@ class $HoldingsTable extends Holdings
     requiredDuringInsert: false,
     defaultValue: const Constant(0),
   );
+  static const VerificationMeta _manualNavHistoryMeta = const VerificationMeta(
+    'manualNavHistory',
+  );
+  @override
+  late final GeneratedColumn<String> manualNavHistory = GeneratedColumn<String>(
+    'manual_nav_history',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
   static const VerificationMeta _currencyMeta = const VerificationMeta(
     'currency',
   );
@@ -685,6 +696,7 @@ class $HoldingsTable extends Holdings
     quantity,
     costPrice,
     latestPrice,
+    manualNavHistory,
     currency,
     costFxRate,
     purchaseDate,
@@ -768,6 +780,15 @@ class $HoldingsTable extends Holdings
         latestPrice.isAcceptableOrUnknown(
           data['latest_price']!,
           _latestPriceMeta,
+        ),
+      );
+    }
+    if (data.containsKey('manual_nav_history')) {
+      context.handle(
+        _manualNavHistoryMeta,
+        manualNavHistory.isAcceptableOrUnknown(
+          data['manual_nav_history']!,
+          _manualNavHistoryMeta,
         ),
       );
     }
@@ -888,6 +909,10 @@ class $HoldingsTable extends Holdings
         DriftSqlType.double,
         data['${effectivePrefix}latest_price'],
       )!,
+      manualNavHistory: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}manual_nav_history'],
+      ),
       currency: attachedDatabase.typeMapping.read(
         DriftSqlType.string,
         data['${effectivePrefix}currency'],
@@ -947,6 +972,7 @@ class HoldingRow extends DataClass implements Insertable<HoldingRow> {
   final double quantity;
   final double costPrice;
   final double latestPrice;
+  final String? manualNavHistory;
   final String currency;
 
   /// Foreign-currency -> CNY exchange rate recorded at purchase time, used
@@ -994,6 +1020,7 @@ class HoldingRow extends DataClass implements Insertable<HoldingRow> {
     required this.quantity,
     required this.costPrice,
     required this.latestPrice,
+    this.manualNavHistory,
     required this.currency,
     this.costFxRate,
     this.purchaseDate,
@@ -1019,6 +1046,9 @@ class HoldingRow extends DataClass implements Insertable<HoldingRow> {
     map['quantity'] = Variable<double>(quantity);
     map['cost_price'] = Variable<double>(costPrice);
     map['latest_price'] = Variable<double>(latestPrice);
+    if (!nullToAbsent || manualNavHistory != null) {
+      map['manual_nav_history'] = Variable<String>(manualNavHistory);
+    }
     map['currency'] = Variable<String>(currency);
     if (!nullToAbsent || costFxRate != null) {
       map['cost_fx_rate'] = Variable<double>(costFxRate);
@@ -1055,6 +1085,9 @@ class HoldingRow extends DataClass implements Insertable<HoldingRow> {
       quantity: Value(quantity),
       costPrice: Value(costPrice),
       latestPrice: Value(latestPrice),
+      manualNavHistory: manualNavHistory == null && nullToAbsent
+          ? const Value.absent()
+          : Value(manualNavHistory),
       currency: Value(currency),
       costFxRate: costFxRate == null && nullToAbsent
           ? const Value.absent()
@@ -1091,6 +1124,7 @@ class HoldingRow extends DataClass implements Insertable<HoldingRow> {
       quantity: serializer.fromJson<double>(json['quantity']),
       costPrice: serializer.fromJson<double>(json['costPrice']),
       latestPrice: serializer.fromJson<double>(json['latestPrice']),
+      manualNavHistory: serializer.fromJson<String?>(json['manualNavHistory']),
       currency: serializer.fromJson<String>(json['currency']),
       costFxRate: serializer.fromJson<double?>(json['costFxRate']),
       purchaseDate: serializer.fromJson<DateTime?>(json['purchaseDate']),
@@ -1116,6 +1150,7 @@ class HoldingRow extends DataClass implements Insertable<HoldingRow> {
       'quantity': serializer.toJson<double>(quantity),
       'costPrice': serializer.toJson<double>(costPrice),
       'latestPrice': serializer.toJson<double>(latestPrice),
+      'manualNavHistory': serializer.toJson<String?>(manualNavHistory),
       'currency': serializer.toJson<String>(currency),
       'costFxRate': serializer.toJson<double?>(costFxRate),
       'purchaseDate': serializer.toJson<DateTime?>(purchaseDate),
@@ -1139,6 +1174,7 @@ class HoldingRow extends DataClass implements Insertable<HoldingRow> {
     double? quantity,
     double? costPrice,
     double? latestPrice,
+    Value<String?> manualNavHistory = const Value.absent(),
     String? currency,
     Value<double?> costFxRate = const Value.absent(),
     Value<DateTime?> purchaseDate = const Value.absent(),
@@ -1159,6 +1195,9 @@ class HoldingRow extends DataClass implements Insertable<HoldingRow> {
     quantity: quantity ?? this.quantity,
     costPrice: costPrice ?? this.costPrice,
     latestPrice: latestPrice ?? this.latestPrice,
+    manualNavHistory: manualNavHistory.present
+        ? manualNavHistory.value
+        : this.manualNavHistory,
     currency: currency ?? this.currency,
     costFxRate: costFxRate.present ? costFxRate.value : this.costFxRate,
     purchaseDate: purchaseDate.present ? purchaseDate.value : this.purchaseDate,
@@ -1187,6 +1226,9 @@ class HoldingRow extends DataClass implements Insertable<HoldingRow> {
       latestPrice: data.latestPrice.present
           ? data.latestPrice.value
           : this.latestPrice,
+      manualNavHistory: data.manualNavHistory.present
+          ? data.manualNavHistory.value
+          : this.manualNavHistory,
       currency: data.currency.present ? data.currency.value : this.currency,
       costFxRate: data.costFxRate.present
           ? data.costFxRate.value
@@ -1220,6 +1262,7 @@ class HoldingRow extends DataClass implements Insertable<HoldingRow> {
           ..write('quantity: $quantity, ')
           ..write('costPrice: $costPrice, ')
           ..write('latestPrice: $latestPrice, ')
+          ..write('manualNavHistory: $manualNavHistory, ')
           ..write('currency: $currency, ')
           ..write('costFxRate: $costFxRate, ')
           ..write('purchaseDate: $purchaseDate, ')
@@ -1245,6 +1288,7 @@ class HoldingRow extends DataClass implements Insertable<HoldingRow> {
     quantity,
     costPrice,
     latestPrice,
+    manualNavHistory,
     currency,
     costFxRate,
     purchaseDate,
@@ -1269,6 +1313,7 @@ class HoldingRow extends DataClass implements Insertable<HoldingRow> {
           other.quantity == this.quantity &&
           other.costPrice == this.costPrice &&
           other.latestPrice == this.latestPrice &&
+          other.manualNavHistory == this.manualNavHistory &&
           other.currency == this.currency &&
           other.costFxRate == this.costFxRate &&
           other.purchaseDate == this.purchaseDate &&
@@ -1291,6 +1336,7 @@ class HoldingsCompanion extends UpdateCompanion<HoldingRow> {
   final Value<double> quantity;
   final Value<double> costPrice;
   final Value<double> latestPrice;
+  final Value<String?> manualNavHistory;
   final Value<String> currency;
   final Value<double?> costFxRate;
   final Value<DateTime?> purchaseDate;
@@ -1311,6 +1357,7 @@ class HoldingsCompanion extends UpdateCompanion<HoldingRow> {
     this.quantity = const Value.absent(),
     this.costPrice = const Value.absent(),
     this.latestPrice = const Value.absent(),
+    this.manualNavHistory = const Value.absent(),
     this.currency = const Value.absent(),
     this.costFxRate = const Value.absent(),
     this.purchaseDate = const Value.absent(),
@@ -1332,6 +1379,7 @@ class HoldingsCompanion extends UpdateCompanion<HoldingRow> {
     this.quantity = const Value.absent(),
     this.costPrice = const Value.absent(),
     this.latestPrice = const Value.absent(),
+    this.manualNavHistory = const Value.absent(),
     this.currency = const Value.absent(),
     this.costFxRate = const Value.absent(),
     this.purchaseDate = const Value.absent(),
@@ -1355,6 +1403,7 @@ class HoldingsCompanion extends UpdateCompanion<HoldingRow> {
     Expression<double>? quantity,
     Expression<double>? costPrice,
     Expression<double>? latestPrice,
+    Expression<String>? manualNavHistory,
     Expression<String>? currency,
     Expression<double>? costFxRate,
     Expression<DateTime>? purchaseDate,
@@ -1376,6 +1425,7 @@ class HoldingsCompanion extends UpdateCompanion<HoldingRow> {
       if (quantity != null) 'quantity': quantity,
       if (costPrice != null) 'cost_price': costPrice,
       if (latestPrice != null) 'latest_price': latestPrice,
+      if (manualNavHistory != null) 'manual_nav_history': manualNavHistory,
       if (currency != null) 'currency': currency,
       if (costFxRate != null) 'cost_fx_rate': costFxRate,
       if (purchaseDate != null) 'purchase_date': purchaseDate,
@@ -1399,6 +1449,7 @@ class HoldingsCompanion extends UpdateCompanion<HoldingRow> {
     Value<double>? quantity,
     Value<double>? costPrice,
     Value<double>? latestPrice,
+    Value<String?>? manualNavHistory,
     Value<String>? currency,
     Value<double?>? costFxRate,
     Value<DateTime?>? purchaseDate,
@@ -1420,6 +1471,7 @@ class HoldingsCompanion extends UpdateCompanion<HoldingRow> {
       quantity: quantity ?? this.quantity,
       costPrice: costPrice ?? this.costPrice,
       latestPrice: latestPrice ?? this.latestPrice,
+      manualNavHistory: manualNavHistory ?? this.manualNavHistory,
       currency: currency ?? this.currency,
       costFxRate: costFxRate ?? this.costFxRate,
       purchaseDate: purchaseDate ?? this.purchaseDate,
@@ -1462,6 +1514,9 @@ class HoldingsCompanion extends UpdateCompanion<HoldingRow> {
     }
     if (latestPrice.present) {
       map['latest_price'] = Variable<double>(latestPrice.value);
+    }
+    if (manualNavHistory.present) {
+      map['manual_nav_history'] = Variable<String>(manualNavHistory.value);
     }
     if (currency.present) {
       map['currency'] = Variable<String>(currency.value);
@@ -1508,6 +1563,7 @@ class HoldingsCompanion extends UpdateCompanion<HoldingRow> {
           ..write('quantity: $quantity, ')
           ..write('costPrice: $costPrice, ')
           ..write('latestPrice: $latestPrice, ')
+          ..write('manualNavHistory: $manualNavHistory, ')
           ..write('currency: $currency, ')
           ..write('costFxRate: $costFxRate, ')
           ..write('purchaseDate: $purchaseDate, ')
@@ -5249,6 +5305,7 @@ typedef $$HoldingsTableCreateCompanionBuilder =
       Value<double> quantity,
       Value<double> costPrice,
       Value<double> latestPrice,
+      Value<String?> manualNavHistory,
       Value<String> currency,
       Value<double?> costFxRate,
       Value<DateTime?> purchaseDate,
@@ -5271,6 +5328,7 @@ typedef $$HoldingsTableUpdateCompanionBuilder =
       Value<double> quantity,
       Value<double> costPrice,
       Value<double> latestPrice,
+      Value<String?> manualNavHistory,
       Value<String> currency,
       Value<double?> costFxRate,
       Value<DateTime?> purchaseDate,
@@ -5351,6 +5409,11 @@ class $$HoldingsTableFilterComposer
 
   ColumnFilters<double> get latestPrice => $composableBuilder(
     column: $table.latestPrice,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get manualNavHistory => $composableBuilder(
+    column: $table.manualNavHistory,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -5477,6 +5540,11 @@ class $$HoldingsTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<String> get manualNavHistory => $composableBuilder(
+    column: $table.manualNavHistory,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<String> get currency => $composableBuilder(
     column: $table.currency,
     builder: (column) => ColumnOrderings(column),
@@ -5588,6 +5656,11 @@ class $$HoldingsTableAnnotationComposer
     builder: (column) => column,
   );
 
+  GeneratedColumn<String> get manualNavHistory => $composableBuilder(
+    column: $table.manualNavHistory,
+    builder: (column) => column,
+  );
+
   GeneratedColumn<String> get currency =>
       $composableBuilder(column: $table.currency, builder: (column) => column);
 
@@ -5687,6 +5760,7 @@ class $$HoldingsTableTableManager
                 Value<double> quantity = const Value.absent(),
                 Value<double> costPrice = const Value.absent(),
                 Value<double> latestPrice = const Value.absent(),
+                Value<String?> manualNavHistory = const Value.absent(),
                 Value<String> currency = const Value.absent(),
                 Value<double?> costFxRate = const Value.absent(),
                 Value<DateTime?> purchaseDate = const Value.absent(),
@@ -5707,6 +5781,7 @@ class $$HoldingsTableTableManager
                 quantity: quantity,
                 costPrice: costPrice,
                 latestPrice: latestPrice,
+                manualNavHistory: manualNavHistory,
                 currency: currency,
                 costFxRate: costFxRate,
                 purchaseDate: purchaseDate,
@@ -5729,6 +5804,7 @@ class $$HoldingsTableTableManager
                 Value<double> quantity = const Value.absent(),
                 Value<double> costPrice = const Value.absent(),
                 Value<double> latestPrice = const Value.absent(),
+                Value<String?> manualNavHistory = const Value.absent(),
                 Value<String> currency = const Value.absent(),
                 Value<double?> costFxRate = const Value.absent(),
                 Value<DateTime?> purchaseDate = const Value.absent(),
@@ -5749,6 +5825,7 @@ class $$HoldingsTableTableManager
                 quantity: quantity,
                 costPrice: costPrice,
                 latestPrice: latestPrice,
+                manualNavHistory: manualNavHistory,
                 currency: currency,
                 costFxRate: costFxRate,
                 purchaseDate: purchaseDate,

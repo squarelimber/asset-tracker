@@ -42,6 +42,7 @@ class Formats {
 
   /// Format a numeric value to at most 4 decimals.
   static String smartNum(double v) {
+    if (!v.isFinite) return '--';
     if (v == v.roundToDouble()) return v.toInt().toString();
     return _num.format(v);
   }
@@ -55,6 +56,7 @@ class Formats {
   /// value must route through here; the stored number itself is never
   /// rounded, or the rounding error would leak into totals.
   static String plainNum(double v, {int decimals = 3}) {
+    if (!v.isFinite) return '--';
     if (v == v.roundToDouble()) return v.toInt().toString();
     var s = v.toStringAsFixed(decimals);
     s = s.replaceFirst(RegExp(r'\.?0+$'), '');

@@ -640,6 +640,10 @@ void main() {
           sqlite.execute(
             "INSERT INTO snapshots VALUES ('2026-11-05', 'CNY', 1234, 1000, 0, 1)",
           );
+          sqlite.execute(
+            'CREATE TABLE holdings (id INTEGER PRIMARY KEY, latest_price REAL NOT NULL)',
+          );
+          sqlite.execute('INSERT INTO holdings VALUES (1, 1.2345)');
           sqlite.execute('PRAGMA user_version = 12');
         },
       ),
@@ -648,12 +652,17 @@ void main() {
     final snapshot = (await AssetDao(db).getSnapshots()).single;
     expect(snapshot.totalValue, 1234);
     expect(snapshot.holdingValues, isNull);
+    final holding = await db
+        .customSelect('SELECT latest_price, manual_nav_history FROM holdings')
+        .getSingle();
+    expect(holding.read<double>('latest_price'), 1.2345);
+    expect(holding.readNullable<String>('manual_nav_history'), isNull);
     expect(
       (await db.customSelect('PRAGMA user_version').getSingle())
           .data
           .values
           .single,
-      13,
+      14,
     );
   });
 }

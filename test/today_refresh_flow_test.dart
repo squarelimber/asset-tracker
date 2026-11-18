@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:asset_tracker/app/providers.dart';
 import 'package:asset_tracker/core/enums.dart';
+import 'package:asset_tracker/core/history_sync.dart';
 import 'package:asset_tracker/data/asset_dao.dart';
 import 'package:asset_tracker/data/database.dart';
 import 'package:asset_tracker/services/history_backfill_service.dart';
@@ -59,7 +60,49 @@ class _Host extends ConsumerWidget {
   }
 }
 
+class _RetryBackfill extends HistoryBackfillService {
+  _RetryBackfill(super.dao);
+  bool online = false;
+  bool? lastForceRebuild;
+
+  @override
+  Future<BackfillResult> backfill({bool forceRebuild = false, DateTime? now}) async {
+    lastForceRebuild = forceRebuild;
+    return BackfillResult(ok: online, days: online ? 1 : 0, holdings: 1,
+      historyUnavailable: !online, wroteToday: online);
+  }
+}
+
 void main() {
+  test('an interrupted backfill remains queued until a successful retry', () async {
+    final db = AppDatabase(NativeDatabase.memory());
+    addTearDown(db.close);
+    final dao = AssetDao(db);
+    final id = await dao.createAccount(AccountsCompanion.insert(name: 'a', type: 'general'));
+    await dao.createHolding(HoldingsCompanion.insert(accountId: id, name: 'fund', assetType: 'mutual_fund'));
+    await dao.setSetting(historySyncDirtyKey, historyDirtySet);
+    final backfill = _RetryBackfill(dao);
+    final container = ProviderContainer(overrides: [
+      databaseProvider.overrideWithValue(db),
+      tradingCalendarProvider.overrideWith((ref) async {}),
+      historyDirtyFlagProvider.overrideWith((ref) => Stream.value(historyDirtySet)),
+      historyBackfillServiceProvider.overrideWithValue(backfill),
+      marketServiceProvider.overrideWithValue(_FakeMarket(dao, dao)),
+    ]);
+    addTearDown(container.dispose);
+    final subscription = container.listen(historySyncProvider, (_, _) {});
+    addTearDown(subscription.close);
+
+    expect((await container.read(historySyncProvider.future))!.historyUnavailable, isTrue);
+    expect(await dao.getSetting(historySyncDirtyKey), historyDirtySet);
+    expect(await dao.getSetting(historySyncV6Key), isNull);
+    backfill.online = true;
+    expect((await container.refresh(historySyncProvider.future))!.ok, isTrue);
+    expect(backfill.lastForceRebuild, isTrue);
+    expect(await dao.getSetting(historySyncDirtyKey), historyDirtyClear);
+    expect(await dao.getSetting(historySyncV6Key), '1');
+  });
+
   testWidgets('冷启动回填后自动刷新行情并重写今天快照（今日收益无需手动刷新）',
       (tester) async {
     tester.view.physicalSize = const Size(1000, 800);

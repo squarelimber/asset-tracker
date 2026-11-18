@@ -314,6 +314,7 @@ void main() {
         ],
       );
       final product = calc.compute([member(1, 4), member(2, 6)]).single;
+      expect(product.holdingIds, [1, 2]);
       final month = calc.monthOf(product, 2026, 11);
       expect(month.dailyProfits, [10]);
       expect(month.closed, true);

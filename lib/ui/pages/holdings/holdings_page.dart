@@ -3,7 +3,6 @@ import 'dart:async';
 import 'package:flutter/material.dart' hide DataRow;
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 
 import '../../../app/providers.dart';
 import '../../../core/enums.dart';
@@ -15,7 +14,6 @@ import '../../../data/database.dart';
 import '../../../domain/closed_holding.dart';
 import '../../../domain/holding_category.dart';
 import '../../../domain/holding_cost.dart';
-import '../../../domain/holding_kline.dart';
 import '../../../domain/trade_stats.dart';
 import '../../components/app_bar_actions.dart';
 import '../../components/data_row.dart';
@@ -27,11 +25,10 @@ import '../../components/status_chip.dart';
 import '../../components/terminal_card.dart';
 import '../../components/terminal_fab.dart';
 import '../../tokens.dart';
-import 'holding_detail_sheet.dart';
-import 'holding_kline_page.dart';
 import 'holding_dialogs.dart';
 import 'holding_menu.dart';
 import 'holdings_table.dart';
+import 'open_holding_details.dart';
 
 final _refreshingProvider = StateProvider<bool>((ref) => false);
 
@@ -581,21 +578,7 @@ class _HoldingsPageState extends ConsumerState<HoldingsPage> {
     );
   }
 
-  void _openHolding(HoldingRow holding) {
-    if (klineSymbolForHolding(holding) == null) {
-      showHoldingDetailSheet(context, ref, holding);
-      return;
-    }
-    if (GoRouter.maybeOf(context) != null) {
-      context.push('/holdings/${holding.id}');
-    } else {
-      Navigator.of(context).push(
-        MaterialPageRoute<void>(
-          builder: (_) => HoldingKlinePage(holdingId: holding.id),
-        ),
-      );
-    }
-  }
+  void _openHolding(HoldingRow holding) => openHoldingDetails(context, holding.id);
 
   Widget _buildControls(bool desktop) {
     final sections = SegmentedButton<HoldingSection>(

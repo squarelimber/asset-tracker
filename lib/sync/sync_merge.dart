@@ -1,3 +1,4 @@
+import '../core/nav_history.dart';
 import 'sync_format.dart';
 
 /// A tombstone entry as transmitted over the wire.
@@ -162,18 +163,8 @@ class SyncMerger {
       }
     }
 
-    // Holdings 实体级去重：同一账户 + 同一行情代码（symbol 非空时）的
-    // 多个持仓视为同一实体。跨设备自增 id 不同会导致 merge 把同一持仓
-    // 当成两条保留——正是「同步后多出重复黄金ETF」的根源（row key 是
-    // 自增 id，无法跨设备识别同一实体）。这里合并为一条（保留
-    // updatedAt 最新），避免重复持仓污染净值曲线。
-    //
-    // 被淘汰的行只是「去掉多余副本」，其交易历史必须跟随胜者继续存在：
-    // 直接删除 loser 会级联删除它名下的全部交易并写墓碑，而 merge 输出
-    // 又把这些交易原样重插（localTombstones 快照在删除前读取不到新墓碑）
-    // —— 结果是引用已删持仓 id 的孤儿交易被 push 到所有设备。因此在
-    // merge 输出层面把引用 loser id 的交易行改写为 winner id，loser 仅
-    // 作为普通持仓删除，交易本体完整保留。
+    // Copies of the same position can have different IDs on each device.
+    // Keep their transaction history by repointing references before deletion.
     final deduped = _dedupeHoldings(tables[SyncTables.holdings] ?? const []);
     if (deduped.removedKeys.isNotEmpty) {
       tables[SyncTables.holdings] = deduped.rows;
@@ -316,7 +307,19 @@ class SyncMerger {
     if (b == null) return a;
     final at = _updatedAt(a);
     final bt = _updatedAt(b);
-    return at.isAfter(bt) ? a : (bt.isAfter(at) ? b : a);
+    final winner = bt.isAfter(at) ? b : a;
+    final other = identical(winner, a) ? b : a;
+    final otherNav = other['manualNavHistory'];
+    if (otherNav is! String ||
+        winner['assetType'] != other['assetType'] ||
+        winner['symbol'] != other['symbol'] ||
+        winner['currency'] != other['currency']) {
+      return winner;
+    }
+    final values = decodeNavHistory(otherNav);
+    if (values.isEmpty) return winner;
+    values.addAll(decodeNavHistory(winner['manualNavHistory'] as String?));
+    return {...winner, 'manualNavHistory': encodeNavHistory(values)};
   }
 
   static bool _same(Map<String, dynamic>? a, Map<String, dynamic>? b) {
@@ -367,10 +370,9 @@ class SyncMerger {
   /// "黄金ETF 518880" and the server's copy of it survive the merge as two
   /// rows — the duplicated holding behind a sync-triggered net-worth jump.
   ///
-  /// Identity: same `accountId` AND same non-empty `symbol` (the market
-  /// code uniquely identifies an instrument; manual assets with no code stay
-  /// untouched — name-based matching would wrongly merge two manual funds
-  /// with the same display name in the same account). Among the duplicates,
+  /// Identity includes the account, market source, asset type, currency and
+  /// symbol. The same numeric code can identify products in different feeds.
+  /// Holdings without a symbol stay independent. Among the duplicates,
   /// the row with the newest `updatedAt` wins; the others' keys are returned
   /// for deletion (and are not pushed back). [idRewrite] maps each dropped
   /// holding id to the surviving one, so callers can re-point transactions
@@ -386,31 +388,32 @@ class SyncMerger {
     }
     final removed = <String>[];
     final rewrite = <int, int>{};
-    final index = <String, Map<String, dynamic>>{};
+    final index = <(Object?, Object?, Object?, Object?, String), int>{};
     final out = <Map<String, dynamic>>[];
     for (final row in rows) {
-      final symbol = row['symbol'];
-      if (symbol == null || '$symbol'.isEmpty) {
+      final symbol = row['symbol']?.toString().trim();
+      if (symbol == null || symbol.isEmpty) {
         out.add(row);
         continue;
       }
-      final key = '${row['accountId']}|$symbol';
-      final existing = index[key];
-      if (existing == null) {
-        index[key] = row;
+      final key = (
+        row['accountId'],
+        row['marketSource'],
+        row['assetType'],
+        row['currency'],
+        symbol,
+      );
+      final position = index[key];
+      if (position == null) {
+        index[key] = out.length;
         out.add(row);
         continue;
       }
-      // Same instrument in the same account: keep the newer.
+      final existing = out[position];
       final keep = _newerOf(existing, row)!;
-      final drop = identical(keep, existing) ? row : existing;
-      if (identical(keep, existing)) {
-        index[key] = keep;
-      } else {
-        index[key] = keep;
-        out.remove(existing);
-        out.add(keep);
-      }
+      // Combining NAV observations can produce a copy of the winning row.
+      final drop = keep['id'] == existing['id'] ? row : existing;
+      out[position] = keep;
       final dropId = (drop['id'] as num?)?.toInt();
       final keepId = (keep['id'] as num?)?.toInt();
       removed.add('${drop['id']}');
@@ -435,8 +438,11 @@ class SyncMerger {
       final raw = copy[field];
       if (raw == null) continue;
       final v = (raw as num).toInt();
-      final to = idRewrite[v];
-      if (to == null) continue;
+      var to = v;
+      while (idRewrite.containsKey(to)) {
+        to = idRewrite[to]!;
+      }
+      if (to == v) continue;
       copy[field] = to;
       changed = true;
     }

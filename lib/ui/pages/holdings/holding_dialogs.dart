@@ -6,6 +6,7 @@ import '../../../app/providers.dart';
 import '../../../core/enums.dart';
 import '../../../core/formats.dart';
 import '../../../core/history_sync.dart';
+import '../../../core/nav_history.dart';
 import '../../../core/symbols.dart';
 import '../../../data/database.dart';
 import '../../../domain/holding_type_conversion.dart';
@@ -33,7 +34,8 @@ String _plainNum(double v) => Formats.plainNum(v, decimals: 4);
 /// silently changing the number. Untouched fields must round-trip unchanged.
 double? _parseEditable(String text, String prefill, double original) {
   final t = text.trim();
-  return t == prefill ? original : double.tryParse(t);
+  final value = t == prefill ? original : double.tryParse(t);
+  return value?.isFinite == true ? value : null;
 }
 
 /// Caps an AlertDialog's total height so the dialog always fits on screen
@@ -61,11 +63,11 @@ Value<double?> _editFxRateValue(
   final ccy = autoCny ? 'CNY' : currencyCtrl.text.trim().toUpperCase();
   if (ccy.isEmpty || ccy == 'CNY') return const Value<double?>.absent();
   // Untouched field: keep the exact stored rate (see _parseEditable).
-  if (holding.costFxRate != null && fxRateCtrl.text.trim() == prefill) {
+  if (holding.costFxRate?.isFinite == true && fxRateCtrl.text.trim() == prefill) {
     return Value<double?>(holding.costFxRate);
   }
   final fx = double.tryParse(fxRateCtrl.text.trim());
-  if (fx != null && fx > 0) return Value<double?>(fx);
+  if (fx != null && fx.isFinite && fx > 0) return Value<double?>(fx);
   return const Value<double?>.absent();
 }
 
@@ -655,6 +657,10 @@ Future<void> showAddHoldingDialog(BuildContext context, WidgetRef ref) async {
                     ? (type.isAmountBased ? investedResult != null : true)
                     : invested != null),
                 latestPrice: Value(isAmount ? 1 : (userPrice ?? 0)),
+                manualNavHistory: type == AssetType.bankWealth && !rateLinked &&
+                        userPrice != null && userPrice.isFinite && userPrice > 0
+                    ? Value(encodeNavHistory({todayKey(): userPrice}))
+                    : const Value.absent(),
                 costFxRate:
                     finalCurrency != 'CNY' && !rateLinked && fx != null && fx > 0
                         ? Value(fx)
@@ -747,6 +753,10 @@ Future<void> showUpdatePriceDialog(
   WidgetRef ref,
   HoldingRow holding,
 ) async {
+  if (hasManualNav(holding)) {
+    await showRecordBankNavDialog(context, ref, holding);
+    return;
+  }
   final priceText =
       holding.latestPrice > 0 ? Formats.plainNum(holding.latestPrice) : '';
   final priceCtrl = TextEditingController(text: priceText);
@@ -765,7 +775,7 @@ Future<void> showUpdatePriceDialog(
         FilledButton(
           onPressed: () {
             final price = double.tryParse(priceCtrl.text.trim());
-            if (price == null || price <= 0) return;
+            if (price == null || !price.isFinite || price <= 0) return;
             Navigator.pop(context, true);
           },
           child: const Text('保存'),
@@ -782,6 +792,86 @@ Future<void> showUpdatePriceDialog(
     }
   }
   priceCtrl.dispose();
+}
+
+Future<void> showRecordBankNavDialog(BuildContext context, WidgetRef ref, HoldingRow holding) async {
+  final dao = ref.read(daoProvider);
+  final today = DateUtils.dateOnly(DateTime.now());
+  final recorded = decodeNavHistory(holding.manualNavHistory);
+  var day = today;
+  var saving = false;
+  String? error;
+  final controller = TextEditingController(text: recorded[todayKey(day)]?.toString());
+  await showDialog<void>(
+    context: context,
+    builder: (context) => StatefulBuilder(
+      builder: (context, setState) => PopScope(
+        canPop: !saving,
+        child: AlertDialog(
+          title: const Text('记录单位净值'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              TextButton.icon(
+                onPressed: saving ? null : () async {
+                  final selected = await showDatePicker(
+                    context: context,
+                    initialDate: day,
+                    firstDate: DateTime(1990),
+                    lastDate: today,
+                  );
+                  if (selected == null || !context.mounted) return;
+                  setState(() {
+                    if (selected != day) {
+                      final value = recorded[todayKey(selected)];
+                      controller.text = value?.toString() ?? '';
+                    }
+                    day = selected;
+                    error = null;
+                  });
+                },
+                icon: const Icon(Icons.calendar_today_outlined, size: 16),
+                label: Text(Formats.date(day)),
+              ),
+              TerminalTextField(
+                controller: controller,
+                label: '单位净值',
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              ),
+              const SizedBox(height: 8),
+              Text(error ?? '保存今天的净值会同时更新最新单价。', style: T.label(color: error == null ? T.text3 : T.down)),
+            ],
+          ),
+          actions: [
+            TextButton(onPressed: saving ? null : () => Navigator.pop(context), child: const Text('取消')),
+            FilledButton(
+              onPressed: saving ? null : () async {
+                final value = double.tryParse(controller.text.trim());
+                if (value == null || !value.isFinite || value <= 0) {
+                  setState(() => error = '请输入大于 0 的单位净值');
+                  return;
+                }
+                setState(() { saving = true; error = null; });
+                try {
+                  await dao.recordManualNav(holding.id, day, value);
+                } catch (_) {
+                  if (context.mounted) {
+                    setState(() { saving = false; error = '保存失败，请重试'; });
+                  }
+                  return;
+                }
+                if (context.mounted) Navigator.pop(context);
+              },
+              child: Text(saving ? '保存中…' : '保存'),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+  await Future<void>.delayed(const Duration(milliseconds: 350));
+  controller.dispose();
 }
 
 Future<void> showEditHoldingDialog(
@@ -845,6 +935,7 @@ Future<void> showEditHoldingDialog(
   // InvestedProfitField（其内部状态无法从外部改写）。
   String? conversionNotice;
   var conversionCount = 0;
+  String? validationError;
 
   void applyTypeSwitch(AssetType next) {
     final prev = typeNotifier.value;
@@ -1134,6 +1225,11 @@ Future<void> showEditHoldingDialog(
                 ),
                 const SizedBox(height: 12),
                 TerminalTextField(controller: noteCtrl, label: '备注'),
+                if (validationError != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Text(validationError!, style: T.label(color: T.up)),
+                  ),
               ],
             ),
           ),
@@ -1143,7 +1239,24 @@ Future<void> showEditHoldingDialog(
               child: const Text('取消'),
             ),
             FilledButton(
-              onPressed: () => Navigator.pop(context, true),
+              onPressed: () {
+                final balance = _parseEditable(quantityCtrl.text, quantityText, holding.quantity);
+                final cost = _parseEditable(costCtrl.text, costText, holding.costPrice);
+                final price = _parseEditable(priceCtrl.text, priceText, holding.latestPrice);
+                if (balance == null || (!isAmount && (cost == null || price == null))) {
+                  setState(() => validationError = isAmount ? '请填写有效金额' : '请填写有效的数量、成本单价和最新单价');
+                  return;
+                }
+                final fxText = fxRateCtrl.text.trim();
+                final fx = double.tryParse(fxText);
+                final currency = currencyCtrl.text.trim().toUpperCase();
+                if (currency.isNotEmpty && currency != 'CNY' && fxText.isNotEmpty &&
+                    (fx == null || !fx.isFinite || fx <= 0)) {
+                  setState(() => validationError = '请填写有效的正数汇率');
+                  return;
+                }
+                Navigator.pop(context, true);
+              },
               child: const Text('保存'),
             ),
           ],
@@ -1266,7 +1379,17 @@ Future<void> showEditHoldingDialog(
           _editFxRateValue(fxRateCtrl, currencyCtrl, autoCny, holding, fxText),
       note: noteCtrl.text.trim().isEmpty ? const Value.absent() : Value(noteCtrl.text.trim()),
     );
-    await ref.read(daoProvider).updateHolding(updated);
+    final dao = ref.read(daoProvider);
+    await dao.transaction(() async {
+      final current = await dao.getHolding(holding.id);
+      if (current == null) return;
+      await dao.updateHolding(updated.copyWith(manualNavHistory: Value(current.manualNavHistory)));
+      if (hasManualNav(updated) && priceCtrl.text.trim() != priceText &&
+          updated.latestPrice.isFinite && updated.latestPrice > 0) {
+        final now = DateTime.now();
+        await dao.recordManualNav(holding.id, now, updated.latestPrice, now: now);
+      }
+    });
     ref.read(daoProvider).setSetting(historySyncDirtyKey, historyDirtySet);
     if (crossAmountSwitch) {
       // The semantics of quantity/costPrice changed for every historical
@@ -1299,6 +1422,9 @@ Future<void> confirmDeleteHolding(
   WidgetRef ref,
   HoldingRow holding,
 ) async {
+  final route = ModalRoute.of(context);
+  final navigator = Navigator.of(context);
+  final messenger = ScaffoldMessenger.maybeOf(context);
   final hasTxns = (await ref.read(daoProvider).getTransactionsForHolding(holding.id)).isNotEmpty;
   if (!context.mounted) return;
   final ok = await showDialog<bool>(
@@ -1333,9 +1459,11 @@ Future<void> confirmDeleteHolding(
   if (ok == true) {
     await ref.read(daoProvider).deleteHolding(holding.id);
     ref.read(daoProvider).setSetting(historySyncDirtyKey, historyDirtySet);
-    if (context.mounted) {
-      Navigator.of(context).pop(); // 返回持仓列表/上一页
-      ScaffoldMessenger.of(context).showSnackBar(
+    if (navigator.mounted && route?.isCurrent == true) {
+      await navigator.maybePop();
+    }
+    if (messenger?.mounted == true) {
+      messenger!.showSnackBar(
         SnackBar(content: Text('已删除「${holding.name}」及其全部流水')),
       );
     }

@@ -2,7 +2,6 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 
 import '../../app/providers.dart';
 import '../../core/enums.dart';
@@ -11,6 +10,7 @@ import '../../core/market_session.dart';
 import '../../core/ui_prefs.dart';
 import '../../domain/earnings_breakdown.dart';
 import '../../domain/product_monthly_earnings.dart';
+import '../pages/holdings/open_holding_details.dart';
 import '../tokens.dart';
 
 /// Desktop shows all three observations at once. Compact layouts retain the
@@ -162,7 +162,8 @@ class _RotatingSpotlightCardState extends ConsumerState<RotatingSpotlightCard> {
                 type: spot.winner!.type,
                 delta: spot.winner!.delta,
                 hidden: hidden,
-                onTap: () => context.push('/holdings'),
+                onTap: () =>
+                    openProductDetails(context, spot.winner!.holdingIds),
               ),
       ),
     );
@@ -176,7 +177,8 @@ class _RotatingSpotlightCardState extends ConsumerState<RotatingSpotlightCard> {
                 type: spot.loser!.type,
                 delta: spot.loser!.delta,
                 hidden: hidden,
-                onTap: () => context.push('/holdings'),
+                onTap: () =>
+                    openProductDetails(context, spot.loser!.holdingIds),
               ),
       ),
     );
@@ -193,7 +195,9 @@ class _RotatingSpotlightCardState extends ConsumerState<RotatingSpotlightCard> {
                 type: monthBest.type,
                 delta: monthBest.delta,
                 hidden: hidden,
-                onTap: () => context.push('/product-earnings'),
+                onTap: monthBest.holdingIds.isEmpty
+                    ? null
+                    : () => openProductDetails(context, monthBest.holdingIds),
               ),
       ),
     );
@@ -219,7 +223,7 @@ class _RotatingSpotlightCardState extends ConsumerState<RotatingSpotlightCard> {
   }
 
   static Widget _hintFace() =>
-      const _FaceContent(title: '资产聚焦', emptyText: '点按卡片跳转 · 持仓与产品收益');
+      const _FaceContent(title: '资产聚焦', emptyText: '点按卡片查看产品明细');
 
   /// 今日最佳/最差沿用收益日历的产品分解，不将本金流入流出当作收益。
   ({_SpotEntry? winner, _SpotEntry? loser}) _todaySpotlight(
@@ -232,10 +236,20 @@ class _RotatingSpotlightCardState extends ConsumerState<RotatingSpotlightCard> {
       final delta = t.profit;
       if (delta.abs() < 0.01) continue; // 无变动
       if (winner == null || delta > winner.delta) {
-        winner = _SpotEntry(name: t.name, type: t.type, delta: delta);
+        winner = _SpotEntry(
+          holdingIds: [t.holdingId],
+          name: t.name,
+          type: t.type,
+          delta: delta,
+        );
       }
       if (loser == null || delta < loser.delta) {
-        loser = _SpotEntry(name: t.name, type: t.type, delta: delta);
+        loser = _SpotEntry(
+          holdingIds: [t.holdingId],
+          name: t.name,
+          type: t.type,
+          delta: delta,
+        );
       }
     }
     return (winner: winner, loser: loser);
@@ -254,7 +268,12 @@ class _RotatingSpotlightCardState extends ConsumerState<RotatingSpotlightCard> {
       if (month.days == 0) continue;
       final delta = month.profit;
       if (best == null || delta > best.delta) {
-        best = _SpotEntry(name: p.name, type: p.type, delta: delta);
+        best = _SpotEntry(
+          holdingIds: p.holdingIds,
+          name: p.name,
+          type: p.type,
+          delta: delta,
+        );
       }
     }
     return best;
@@ -263,11 +282,13 @@ class _RotatingSpotlightCardState extends ConsumerState<RotatingSpotlightCard> {
 
 class _SpotEntry {
   const _SpotEntry({
+    required this.holdingIds,
     required this.name,
     required this.type,
     required this.delta,
   });
 
+  final List<int> holdingIds;
   final String name;
   final AssetType type;
   final double delta;

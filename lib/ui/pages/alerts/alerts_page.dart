@@ -16,7 +16,7 @@ import '../../components/error_state.dart';
 import '../../components/secondary_page_back_button.dart';
 import '../../components/terminal_fab.dart';
 import '../../tokens.dart';
-import '../holdings/holding_detail_sheet.dart';
+import '../holdings/open_holding_details.dart';
 import '../portfolio/portfolio_page.dart' show summaryProvider;
 import '../portfolio/target_allocation_dialog.dart';
 import 'alert_rule_editor.dart';
@@ -90,15 +90,7 @@ class _AlertsPageState extends ConsumerState<AlertsPage> {
         RegExp(r'持仓 #(\d+)').firstMatch(event.message)?.group(1) ?? '',
       );
       if (id == null) return;
-      final holding = await ref.read(daoProvider).getHolding(id);
-      if (!mounted) return;
-      if (holding == null) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('该持仓已不存在')));
-      } else {
-        showHoldingDetailSheet(context, ref, holding);
-      }
+      await openHoldingDetails(context, id);
     } else if (event.title == '配置比例偏离') {
       try {
         final summary = await ref.read(summaryProvider.future);
@@ -158,9 +150,7 @@ class _AlertsPageState extends ConsumerState<AlertsPage> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('提醒'),
-        leading: Responsive.isDesktop(context)
-            ? null
-            : const SecondaryPageBackButton(),
+        leading: const SecondaryPageBackButton(),
         actions: [
           IconButton(
             tooltip: '立即检查',

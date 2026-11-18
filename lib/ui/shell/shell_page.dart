@@ -47,43 +47,39 @@ class ShellPage extends StatelessWidget {
     ),
   ];
 
-  /// Shell-level routes that live inside the [ShellRoute] and are navigated
-  /// via [GoRouter.go].  Android back gesture on these pages should navigate
-  /// back to the root page (/portfolio) rather than exiting the app. Pushed
-  /// routes (/earnings-calendar, /accounts/:id) and the root page itself
-  /// keep the normal pop behavior so the app can be exited from 总览.
-  static final _shellPaths = {
-    for (final d in _destinations) d.path,
-    '/transactions',
-    '/alerts',
-    '/settings',
-  };
-
   static const _secondaryPaths = {'/transactions', '/alerts', '/settings'};
+  static const _calendarPaths = {'/earnings-calendar', '/product-earnings'};
+
+  static void _openDestination(BuildContext context, String path) {
+    final router = GoRouter.of(context);
+    if (router.state.uri.path != path) router.push(path);
+  }
 
   @override
   Widget build(BuildContext context) {
-    // Exact match (not prefix): a shell-level page has no stack to pop (back
-    // gesture -> back to /portfolio), while /accounts/:id and other pushed
-    // routes must pop normally. /portfolio itself is allowed to pop so the
-    // system back gesture / edge swipe can exit the app from the root page.
     final currentPath = GoRouterState.of(context).uri.path;
-    final canPop =
-        currentPath == '/portfolio' ||
-        !_shellPaths.contains(currentPath) ||
-        (_secondaryPaths.contains(currentPath) && context.canPop());
-
-    Widget child = _shellBody(context);
-    child = PopScope(
-      canPop: canPop,
+    final fallback = switch (currentPath) {
+      '/portfolio' => null,
+      _ when _calendarPaths.contains(currentPath) => '/stats',
+      _ => '/portfolio',
+    };
+    final router = GoRouter.of(context);
+    final matches = router.routerDelegate.currentConfiguration.matches;
+    final shellMatch = matches.lastOrNull;
+    final hasHistory =
+        matches.length > 1 ||
+        (shellMatch is ShellRouteMatch && shellMatch.matches.length > 1);
+    return PopScope(
+      // The inner navigator handles regular history and dialogs. Only direct
+      // entry with no previous page needs a fallback on the outer route.
+      canPop: fallback == null || hasHistory,
       onPopInvokedWithResult: (didPop, _) {
-        if (!didPop && context.mounted) {
-          context.go('/portfolio');
+        if (!didPop && fallback != null && !router.canPop()) {
+          router.go(fallback);
         }
       },
-      child: child,
+      child: _shellBody(context),
     );
-    return child;
   }
 
   Widget _shellBody(BuildContext context) {
@@ -101,9 +97,9 @@ class ShellPage extends StatelessWidget {
           _ => -1,
         };
         if (i >= 0) {
-          context.go(_destinations[i].path);
+          _openDestination(context, _destinations[i].path);
         } else if (i == -2) {
-          context.go('/transactions');
+          _openDestination(context, '/transactions');
         }
       },
       child: _DesktopShell(child: child),
@@ -119,9 +115,12 @@ class _PhoneShell extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final path = GoRouterState.of(context).uri.path;
+    final hideNavigation =
+        ShellPage._secondaryPaths.contains(path) ||
+        ShellPage._calendarPaths.contains(path);
     return Scaffold(
       body: child,
-      bottomNavigationBar: ShellPage._secondaryPaths.contains(path)
+      bottomNavigationBar: hideNavigation
           ? null
           : DecoratedBox(
               decoration: const BoxDecoration(
@@ -131,10 +130,10 @@ class _PhoneShell extends StatelessWidget {
                 padding: const EdgeInsets.only(top: 1),
                 child: NavigationBar(
                   selectedIndex: _selectedIndex(context),
-                  onDestinationSelected: (i) {
-                    final destination = ShellPage._destinations[i].path;
-                    if (destination != path) context.go(destination);
-                  },
+                  onDestinationSelected: (i) => ShellPage._openDestination(
+                    context,
+                    ShellPage._destinations[i].path,
+                  ),
                   destinations: [
                     for (final d in ShellPage._destinations)
                       NavigationDestination(
@@ -170,101 +169,114 @@ class _DesktopShell extends StatelessWidget {
     return Scaffold(
       body: Row(
         children: [
-          Container(
-            width: MediaQuery.sizeOf(context).width < 1280 ? 184 : 196,
-            decoration: const BoxDecoration(
-              color: T.surface,
-              border: Border(right: BorderSide(color: T.borderSoft)),
-            ),
-            child: SafeArea(
-              child: Column(
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 22, 12, 24),
-                    child: Row(
-                      children: [
-                        Image.asset(
-                          'assets/branding/logo.png',
-                          width: 28,
-                          height: 28,
-                          semanticLabel: 'Asset Tracker',
-                        ),
-                        const SizedBox(width: 10),
-                        const Expanded(
-                          child: Text(
-                            'Asset Tracker',
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w600,
+          if (!ShellPage._calendarPaths.contains(path))
+            Container(
+              width: MediaQuery.sizeOf(context).width < 1280 ? 184 : 196,
+              decoration: const BoxDecoration(
+                color: T.surface,
+                border: Border(right: BorderSide(color: T.borderSoft)),
+              ),
+              child: SafeArea(
+                child: Column(
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 22, 12, 24),
+                      child: Row(
+                        children: [
+                          Image.asset(
+                            'assets/branding/logo.png',
+                            width: 28,
+                            height: 28,
+                            semanticLabel: 'Asset Tracker',
+                          ),
+                          const SizedBox(width: 10),
+                          const Expanded(
+                            child: Text(
+                              'Asset Tracker',
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
+                              ),
                             ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
-                  ),
-                  Expanded(
-                    child: ListView(
-                      padding: const EdgeInsets.symmetric(horizontal: 8),
-                      children: [
-                        _groupLabel('资产管理'),
-                        for (final (index, d)
-                            in ShellPage._destinations.indexed)
+                    Expanded(
+                      child: ListView(
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                        children: [
+                          _groupLabel('资产管理'),
+                          for (final (index, d)
+                              in ShellPage._destinations.indexed)
+                            _SidebarItem(
+                              icon: d.icon,
+                              activeIcon: d.activeIcon,
+                              label: d.label,
+                              selected: path.startsWith(d.path),
+                              shortcut: '${index + 1}',
+                              onTap: () =>
+                                  ShellPage._openDestination(context, d.path),
+                            ),
+                          const SizedBox(height: 24),
+                          _groupLabel('工具与记录'),
                           _SidebarItem(
-                            icon: d.icon,
-                            activeIcon: d.activeIcon,
-                            label: d.label,
-                            selected: path.startsWith(d.path),
-                            shortcut: '${index + 1}',
-                            onTap: () => context.go(d.path),
+                            icon: Icons.receipt_long_outlined,
+                            activeIcon: Icons.receipt_long,
+                            label: '交易流水',
+                            selected: path.startsWith('/transactions'),
+                            shortcut: '6',
+                            onTap: () => ShellPage._openDestination(
+                              context,
+                              '/transactions',
+                            ),
                           ),
-                        const SizedBox(height: 24),
-                        _groupLabel('工具与记录'),
-                        _SidebarItem(
-                          icon: Icons.receipt_long_outlined,
-                          activeIcon: Icons.receipt_long,
-                          label: '交易流水',
-                          selected: path.startsWith('/transactions'),
-                          shortcut: '6',
-                          onTap: () => context.go('/transactions'),
-                        ),
-                        _SidebarItem(
-                          icon: Icons.notifications_outlined,
-                          activeIcon: Icons.notifications,
-                          label: '提醒',
-                          selected: path.startsWith('/alerts'),
-                          onTap: () => context.go('/alerts'),
-                        ),
-                        _SidebarItem(
-                          icon: Icons.settings_outlined,
-                          activeIcon: Icons.settings,
-                          label: '设置',
-                          selected: path.startsWith('/settings'),
-                          onTap: () => context.go('/settings'),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const Divider(height: 1, color: T.borderSoft),
-                  const Padding(
-                    padding: EdgeInsets.fromLTRB(20, 12, 12, 12),
-                    child: Row(
-                      children: [
-                        Icon(Icons.storage_outlined, size: 15, color: T.text3),
-                        SizedBox(width: 10),
-                        Expanded(
-                          child: Text(
-                            '本地数据',
-                            style: TextStyle(fontSize: 11, color: T.text2),
+                          _SidebarItem(
+                            icon: Icons.notifications_outlined,
+                            activeIcon: Icons.notifications,
+                            label: '提醒',
+                            selected: path.startsWith('/alerts'),
+                            onTap: () =>
+                                ShellPage._openDestination(context, '/alerts'),
                           ),
-                        ),
-                      ],
+                          _SidebarItem(
+                            icon: Icons.settings_outlined,
+                            activeIcon: Icons.settings,
+                            label: '设置',
+                            selected: path.startsWith('/settings'),
+                            onTap: () => ShellPage._openDestination(
+                              context,
+                              '/settings',
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
-                ],
+                    const Divider(height: 1, color: T.borderSoft),
+                    const Padding(
+                      padding: EdgeInsets.fromLTRB(20, 12, 12, 12),
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.storage_outlined,
+                            size: 15,
+                            color: T.text3,
+                          ),
+                          SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              '本地数据',
+                              style: TextStyle(fontSize: 11, color: T.text2),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
-          ),
           Expanded(child: child),
         ],
       ),

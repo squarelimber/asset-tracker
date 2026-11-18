@@ -1,14 +1,20 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:drift/drift.dart' show Value;
+import 'package:drift/native.dart';
 
+import 'package:asset_tracker/app/app.dart';
 import 'package:asset_tracker/app/providers.dart';
+import 'package:asset_tracker/app/router.dart';
 import 'package:asset_tracker/core/enums.dart';
 import 'package:asset_tracker/core/formats.dart';
+import 'package:asset_tracker/data/asset_dao.dart';
 import 'package:asset_tracker/data/database.dart';
 import 'package:asset_tracker/domain/product_monthly_earnings.dart';
 import 'package:asset_tracker/ui/components/sparkline.dart';
 import 'package:asset_tracker/ui/pages/calendar/product_earnings_calendar_page.dart';
+import 'package:asset_tracker/ui/pages/holdings/holding_kline_page.dart';
 
 /// A product with one baseline day and one profit day per month of [year],
 /// so every month has data (days = 2) and a deterministic rate. The value
@@ -190,5 +196,94 @@ void main() {
     expect(find.text('产品甲'), findsOneWidget);
     expect(find.text('产品乙'), findsOneWidget);
     expect(find.byType(Sparkline), findsNWidgets(2));
+  });
+
+  testWidgets('annual and monthly rows open the exact grouped holdings', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final db = AppDatabase(NativeDatabase.memory());
+    addTearDown(db.close);
+    final dao = AssetDao(db);
+    final ids = <int>[];
+    for (final (name, amount) in [
+      ('账户甲', 100.0),
+      ('账户乙', 200.0),
+      ('另一个账户', 300.0),
+    ]) {
+      final account = await dao.createAccount(
+        AccountsCompanion.insert(name: name, type: 'general'),
+      );
+      ids.add(
+        await dao.createHolding(
+          HoldingsCompanion.insert(
+            accountId: account,
+            name: '同名产品',
+            assetType: 'savings',
+            quantity: Value(amount),
+          ),
+        ),
+      );
+    }
+    final year = DateTime.now().year;
+    final product = _product('同名产品', List.filled(12, 100), year);
+      final accounts = await dao.getAccounts();
+      final holdings = await dao.getHoldings();
+    final container = ProviderContainer(
+      overrides: [
+        databaseProvider.overrideWithValue(db),
+          accountsProvider.overrideWith((ref) => Stream.value(accounts)),
+          holdingsProvider.overrideWith((ref) => Stream.value(holdings)),
+          priceCacheProvider.overrideWith((ref) async => {}),
+          alertEventsProvider.overrideWith((ref) => Stream.value([])),
+          for (final id in ids)
+            transactionsByHoldingProvider(id).overrideWith((ref) => Stream.value([])),
+        hideAmountsProvider.overrideWith((ref) => false),
+        productEarningsProvider(year).overrideWith(
+          (ref) => [
+            ProductEarnings(
+              name: product.name,
+              type: product.type,
+              closed: false,
+              daily: product.daily,
+              holdingIds: ids.take(2).toList(),
+            ),
+          ],
+        ),
+      ],
+    );
+    addTearDown(container.dispose);
+    final router = container.read(routerProvider)..go('/product-earnings');
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: const AssetTrackerApp(),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    for (final monthView in [false, true]) {
+      if (monthView) {
+        await tester.tap(find.text('月', findRichText: true).last);
+        await tester.pumpAndSettle();
+      }
+      await tester.tap(find.text('同名产品'));
+      await tester.pumpAndSettle();
+      expect(router.state.uri.path, '/holdings/product');
+      expect(find.byType(HoldingKlinePage), findsOneWidget);
+      expect(find.text('账户甲'), findsOneWidget);
+      expect(find.text('账户乙'), findsOneWidget);
+      expect(find.text('另一个账户'), findsNothing);
+      await tester.tap(find.text('账户乙'));
+      await tester.pumpAndSettle();
+      expect(find.text(Formats.money(200)), findsWidgets);
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+      expect(find.byType(ProductEarningsCalendarPage), findsOneWidget);
+    }
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump(const Duration(milliseconds: 1));
   });
 }

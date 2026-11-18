@@ -7,6 +7,7 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
 import 'package:asset_tracker/core/enums.dart';
+import 'package:asset_tracker/core/history_sync.dart';
 import 'package:asset_tracker/data/asset_dao.dart';
 import 'package:asset_tracker/data/database.dart';
 import 'package:asset_tracker/sync/sync_api.dart';
@@ -25,6 +26,7 @@ class _FakeServer {
   /// revision bumps before the baseRev check), forcing the client's
   /// re-merge/retry path.
   int concurrentWrites = 0;
+  bool rejectUploads = false;
 
   late final MockClient client = MockClient((request) async {
     if (request.method == 'GET' && request.url.path == '/api/sync') {
@@ -36,6 +38,7 @@ class _FakeServer {
     }
     if (request.method == 'PUT' && request.url.path == '/api/sync') {
       putAttempts++;
+      if (rejectUploads) return http.Response('unavailable', 503);
       final body = jsonDecode(request.body) as Map<String, dynamic>;
       if (concurrentWrites > 0) {
         concurrentWrites--;
@@ -108,6 +111,21 @@ void main() {
     final holdings = server.snapshot['holdings'] as List;
     expect(holdings, hasLength(1));
     expect(await dao.getSetting(SyncSettingsKeys.lastRev), '1');
+  });
+
+  test('downloaded changes still schedule a rebuild when the upload fails', () async {
+    final id = await seedHolding(name: '旧名称');
+    final first = await service.sync();
+    expect(first.ok, isTrue);
+    final rows = server.snapshot['holdings'] as List;
+    (rows.single as Map)['name'] = '远端新名称';
+    (rows.single as Map)['updatedAt'] = DateTime.now().add(const Duration(days: 1)).toIso8601String();
+    server.rejectUploads = true;
+
+    final result = await service.sync();
+    expect(result.ok, isFalse);
+    expect((await dao.getHolding(id))!.name, '远端新名称');
+    expect(await dao.getSetting(historySyncDirtyKey), historyDirtySet);
   });
 
   test('remote rows are pulled into an empty local database', () async {

@@ -1,6 +1,9 @@
 import 'package:drift/drift.dart';
 
 import '../core/enums.dart';
+import '../core/formats.dart';
+import '../core/nav_history.dart';
+import '../core/symbols.dart';
 import 'database.dart';
 
 /// Data access layer for accounts, holdings, transactions and snapshots.
@@ -131,6 +134,7 @@ class AssetDao {
         costPrice: Value(holding.costPrice),
         costRecorded: Value(holding.costRecorded),
         latestPrice: Value(holding.latestPrice),
+        manualNavHistory: Value(holding.manualNavHistory),
         costFxRate: Value(holding.costFxRate),
         currency: Value(holding.currency),
         purchaseDate: Value(holding.purchaseDate),
@@ -232,6 +236,31 @@ class AssetDao {
     await stmt.write(HoldingsCompanion(latestPrice: Value(price)));
   }
 
+  /// Keeps actual bank NAV observations separate from ledger transactions.
+  /// A backdated point changes the chart without repricing today's holding.
+  Future<void> recordManualNav(int id, DateTime date, double price, {DateTime? now}) async {
+    final recordedAt = now ?? DateTime.now();
+    final today = todayKey(recordedAt);
+    final day = todayKey(date);
+    if (!price.isFinite || price <= 0 || day.compareTo(today) > 0) {
+      throw ArgumentError('净值须大于 0，日期须为今天或更早');
+    }
+    await transaction(() async {
+      final holding = await getHolding(id);
+      if (holding == null || !hasManualNav(holding)) {
+        throw ArgumentError('该持仓不支持手工净值记录');
+      }
+      final values = decodeNavHistory(holding.manualNavHistory)..[day] = price;
+      await (_db.update(_db.holdings)..where((t) => t.id.equals(id))).write(
+        HoldingsCompanion(
+          manualNavHistory: Value(encodeNavHistory(values)),
+          latestPrice: day == today ? Value(price) : const Value.absent(),
+          updatedAt: Value(recordedAt),
+        ),
+      );
+    });
+  }
+
   // ---------------------------------------------------------------------------
   // Transactions
   // ---------------------------------------------------------------------------
@@ -293,6 +322,11 @@ class AssetDao {
 
   Future<List<TransactionRow>> getTransactions() =>
       _db.select(_db.transactions).get();
+
+  Future<List<TransactionRow>> getTransactionsAt(DateTime instant) =>
+      (_db.select(_db.transactions)
+            ..where((t) => t.occurredAt.equals(instant)))
+          .get();
 
   Future<List<TransactionRow>> getTransactionsSince(DateTime start) =>
       (_db.select(_db.transactions)

@@ -27,7 +27,7 @@ class BackupService {
   static const _version = 2;
 
   /// Serializes the whole database into a portable JSON string.
-  Future<String> exportJson() async {
+  Future<String> exportJson() => _dao.transaction(() async {
     final accounts = await _dao.getAccounts();
     final holdings = await _dao.getHoldings();
     final transactions = await _dao.getTransactions();
@@ -51,7 +51,7 @@ class BackupService {
           ? null
           : {'target_allocation': targetAllocation},
     });
-  }
+  });
 
   /// Validates and imports a backup, replacing all existing data.
   Future<ImportResult> importJson(String json) async {
@@ -168,6 +168,7 @@ class BackupService {
                     : h['costRecorded'] == true,
               ),
               latestPrice: Value((h['latestPrice'] as num?)?.toDouble() ?? 0),
+              manualNavHistory: Value(h['manualNavHistory'] as String?),
               costFxRate: h['costFxRate'] == null
                   ? const Value.absent()
                   : Value((h['costFxRate'] as num).toDouble()),
@@ -370,6 +371,7 @@ class BackupService {
     'costPrice': h.costPrice,
     'costRecorded': h.costRecorded,
     'latestPrice': h.latestPrice,
+    if (h.manualNavHistory != null) 'manualNavHistory': h.manualNavHistory,
     'costFxRate': h.costFxRate,
     'purchaseDate': h.purchaseDate?.toIso8601String(),
     'riskLevel': h.riskLevel,

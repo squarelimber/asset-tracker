@@ -82,6 +82,19 @@ void main() {
 
     await tester.enterText(field, 'USD');
     await tester.pumpAndSettle();
+    final quantity = tester.widget<TextField>(find.byWidgetPredicate(
+      (w) => w is TextField && w.controller?.text == '1000',
+    )).controller;
+    final quantityField = find.byWidgetPredicate(
+      (w) => w is TextField && identical(w.controller, quantity),
+    );
+    await tester.enterText(quantityField, 'Infinity');
+    await tester.tap(find.text('保存'));
+    await tester.pumpAndSettle();
+    expect(find.text('请填写有效的数量、成本单价和最新单价'), findsOneWidget);
+    expect(find.text('USD'), findsOneWidget);
+    expect((await dao.getHolding(holding.id))!.currency, 'CNY');
+    await tester.enterText(quantityField, '1000');
     await tester.tap(find.text('保存'));
     await tester.pumpAndSettle();
 

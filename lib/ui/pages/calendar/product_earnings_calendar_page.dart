@@ -9,9 +9,11 @@ import '../../../core/responsive.dart';
 import '../../../domain/product_monthly_earnings.dart';
 import '../../components/app_bar_actions.dart';
 import '../../components/error_state.dart';
+import '../../components/secondary_page_back_button.dart';
 import '../../components/sparkline.dart';
 import '../../components/terminal_card.dart';
 import '../../tokens.dart';
+import '../holdings/open_holding_details.dart';
 
 class ProductEarningsCalendarPage extends ConsumerStatefulWidget {
   const ProductEarningsCalendarPage({super.key});
@@ -61,6 +63,7 @@ class _ProductEarningsCalendarPageState
     final products = ref.watch(productEarningsProvider(_year));
     return Scaffold(
       appBar: AppBar(
+        leading: const SecondaryPageBackButton(),
         title: const Text('产品收益日历'),
         actions: const [TerminalAppBarActions()],
       ),
@@ -272,10 +275,7 @@ class _PEBody extends StatelessWidget {
                   ),
           ),
           const SizedBox(height: T.s3),
-          Text(
-            '收益按历史快照中的市值减成本的变化计算，已剔除本金进出影响。清仓月份仍可查看产品收益。',
-            style: T.label(),
-          ),
+          Text('收益按历史快照中的市值减成本的变化计算，已剔除本金进出影响。清仓月份仍可查看产品收益。', style: T.label()),
         ],
       ),
     );
@@ -411,23 +411,34 @@ class _YearMatrixState extends State<_YearMatrix> {
               for (final row in widget.rows)
                 SizedBox(
                   height: _rowHeight,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: T.s2),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            row.p.name,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              fontSize: 13,
-                              color: T.text1,
+                  child: InkWell(
+                    onTap: row.p.holdingIds.isEmpty
+                        ? null
+                        : () => openProductDetails(context, row.p.holdingIds),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: T.s2),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              row.p.name,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontSize: 13,
+                                color: T.text1,
+                              ),
                             ),
                           ),
-                        ),
-                        if (row.p.closed) const _ClosedBadge(),
-                      ],
+                          if (row.p.closed) const _ClosedBadge(),
+                          if (row.p.holdingIds.isNotEmpty)
+                            const Icon(
+                              Icons.chevron_right,
+                              size: 14,
+                              color: T.text3,
+                            ),
+                        ],
+                      ),
                     ),
                   ),
                 ),
@@ -733,6 +744,9 @@ class _MonthList extends ConsumerWidget {
       children: [
         for (final row in rows)
           TerminalCard(
+            onTap: row.p.holdingIds.isEmpty
+                ? null
+                : () => openProductDetails(context, row.p.holdingIds),
             margin: const EdgeInsets.only(bottom: T.s2),
             padding: const EdgeInsets.symmetric(
               horizontal: T.s3,
@@ -789,6 +803,8 @@ class _MonthList extends ConsumerWidget {
                   width: 84,
                   height: 36,
                 ),
+                if (row.p.holdingIds.isNotEmpty)
+                  const Icon(Icons.chevron_right, size: 18, color: T.text3),
               ],
             ),
           ),

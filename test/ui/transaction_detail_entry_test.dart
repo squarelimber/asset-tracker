@@ -3,6 +3,7 @@ import 'package:asset_tracker/data/asset_dao.dart';
 import 'package:asset_tracker/data/database.dart';
 import 'package:asset_tracker/ui/components/transaction_tile.dart';
 import 'package:asset_tracker/ui/pages/accounts/account_detail_page.dart';
+import 'package:asset_tracker/ui/pages/holdings/holding_kline_page.dart';
 import 'package:asset_tracker/ui/pages/transactions/transactions_page.dart';
 import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
@@ -120,8 +121,25 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('买入'));
     await expectDetail(tester);
+    await tester.tap(find.text('测试 ETF'));
+    await tester.pumpAndSettle();
+    expect(find.byType(HoldingKlinePage), findsOneWidget);
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    expect(find.text('交易详情'), findsOneWidget);
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    expect(find.text('交易详情'), findsNothing);
+    expect(find.byType(AccountDetailPage), findsOneWidget);
+    expect(find.text('买入'), findsOneWidget);
+    await tester.tap(find.widgetWithText(Tab, '持仓'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('测试 ETF'));
+    await tester.pumpAndSettle();
+    expect(find.byType(HoldingKlinePage), findsOneWidget);
+    expect(find.text('记一笔'), findsOneWidget);
     await tester.pumpWidget(const SizedBox());
-    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 1));
   });
 
   testWidgets('全局流水先显示详情并保留修改日期入口', (tester) async {

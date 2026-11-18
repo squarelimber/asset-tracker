@@ -1,9 +1,12 @@
+import 'package:asset_tracker/app/app.dart';
+import 'package:asset_tracker/app/router.dart';
 import 'package:asset_tracker/app/theme.dart';
 import 'package:asset_tracker/ui/components/asset_overview_card.dart';
 import 'package:asset_tracker/ui/pages/portfolio/portfolio_welcome.dart';
 import 'package:asset_tracker/ui/shell/shell_page.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 
@@ -115,6 +118,65 @@ void main() {
     );
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets('Windows back keys close dialogs before retracing destinations', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1280, 800);
+    addTearDown(tester.view.reset);
+    final router = _router();
+    addTearDown(router.dispose);
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [routerProvider.overrideWithValue(router)],
+        child: const AssetTrackerApp(),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(
+      find.descendant(of: find.byType(ListView), matching: find.text('持仓')),
+    );
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.digit6);
+    await tester.pumpAndSettle();
+    expect(router.state.uri.path, '/transactions');
+    await tester.tap(find.text('设置'));
+    await tester.pumpAndSettle();
+    expect(router.state.uri.path, '/settings');
+
+    Future<void> altLeft() async {
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.altLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.altLeft);
+      await tester.pumpAndSettle();
+    }
+
+    for (final useRootNavigator in [true, false]) {
+      showDialog<void>(
+        context: tester.element(find.text('page:settings')),
+        useRootNavigator: useRootNavigator,
+        builder: (_) => const AlertDialog(title: Text('对话框')),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('对话框'), findsOneWidget);
+      await altLeft();
+      expect(find.text('对话框'), findsNothing);
+      expect(router.state.uri.path, '/settings');
+    }
+
+    await altLeft();
+    expect(router.state.uri.path, '/transactions');
+    await tester.sendKeyEvent(
+      LogicalKeyboardKey.browserBack,
+      platform: 'windows',
+    );
+    await tester.pumpAndSettle();
+    expect(router.state.uri.path, '/holdings');
+    await altLeft();
+    expect(router.state.uri.path, '/portfolio');
+  }, variant: const TargetPlatformVariant({TargetPlatform.windows}));
 
   for (final size in [const Size(360, 640), const Size(1100, 600)]) {
     testWidgets(

@@ -38,6 +38,37 @@ Map<String, dynamic> _holding(int id, {double? latestPrice}) => {
 void main() {
   const merger = SyncMerger();
 
+  test('same symbol from different markets is not deduplicated', () {
+    final outcome = merger.merge(
+      local: {SyncTables.holdings: [{..._holding(1), 'symbol': '400030', 'marketSource': 'sina', 'assetType': 'stock'}]},
+      remote: {SyncTables.holdings: [{..._holding(2), 'symbol': '400030', 'marketSource': 'eastmoney', 'assetType': 'mutual_fund'}]},
+      remoteTombstones: [], localTombstones: [],
+    );
+    expect(outcome.tables[SyncTables.holdings]!.map((row) => row['id']), [1, 2]);
+    expect(outcome.dedupeHoldingKeys, isEmpty);
+  });
+
+  test('NAV and transactions survive multiple successive ID rewrites', () {
+    Map<String, dynamic> holding(int id, int day) => {
+      ..._holding(id), 'symbol': 'BANK01', 'assetType': 'bank_wealth',
+      'updatedAt': '2026-01-0${day}T00:00:00Z',
+      'manualNavHistory': '{"2026-01-0$day":1.$day}',
+    };
+    final outcome = merger.merge(
+      local: {SyncTables.holdings: [holding(1, 1), holding(2, 2)],
+        SyncTables.transactions: [{'id': 20, 'holdingId': 1, 'cashSourceId': 2}]},
+      remote: {SyncTables.holdings: [holding(3, 3), holding(4, 2)]},
+      remoteTombstones: [], localTombstones: [],
+    );
+    final merged = outcome.tables[SyncTables.holdings]!.single;
+    expect(merged['id'], 3);
+    expect(merged['manualNavHistory'], '{"2026-01-01":1.1,"2026-01-02":1.2,"2026-01-03":1.3}');
+    expect(outcome.dedupeHoldingKeys, {'1', '2', '4'});
+    final trade = outcome.tables[SyncTables.transactions]!.single;
+    expect(trade['holdingId'], 3);
+    expect(trade['cashSourceId'], 3);
+  });
+
   test('identical rows merge without conflicts', () {
     final local = _snap([_account(1, updatedAt: '2026-01-02T00:00:00.000Z')]);
     final remote = _snap([_account(1, updatedAt: '2026-01-02T00:00:00.000Z')]);

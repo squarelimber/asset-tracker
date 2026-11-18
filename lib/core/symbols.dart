@@ -103,6 +103,10 @@ bool isFxLinked(HoldingRow h) {
   return isFxCurrencyCode(h.symbol);
 }
 
+bool hasManualNav(HoldingRow holding) =>
+    holding.assetType == AssetType.bankWealth.storageName &&
+    !isFxLinked(holding);
+
 /// Currency codes in [currencies] that [cnyRates] cannot convert to CNY.
 ///
 /// [valueRateOf] returns 1 for a code it does not know, which keeps the UI

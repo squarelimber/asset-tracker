@@ -41,11 +41,15 @@ class ProductEarnings {
     required this.type,
     required this.closed,
     required this.daily,
+    this.holdingIds = const [],
     this.dailyProfitAdjustments = const {},
   });
 
   /// Product name - the merge key across accounts.
   final String name;
+
+  /// Positions whose valuations were merged into this product.
+  final List<int> holdingIds;
 
   /// Asset type of the first holding (for the icon).
   final AssetType type;
@@ -134,6 +138,9 @@ class ProductEarningsCalculator {
         name: entry.key,
         type: members.first.type,
         closed: members.every((m) => m.closed),
+        holdingIds: List.unmodifiable(
+          members.map((holding) => holding.holdingId),
+        ),
         dailyProfitAdjustments: adjustmentsByDate,
         daily: [
           for (final date in dates)

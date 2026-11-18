@@ -3,6 +3,7 @@ import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:asset_tracker/core/enums.dart';
+import 'package:asset_tracker/core/history_sync.dart';
 import 'package:asset_tracker/data/asset_dao.dart';
 import 'package:asset_tracker/data/database.dart';
 import 'package:asset_tracker/domain/rate_series.dart';
@@ -63,6 +64,46 @@ void main() {
     }
     return total;
   }
+
+  test('invalid numbers cannot change balances or create transactions', () async {
+    final account = await addAccount('账户');
+    final cash = await addHolding(accountId: account, name: '现金', type: AssetType.cash, quantity: 100);
+    final fund = await addHolding(accountId: account, name: '基金', type: AssetType.etf);
+
+    final income = await service.record(accountId: account, type: TransactionType.income,
+      cashTargetId: cash, amount: double.infinity);
+    final purchase = await service.recordHistorical(accountId: account, type: TransactionType.buy,
+      holdingId: fund, cashSourceId: cash, amount: 50, quantity: double.nan, occurredAt: DateTime(2026, 9, 1));
+    final invalidPrice = await service.record(accountId: account, type: TransactionType.buy,
+      holdingId: fund, cashSourceId: cash, amount: 50, quantity: 10, price: double.infinity);
+
+    expect([income.ok, purchase.ok, invalidPrice.ok], [false, false, false]);
+    expect((await dao.getHolding(cash))!.quantity, 100);
+    expect((await dao.getHolding(fund))!.quantity, 0);
+    expect(await dao.getTransactions(), isEmpty);
+  });
+
+  test('rescheduling a redemption-funded buy moves both legs without changing balances', () async {
+    final account = await addAccount('账户');
+    final source = await addHolding(accountId: account, name: '出资基金', type: AssetType.mutualFund,
+      quantity: 100, costPrice: 10, latestPrice: 12);
+    final target = await addHolding(accountId: account, name: '目标基金', type: AssetType.etf);
+    final recorded = await service.recordBuyFundedByHolding(sourceHoldingId: source,
+      targetHoldingId: target, targetQuantity: 5, targetPrice: 24, amount: 120,
+      occurredAt: DateTime(2026, 9, 1, 14, 45));
+    expect(recorded.ok, isTrue);
+    final buy = (await dao.getTransactions()).singleWhere((row) => row.type == 'buy');
+    final result = await service.reschedule(buy.id, DateTime(2026, 9, 3));
+
+    expect(result.ok, isTrue);
+    final trades = await dao.getTransactions();
+    expect(trades.map((row) => row.occurredAt.toLocal()).toSet(), {DateTime(2026, 9, 3, 14, 45)});
+    expect(trades.map((row) => row.type).toSet(), {'buy', 'sell'});
+    expect((await dao.getHolding(source))!.quantity, 90);
+    expect((await dao.getHolding(target))!.quantity, 5);
+    expect(await dao.getSetting(historyFullRebuildKey), '1');
+    expect(await dao.getSetting(historySyncDirtyKey), historyDirtySet);
+  });
 
   group('buy', () {
     test('refuses to reverse a sell after a newer buy changes the cost', () async {

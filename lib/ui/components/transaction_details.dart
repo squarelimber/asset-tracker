@@ -6,6 +6,7 @@ import '../../app/providers.dart';
 import '../../core/enums.dart';
 import '../../core/formats.dart';
 import '../../data/database.dart';
+import '../pages/holdings/open_holding_details.dart';
 import '../tokens.dart';
 import 'transaction_presentation.dart';
 
@@ -125,6 +126,16 @@ class _TransactionDetails extends ConsumerWidget {
         ),
       if (note != null && note.isNotEmpty) ('备注', note),
     ];
+    final links = <String, int>{
+      if (product != null) '产品': product.id,
+      if (counterpartyLabel != null && counterpartyId != null)
+        counterpartyLabel: counterpartyId,
+      if (type == TransactionType.transferIn ||
+          type == TransactionType.transferOut) ...{
+        (repayment == null ? '来源' : '资金来源'): ?transaction.cashSourceId,
+        (repayment == null ? '去向' : '还款账户'): ?transaction.cashTargetId,
+      },
+    };
     return SafeArea(
       child: ConstrainedBox(
         constraints: BoxConstraints(
@@ -160,29 +171,43 @@ class _TransactionDetails extends ConsumerWidget {
                 ],
               ),
               for (final (label, value) in rows)
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: T.s2),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      SizedBox(
-                        width: 80,
-                        child: Text(label, style: T.label(size: 13)),
-                      ),
-                      Expanded(
-                        child: Text(
-                          value,
-                          textAlign: TextAlign.right,
-                          style: T.mono(size: 13),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
+                _row(context, label, value, links[label]),
             ],
           ),
         ),
       ),
     );
+  }
+
+  Widget _row(
+    BuildContext context,
+    String label,
+    String value,
+    int? holdingId,
+  ) {
+    final row = Padding(
+      padding: const EdgeInsets.symmetric(vertical: T.s2),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(width: 80, child: Text(label, style: T.label(size: 13))),
+          Expanded(
+            child: Text(
+              value,
+              textAlign: TextAlign.right,
+              style: T.mono(size: 13),
+            ),
+          ),
+          if (holdingId != null)
+            const Icon(Icons.chevron_right, size: 18, color: T.text3),
+        ],
+      ),
+    );
+    return holdingId == null
+        ? row
+        : InkWell(
+            onTap: () => openHoldingDetails(context, holdingId),
+            child: row,
+          );
   }
 }

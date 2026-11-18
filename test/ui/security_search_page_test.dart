@@ -64,6 +64,11 @@ void main() {
     await tester.tap(find.text('贵州茅台'));
     await tester.pumpAndSettle();
     expect(find.text('sh600519 贵州茅台'), findsOneWidget);
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    expect(router.state.uri.path, '/markets/search');
+    expect(find.text('茅台'), findsOneWidget);
+    expect(find.text('贵州茅台'), findsOneWidget);
   });
 
   testWidgets('搜索失败可重试', (tester) async {

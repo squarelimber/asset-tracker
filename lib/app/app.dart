@@ -1,4 +1,6 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'router.dart';
@@ -15,6 +17,17 @@ class AssetTrackerApp extends ConsumerWidget {
       debugShowCheckedModeBanner: false,
       theme: AppTheme.dark(),
       routerConfig: router,
+      builder: kIsWeb
+          ? null
+          : (context, child) => CallbackShortcuts(
+              bindings: {
+                const SingleActivator(LogicalKeyboardKey.arrowLeft, alt: true):
+                    router.routerDelegate.popRoute,
+                const SingleActivator(LogicalKeyboardKey.browserBack):
+                    router.routerDelegate.popRoute,
+              },
+              child: child!,
+            ),
     );
   }
 }

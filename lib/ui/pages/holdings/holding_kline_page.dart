@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../app/providers.dart';
+import '../../../core/enums.dart';
 import '../../../core/formats.dart';
 import '../../../core/responsive.dart';
+import '../../../core/symbols.dart';
 import '../../../data/database.dart';
 import '../../../domain/closed_holding.dart';
 import '../../../domain/holding_kline.dart';
@@ -18,61 +20,106 @@ import '../../components/transaction_details.dart';
 import '../../tokens.dart';
 import '../transaction_dialogs.dart';
 import 'holding_detail_sheet.dart';
+import 'holding_nav_trend.dart';
 
 /// A holding's chart and existing details share the same live data.
 class HoldingKlinePage extends ConsumerWidget {
-  const HoldingKlinePage({super.key, required this.holdingId, this.source});
+  const HoldingKlinePage({super.key, required this.holdingId, this.source})
+    : _groupIds = const [];
 
-  final int holdingId;
+  const HoldingKlinePage.group({super.key, required List<int> holdingIds})
+    : holdingId = null,
+      _groupIds = holdingIds,
+      source = null;
+
+  final int? holdingId;
+  final List<int> _groupIds;
   final KlineSource? source;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final holdings = ref.watch(holdingsProvider);
-    return Scaffold(
-      appBar: AppBar(title: const Text('持仓详情')),
-      body: holdings.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (_, _) => ErrorState(
+    return holdings.when(
+      loading: () => _page(const Center(child: CircularProgressIndicator())),
+      error: (_, _) => _page(
+        ErrorState(
           message: '持仓加载失败，请重试',
           onRetry: () => ref.invalidate(holdingsProvider),
         ),
-        data: (list) {
-          final matching = list.where((holding) => holding.id == holdingId);
-          if (matching.isEmpty) {
-            return const Center(child: Text('持仓不存在或已删除'));
-          }
-          final holding = matching.first;
-          final symbol = klineSymbolForHolding(holding);
-          return ResponsiveShell(
-            child: ListView(
-              children: [
-                if (symbol != null)
-                  _HoldingChart(
-                    holding: holding,
-                    symbol: symbol,
-                    source: source,
-                  )
-                else
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: T.s3),
-                    child: Text(
-                      holding.name,
-                      style: const TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
+      ),
+      data: (list) {
+        final ids = {?holdingId, ..._groupIds};
+        final matching = list
+            .where((holding) => ids.contains(holding.id))
+            .toList();
+        if (matching.isEmpty) {
+          return _page(const Center(child: Text('持仓不存在或已删除')));
+        }
+        if (matching.length == 1) return _page(_position(matching.single));
+        final accounts =
+            ref.watch(accountsProvider).valueOrNull ?? const <AccountRow>[];
+        final accountNames = {
+          for (final account in accounts) account.id: account.name,
+        };
+        return DefaultTabController(
+          length: matching.length,
+          child: _page(
+            TabBarView(children: matching.map(_position).toList()),
+            title: matching.first.name,
+            tabs: TabBar(
+              isScrollable: true,
+              tabs: [
+                for (final holding in matching)
+                  Tab(
+                    text: [
+                      accountNames[holding.accountId] ??
+                          '账户 #${holding.accountId}',
+                      if (holding.symbol case final symbol?
+                          when symbol.isNotEmpty)
+                        symbol,
+                    ].join(' · '),
                   ),
-                HoldingDetailSheet(
-                  holding: holding,
-                  embedded: true,
-                  showTransactionButton: symbol == null,
-                ),
               ],
             ),
-          );
-        },
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _page(Widget body, {String title = '持仓详情', TabBar? tabs}) => Scaffold(
+    appBar: AppBar(title: Text(title), bottom: tabs),
+    body: body,
+  );
+
+  Widget _position(HoldingRow holding) {
+    final symbol = klineSymbolForHolding(holding);
+    return ResponsiveShell(
+      child: ListView(
+        key: PageStorageKey(holding.id),
+        children: [
+          if (symbol != null)
+            _HoldingChart(holding: holding, symbol: symbol, source: source)
+          else
+            Padding(
+              padding: const EdgeInsets.only(bottom: T.s3),
+              child: Text(
+                holding.name,
+                style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          if (symbol == null &&
+              (hasManualNav(holding) ||
+                  holding.assetType == AssetType.mutualFund.storageName))
+            HoldingNavTrend(key: ValueKey(holding.id), holding: holding),
+          HoldingDetailSheet(
+            holding: holding,
+            showTransactionButton: symbol == null,
+          ),
+        ],
       ),
     );
   }

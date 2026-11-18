@@ -72,6 +72,7 @@ class TransactionService {
     String? note,
   }) async {
     try {
+      _validateNumbers(amount: amount, quantity: quantity, price: price);
       // The invested amount the cash leg actually moved. Persisted so the
       // history replay can undo this exact number: it is a *proportional*
       // share of the principal, so re-deriving it from `amount` at replay
@@ -176,7 +177,7 @@ class TransactionService {
       if (occurredAt.isAfter(DateTime.now())) {
         throw ArgumentError('发生日期不能晚于今天');
       }
-      if (amount <= 0) throw ArgumentError('金额必须大于 0');
+      _validateNumbers(amount: amount, quantity: quantity, price: price);
       if ((type == TransactionType.buy || type == TransactionType.sell) &&
           (quantity == null || quantity <= 0)) {
         throw ArgumentError('数量必须大于 0');
@@ -269,6 +270,12 @@ class TransactionService {
     double redemptionAmount = 0,
     double? price,
   }) => _dao.transaction(() async {
+    if ((draft.quantity.present && !draft.quantity.value.isFinite) ||
+        (draft.costPrice.present && !draft.costPrice.value.isFinite) ||
+        (draft.latestPrice.present && !draft.latestPrice.value.isFinite) ||
+        (draft.costFxRate.present && draft.costFxRate.value?.isFinite == false)) {
+      throw ArgumentError('持仓数值无效，请检查数量、单价及汇率');
+    }
     final id = await _dao.createHolding(draft);
     final holding = await _getHolding(id);
     final type = AssetType.fromStorage(holding.assetType);
@@ -347,6 +354,9 @@ class TransactionService {
     String? note,
   }) async {
     try {
+      if (!quantity.isFinite || price?.isFinite == false) {
+        throw ArgumentError('数量或单价无效');
+      }
       final holding = await _getHolding(holdingId);
       // 零余额/零数量持仓不需要初始化流水（负债也只在有余额时记借款）。
       if (quantity <= 0 && holding.quantity <= 0 && amount <= 0) {
@@ -414,7 +424,7 @@ class TransactionService {
       if (sourceHoldingId == targetHoldingId) {
         throw ArgumentError('资金来源与目标产品不能相同');
       }
-      if (!amount.isFinite || amount <= 0) throw ArgumentError('金额必须大于 0');
+      _validateNumbers(amount: amount, quantity: targetQuantity, price: targetPrice);
       if (!targetQuantity.isFinite || targetQuantity <= 0) {
         throw ArgumentError('买入数量必须大于 0');
       }
@@ -509,7 +519,10 @@ class TransactionService {
     double? targetPrice,
   }) async {
     try {
-      if (!amount.isFinite || amount <= 0) throw ArgumentError('金额必须大于 0');
+      _validateNumbers(amount: amount, quantity: targetQuantity, price: targetPrice);
+      if (targetHoldingId != null && (targetQuantity == null || targetQuantity <= 0)) {
+        throw ArgumentError('入账份额必须大于 0');
+      }
       final when = occurredAt ?? DateTime.now();
 
       double moved = 0;
@@ -629,6 +642,20 @@ class TransactionService {
 
   static String _failMessage(Object e) =>
       e is ArgumentError ? e.message.toString() : '操作失败: $e';
+
+  static void _validateNumbers({
+    required double amount,
+    double? quantity,
+    double? price,
+  }) {
+    if (!amount.isFinite || amount <= 0) {
+      throw ArgumentError('请填写有效的正数金额');
+    }
+    if (quantity?.isFinite == false) throw ArgumentError('请填写有效数量');
+    if (price != null && (!price.isFinite || price < 0)) {
+      throw ArgumentError('请填写有效单价');
+    }
+  }
 
   /// Failure text for record paths: rewrites the raw UNIQUE constraint
   /// error (identical account/holding/type/timestamp/amount row already
@@ -964,6 +991,9 @@ class TransactionService {
     required double quantity,
     double? costPrice,
   }) {
+    if (!quantity.isFinite || costPrice?.isFinite == false) {
+      throw ArgumentError('计算结果超出范围，请检查输入数值');
+    }
     return _dao.updateHolding(
       holding.copyWith(
         quantity: quantity,
@@ -975,9 +1005,64 @@ class TransactionService {
     );
   }
 
-  // ---------------------------------------------------------------------------
-  // Remove (reverse linkage)
-  // ---------------------------------------------------------------------------
+  /// Move the two halves of a redeem-to-buy together. Their timestamp is
+  /// part of the pairing key used by historical earnings.
+  Future<TransactionResult> reschedule(int id, DateTime day) async {
+    try {
+      return await _dao.transaction(() async {
+        final transaction = await _dao.getTransaction(id);
+        if (transaction == null) throw ArgumentError('流水不存在');
+        final local = transaction.occurredAt.toLocal();
+        final date = DateTime(
+          day.year,
+          day.month,
+          day.day,
+          local.hour,
+          local.minute,
+          local.second,
+        );
+        if (date.isAtSameMomentAs(local)) return TransactionResult.success;
+        final now = DateTime.now();
+        if (date.isAfter(now)) throw ArgumentError('调整后的交易时间晚于现在');
+        final rows = [transaction];
+        if (_isRedemptionLeg(transaction)) {
+          final atTime = await _dao.getTransactionsAt(transaction.occurredAt);
+          final matching = atTime.where(
+            (row) =>
+                _isRedemptionLeg(row) &&
+                row.amount == transaction.amount &&
+                row.currency.toUpperCase() == transaction.currency.toUpperCase() &&
+                row.costMovedAmount == transaction.costMovedAmount,
+          );
+          final opposite = matching.where((row) => row.type != transaction.type).toList();
+          if (opposite.isNotEmpty) {
+            if (opposite.length != 1 || matching.length != 2 ||
+                opposite.single.holdingId == transaction.holdingId) {
+              throw ArgumentError('关联的赎回与买入流水无法唯一匹配，日期未修改');
+            }
+            rows.add(opposite.single);
+          }
+        }
+        for (final row in rows) {
+          await _dao.updateTransaction(row.copyWith(occurredAt: date), now: now);
+        }
+        await _dao.setSetting(historyFullRebuildKey, '1');
+        await _dao.setSetting(historySyncDirtyKey, historyDirtySet);
+        return TransactionResult.okWith(
+          0,
+          message: rows.length == 2 ? '关联的赎回与买入日期已一并更新' : '流水日期已更新',
+        );
+      });
+    } catch (e) {
+      return TransactionResult.fail(_recordFailMessage(e));
+    }
+  }
+
+  static bool _isRedemptionLeg(TransactionRow row) =>
+      row.internalMove && row.holdingId != null &&
+      row.cashSourceId == null && row.cashTargetId == null &&
+      (row.type == TransactionType.buy.storageName ||
+          row.type == TransactionType.sell.storageName);
 
   Future<TransactionResult> remove(int transactionId) async {
     try {

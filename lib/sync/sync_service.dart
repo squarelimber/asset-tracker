@@ -82,22 +82,27 @@ class SyncService {
 
   Future<SyncResult> _syncWith(SyncApi api) async {
     const maxAttempts = 3;
+    var localDataChanged = false;
     for (var attempt = 1; attempt <= maxAttempts; attempt++) {
       final remote = await api.fetch();
-      final local = await _exportLocal();
-      final outcome = const SyncMerger().merge(
-        local: local,
-        remote: remote.snapshot,
-        remoteTombstones: _parseTombstones(remote.tombstones),
-        localTombstones: _parseTombstones(
-          (await _dao.getTombstones()).map((t) => t.toJson()).toList(),
-        ),
-      );
-
-      await _dao.transaction(() async {
+      final outcome = await _dao.transaction(() async {
+        final outcome = const SyncMerger().merge(
+          local: await _exportLocal(),
+          remote: remote.snapshot,
+          remoteTombstones: _parseTombstones(remote.tombstones),
+          localTombstones: _parseTombstones(
+            (await _dao.getTombstones()).map((t) => t.toJson()).toList(),
+          ),
+        );
         await _apply(outcome);
         await _replaceTombstones(outcome.tombstones);
+        // Local data has changed even if the subsequent upload fails.
+        if (outcome.dataChanged) {
+          await _dao.setSetting(historySyncDirtyKey, historyDirtySet);
+        }
+        return outcome;
       });
+      localDataChanged = localDataChanged || outcome.dataChanged;
 
       final push = await api.push(
         outcome.tables,
@@ -116,20 +121,12 @@ class SyncService {
         SyncSettingsKeys.lastSyncAt,
         DateTime.now().toIso8601String(),
       );
-      // Derived snapshots must be regenerated from the now-merged source
-      // rows, otherwise a freshly-arrived transaction (e.g. a repayment)
-      // changes the holdings but leaves stale snapshots, leaking the
-      // cash-flow into daily returns. Flag it so the history sync rebuilds
-      // the backfill + today.
-      if (outcome.dataChanged) {
-        await _dao.setSetting(historySyncDirtyKey, historyDirtySet);
-      }
       return SyncResult(
         ok: true,
         rev: push.rev,
         conflicts: outcome.conflicts,
         changed: outcome.changed,
-        dataChanged: outcome.dataChanged,
+        dataChanged: localDataChanged,
       );
     }
     return SyncResult.fail('同步冲突：服务器被并发更新，请重试');
@@ -277,6 +274,7 @@ class SyncService {
                     : row['costRecorded'] == true,
               ),
               latestPrice: Value((row['latestPrice'] as num?)?.toDouble() ?? 0),
+              manualNavHistory: Value(row['manualNavHistory'] as String?),
               costFxRate: row['costFxRate'] == null
                   ? const Value.absent()
                   : Value((row['costFxRate'] as num).toDouble()),
@@ -452,6 +450,7 @@ class SyncService {
         ? ((row['costPrice'] as num?)?.toDouble() ?? 0) > 0
         : row['costRecorded'] == true,
     latestPrice: (row['latestPrice'] as num?)?.toDouble() ?? 0,
+    manualNavHistory: row['manualNavHistory'] as String?,
     costFxRate: (row['costFxRate'] as num?)?.toDouble(),
     purchaseDate: parseIso(row['purchaseDate']),
     riskLevel: row['riskLevel'] as String?,

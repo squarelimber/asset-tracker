@@ -19,39 +19,14 @@ import '../transaction_dialogs.dart';
 import 'holding_dialogs.dart';
 import 'holdings_page.dart';
 
-void showHoldingDetailSheet(
-  BuildContext context,
-  WidgetRef ref,
-  HoldingRow holding,
-) {
-  showModalBottomSheet<void>(
-    context: context,
-    showDragHandle: true,
-    isScrollControlled: true,
-    builder: (context) => DraggableScrollableSheet(
-      expand: false,
-      initialChildSize: 0.6,
-      maxChildSize: 0.9,
-      builder: (context, controller) => HoldingDetailSheet(
-        holding: holding,
-        scrollController: controller,
-      ),
-    ),
-  );
-}
-
 class HoldingDetailSheet extends ConsumerWidget {
   const HoldingDetailSheet({
     super.key,
     required this.holding,
-    this.scrollController,
-    this.embedded = false,
     this.showTransactionButton = false,
   });
 
   final HoldingRow holding;
-  final ScrollController? scrollController;
-  final bool embedded;
   final bool showTransactionButton;
 
   @override
@@ -111,9 +86,8 @@ class HoldingDetailSheet extends ConsumerWidget {
         : todayProfitOf(todayRow, holding.quantity, source: source,
             transactions: txnList, holdingId: holding.id);
     return ListView(
-      controller: scrollController,
-      shrinkWrap: embedded,
-      physics: embedded ? const NeverScrollableScrollPhysics() : null,
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 32),
       children: [
         Row(
@@ -123,11 +97,11 @@ class HoldingDetailSheet extends ConsumerWidget {
                 children: [
                   Flexible(
                     child: Text(
-                      embedded ? '持仓信息' : holding.name,
+                      '持仓信息',
                       overflow: TextOverflow.ellipsis,
                       style: T.mono(
-                        size: embedded ? 15 : 18,
-                        weight: embedded ? FontWeight.w600 : FontWeight.w700,
+                        size: 15,
+                        weight: FontWeight.w600,
                         color: T.text1,
                       ),
                     ),
@@ -149,7 +123,11 @@ class HoldingDetailSheet extends ConsumerWidget {
                     }
                   case 'archive':
                     await ref.read(daoProvider).setArchived(holding.id, !holding.archived);
-                    if (context.mounted) Navigator.of(context).pop();
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text(holding.archived ? '已恢复显示' : '已归档')),
+                      );
+                    }
                   case 'delete':
                     confirmDeleteHolding(context, ref, holding);
                 }
@@ -165,7 +143,7 @@ class HoldingDetailSheet extends ConsumerWidget {
                 const PopupMenuItem(value: 'delete', child: Text('删除')),
               ],
             ),
-            if (!embedded || showTransactionButton) ...[
+            if (showTransactionButton) ...[
               const SizedBox(width: 8),
               FilledButton.tonalIcon(
                 onPressed: () => showHoldingTransactionDialog(context, ref, holding),

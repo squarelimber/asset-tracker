@@ -18,6 +18,7 @@ import '../../components/terminal_card.dart';
 import '../../components/transaction_details.dart';
 import '../../components/transaction_presentation.dart';
 import '../../tokens.dart';
+import '../holdings/open_holding_details.dart';
 import '../transaction_dialogs.dart';
 
 /// Account detail page: holdings + transactions of one account.
@@ -199,7 +200,8 @@ class _HoldingRow extends ConsumerWidget {
           ],
         ),
       ),
-      onTap: () => showHoldingTransactionDialog(context, ref, h),
+      showChevron: true,
+      onTap: () => openHoldingDetails(context, h.id),
     );
   }
 }

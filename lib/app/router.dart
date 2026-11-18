@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -18,21 +19,12 @@ import '../ui/pages/stats/stats_page.dart';
 import '../ui/pages/transactions/transactions_page.dart';
 
 final routerProvider = Provider<GoRouter>((ref) {
+  // Tab switches now keep the previous page on the stack. On the web their
+  // shareable paths still need to follow the page in front.
+  if (kIsWeb) GoRouter.optionURLReflectsImperativeAPIs = true;
   return GoRouter(
     initialLocation: '/portfolio',
     routes: [
-      GoRoute(
-        path: '/earnings-calendar',
-        builder: (context, state) => EarningsCalendarPage(
-          initialDate: DateTime.tryParse(
-            state.uri.queryParameters['date'] ?? '',
-          ),
-        ),
-      ),
-      GoRoute(
-        path: '/product-earnings',
-        builder: (context, state) => const ProductEarningsCalendarPage(),
-      ),
       ShellRoute(
         builder: (context, state, child) => ShellPage(child: child),
         routes: [
@@ -45,6 +37,16 @@ final routerProvider = Provider<GoRouter>((ref) {
             builder: (context, state) =>
                 HoldingsPage(initialQuery: state.extra as String?),
             routes: [
+              GoRoute(
+                path: 'product',
+                builder: (context, state) => HoldingKlinePage.group(
+                  holdingIds: (state.uri.queryParameters['ids'] ?? '')
+                      .split(',')
+                      .map(int.tryParse)
+                      .whereType<int>()
+                      .toList(),
+                ),
+              ),
               GoRoute(
                 path: ':id',
                 builder: (context, state) => HoldingKlinePage(
@@ -87,6 +89,18 @@ final routerProvider = Provider<GoRouter>((ref) {
           GoRoute(
             path: '/stats',
             builder: (context, state) => const StatsPage(),
+          ),
+          GoRoute(
+            path: '/earnings-calendar',
+            builder: (context, state) => EarningsCalendarPage(
+              initialDate: DateTime.tryParse(
+                state.uri.queryParameters['date'] ?? '',
+              ),
+            ),
+          ),
+          GoRoute(
+            path: '/product-earnings',
+            builder: (context, state) => const ProductEarningsCalendarPage(),
           ),
           GoRoute(
             path: '/transactions',

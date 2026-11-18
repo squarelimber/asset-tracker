@@ -11,6 +11,7 @@ import '../../components/app_bar_actions.dart';
 import '../../components/error_state.dart';
 import '../../components/day_earnings_panel.dart';
 import '../../components/heat_cell.dart';
+import '../../components/secondary_page_back_button.dart';
 import '../../components/terminal_card.dart';
 import '../../tokens.dart';
 
@@ -50,6 +51,7 @@ class _EarningsCalendarPageState extends ConsumerState<EarningsCalendarPage> {
     ref.watch(historySyncProvider);
     return Scaffold(
       appBar: AppBar(
+        leading: const SecondaryPageBackButton(),
         title: const Text('收益日历'),
         actions: const [TerminalAppBarActions()],
       ),

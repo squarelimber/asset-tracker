@@ -18,12 +18,13 @@ Future<String> readLimitedBody(Stream<List<int>> stream, int maxBytes,
   final buffer = BytesBuilder(copy: false);
   final chunks = StreamIterator<List<int>>(stream);
   try {
+    var next = chunks.moveNext();
     while (true) {
       final remaining = timeout - stopwatch.elapsed;
       if (remaining <= Duration.zero) throw const SlowBody();
       final bool hasNext;
       try {
-        hasNext = await chunks.moveNext().timeout(remaining);
+        hasNext = await next.timeout(remaining);
       } on TimeoutException {
         throw const SlowBody();
       }
@@ -32,6 +33,7 @@ Future<String> readLimitedBody(Stream<List<int>> stream, int maxBytes,
       size += chunk.length;
       if (size > maxBytes) throw const BodyTooLarge();
       buffer.add(chunk);
+      next = chunks.moveNext();
     }
   } finally {
     await chunks.cancel();

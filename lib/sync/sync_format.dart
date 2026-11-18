@@ -63,6 +63,7 @@ class SyncFormatter {
     'costPrice': h.costPrice,
     'costRecorded': h.costRecorded,
     'latestPrice': h.latestPrice,
+    if (h.manualNavHistory != null) 'manualNavHistory': h.manualNavHistory,
     'costFxRate': h.costFxRate,
     'purchaseDate': h.purchaseDate?.toIso8601String(),
     'riskLevel': h.riskLevel,
