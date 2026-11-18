@@ -5,11 +5,63 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../app/providers.dart';
 import '../../../core/formats.dart';
 import '../../../data/asset_dao.dart';
+import '../../../domain/holding_kline.dart';
 import '../../../domain/portfolio_intraday.dart';
+import '../../../services/market/kline_source.dart';
+import '../../../services/market/market_data_source.dart';
 import '../../../services/market/market_service.dart';
 
 const _sampleKey = 'portfolio_intraday_samples';
-typedef PortfolioSample = ({int minute, double profit});
+
+final portfolioMinuteSourceProvider = Provider.autoDispose<KlineSource>((ref) {
+  final source = KlineSource();
+  ref.onDispose(source.close);
+  return source;
+});
+
+final portfolioIntradayHistoryProvider = FutureProvider.autoDispose
+    .family<PortfolioIntradayHistory, String>((ref, day) async {
+      final dao = ref.watch(daoProvider);
+      final market = ref.watch(marketServiceProvider);
+      final source = ref.watch(portfolioMinuteSourceProvider);
+      final start = DateTime.parse('${day}T00:00:00+08:00');
+      final (holdings, transactions) = await dao.transaction(
+        () async =>
+            (await dao.getHoldings(), await dao.getTransactionsSince(start)),
+      );
+      final priceHoldings = intradayPriceHoldings(holdings, transactions);
+      final symbols = {
+        for (final holding in priceHoldings) klineSymbolForHolding(holding),
+      }.whereType<String>().where(supportsMarketIntraday).toList();
+      final currencies = {
+        for (final holding in priceHoldings)
+          if (holding.currency.toUpperCase() != 'CNY' &&
+              symbols.contains(klineSymbolForHolding(holding)))
+            holding.currency,
+      };
+      final quotes = <String, MarketIntraday>{};
+      for (final batch in MarketFetchHelper.chunk(symbols, 8)) {
+        final results = await Future.wait(
+          batch.map((symbol) async {
+            return (symbol, await source.fetchIntraday(symbol));
+          }),
+        );
+        for (final (symbol, quote) in results) {
+          if (quote != null && quote.date == day) quotes[symbol] = quote;
+        }
+      }
+      final rates = quotes.isEmpty
+          ? <String, double>{}
+          : await market.loadCnyRates(currencies.toList());
+      return rebuildPortfolioIntraday(
+        day: day,
+        now: DateTime.now(),
+        priceHoldings: priceHoldings,
+        transactions: transactions,
+        quotes: quotes,
+        rates: rates,
+      );
+    });
 
 List<PortfolioSample> _readSamples(String? raw, String day) {
   if (raw == null) return const [];

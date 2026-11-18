@@ -90,6 +90,7 @@ class _PortfolioPageState extends ConsumerState<PortfolioPage> {
           time.minute < 5 &&
           _closingSampleDay != todayKey(time);
       if (session == MarketSession.open || closing) {
+        ref.invalidate(portfolioIntradayHistoryProvider(todayKey(time)));
         unawaited(_refreshPrices(showSnack: false, intradayOnly: true));
       }
     });
@@ -108,6 +109,13 @@ class _PortfolioPageState extends ConsumerState<PortfolioPage> {
   }) async {
     if (_refreshing.value) return;
     _refreshing.value = true;
+    if (showSnack) {
+      ref.invalidate(
+        portfolioIntradayHistoryProvider(
+          todayKey(chinaMarketTime(DateTime.now())),
+        ),
+      );
+    }
     MarketRefreshResult? result;
     try {
       result = await ref.read(marketServiceProvider).refreshAll();

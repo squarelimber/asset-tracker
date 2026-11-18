@@ -16,6 +16,9 @@ void main() {
           'code': 0,
           'data': {
             'sz159980': {
+              'qt': {
+                'sz159980': ['51', 'ETF', '159980', '2.004', '1.960'],
+              },
               'data': {
                 'date': '20261118',
                 'data': [
@@ -35,6 +38,7 @@ void main() {
     addTearDown(client.close);
     final series = await KlineSource(client: client).fetchIntraday('sz159980');
     expect(series?.date, '2026-11-18');
+    expect(series?.previousClose, 1.960);
     expect(series?.points, [
       (minute: 570, value: 1.999),
       (minute: 571, value: 2.004),

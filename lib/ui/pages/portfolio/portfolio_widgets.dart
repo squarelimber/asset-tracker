@@ -345,46 +345,54 @@ class _PortfolioIntradayTrend extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final history = ref.watch(portfolioIntradayHistoryProvider(day));
     final samples = ref.watch(portfolioIntradayProvider(day));
+    final rebuilt = history.valueOrNull;
+    final hasHistory = rebuilt?.points.isNotEmpty ?? false;
+    final points = hasHistory
+        ? rebuilt!.points
+        : samples.valueOrNull ?? const [];
     final hidden = ref.watch(hideAmountsProvider);
-    return samples.when(
-      loading: () => const Center(child: CircularProgressIndicator()),
-      error: (_, _) => Text('今日记录加载失败', style: T.label()),
-      data: (points) => Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          if (points.isEmpty)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 20),
-              child: Text('暂无今日分时记录，交易时段打开总览后开始记录。', style: T.label()),
-            )
-          else ...[
-            Text(
-              hidden
-                  ? Formats.masked()
-                  : '${points.last.profit >= 0 ? '+' : ''}${Formats.money(points.last.profit)}',
-              style: T.mono(size: 22, weight: FontWeight.w700),
-            ),
-            Text(
-              '截至 ${minuteLabel(points.last.minute)} · $day',
-              style: T.label(),
-            ),
-            if (!hidden) ...[
-              IntradayLineChart(
-                points: [
-                  for (final p in points) (minute: p.minute, value: p.profit),
-                ],
-                formatValue: Formats.money,
-              ),
+    if (points.isEmpty) {
+      if (history.isLoading || samples.isLoading) {
+        return const Center(child: CircularProgressIndicator());
+      }
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 20),
+        child: Text(
+          history.hasError || samples.hasError
+              ? '今日分时加载失败，可刷新重试。'
+              : '暂无可用的今日分时行情。',
+          style: T.label(),
+        ),
+      );
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          hidden
+              ? Formats.masked()
+              : '${points.last.profit >= 0 ? '+' : ''}${Formats.money(points.last.profit)}',
+          style: T.mono(size: 22, weight: FontWeight.w700),
+        ),
+        Text('截至 ${minuteLabel(points.last.minute)} · $day', style: T.label()),
+        if (!hidden) ...[
+          IntradayLineChart(
+            points: [
+              for (final p in points) (minute: p.minute, value: p.profit),
             ],
-          ],
-          const SizedBox(height: T.s2),
-          Text(
-            '相对上一日净值，扣除已记录的外部资金进出。总览打开时约每 5 分钟记录一次，按北京时间显示。',
-            style: T.label(),
+            formatValue: Formats.money,
           ),
         ],
-      ),
+        const SizedBox(height: T.s2),
+        Text(
+          hasHistory
+              ? '按 A 股时段重算，分时行情覆盖 ${rebuilt!.covered}/${rebuilt.eligible} 项份额类持仓。其余资产及汇率按固定值估算。'
+              : '当前显示本机已记录的净值点，扣除已记录的外部资金进出。',
+          style: T.label(),
+        ),
+      ],
     );
   }
 }
@@ -394,6 +402,7 @@ class _NetWorthChartState extends ConsumerState<NetWorthChart> {
   late bool _autoToday;
   late String _marketDay;
   Timer? _sessionTimer;
+  late final AppLifecycleListener _lifecycle;
 
   RangeOption get _range =>
       _manualRange ?? (_autoToday ? RangeOption.today : RangeOption.ytd);
@@ -404,6 +413,15 @@ class _NetWorthChartState extends ConsumerState<NetWorthChart> {
     final now = widget.clock();
     _autoToday = prefersTodayTrend(now);
     _marketDay = todayKey(chinaMarketTime(now));
+    _lifecycle = AppLifecycleListener(
+      onResume: () {
+        ref.invalidate(
+          portfolioIntradayHistoryProvider(
+            todayKey(chinaMarketTime(widget.clock())),
+          ),
+        );
+      },
+    );
     _sessionTimer = Timer.periodic(const Duration(seconds: 15), (_) {
       final now = widget.clock();
       final today = prefersTodayTrend(now);
@@ -419,6 +437,7 @@ class _NetWorthChartState extends ConsumerState<NetWorthChart> {
 
   @override
   void dispose() {
+    _lifecycle.dispose();
     _sessionTimer?.cancel();
     super.dispose();
   }

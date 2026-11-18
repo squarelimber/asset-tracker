@@ -8,6 +8,7 @@ enum KlinePeriod { day, week, month }
 
 typedef MarketIntraday = ({
   String date,
+  double? previousClose,
   List<({int minute, double value})> points,
 });
 
@@ -104,9 +105,21 @@ class KlineSource {
           prices[minuteOfDay] = price;
         }
         if (prices.isEmpty) continue;
+        final quotes = security['qt'];
+        final quote = quotes is Map ? quotes[symbol] : null;
+        // The embedded Tencent quote uses the same field order as qt.gtimg.cn.
+        final previousClose = quote is List && quote.length > 4
+            ? double.tryParse(quote[4].toString())
+            : null;
         final minutes = prices.keys.toList()..sort();
         return (
           date: date,
+          previousClose:
+              previousClose != null &&
+                  previousClose.isFinite &&
+                  previousClose > 0
+              ? previousClose
+              : null,
           points: [for (final m in minutes) (minute: m, value: prices[m]!)],
         );
       } catch (_) {

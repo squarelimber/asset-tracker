@@ -2,6 +2,13 @@
 
 All notable changes to Asset Tracker. Entries are condensed from the commit history; dates follow the release tags.
 
+## [0.11.8+64] - 2026-11-18
+
+### Fixed
+
+- 总览「今日」按当天的分钟行情和成交补算分时盈亏，首次打开也能看到早盘走势
+- 盘中买卖按成交时间调整持仓，交易本金不计入盈亏。曲线标明分时行情的持仓覆盖范围
+
 ## [0.11.8] - 2026-11-18
 
 ### Added

@@ -130,6 +130,13 @@ void main() {
           portfolioIntradayProvider.overrideWith(
             (ref, day) => Stream.value([]),
           ),
+          portfolioIntradayHistoryProvider.overrideWith(
+            (ref, day) async => (
+              points: [(minute: 570, profit: 15.0), (minute: 571, profit: 10.0)],
+              covered: 1,
+              eligible: 2,
+            ),
+          ),
         ],
         child: MaterialApp(
           home: Scaffold(body: NetWorthChart(clock: () => now)),
@@ -138,6 +145,8 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(find.text('今日盈亏走势'), findsOneWidget);
+    expect(find.textContaining('截至 09:31'), findsOneWidget);
+    expect(find.textContaining('1/2'), findsOneWidget);
 
     now = DateTime.utc(2026, 11, 18, 7);
     await tester.pump(const Duration(seconds: 15));

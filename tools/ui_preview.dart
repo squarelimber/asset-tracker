@@ -59,12 +59,17 @@ Future<void> main() async {
         hideAmountsProvider.overrideWith((ref) => false),
         historySyncProvider.overrideWith((ref) async => null),
         marketServiceProvider.overrideWithValue(_PreviewMarket(dao)),
-        portfolioIntradayProvider.overrideWith(
-          (ref, day) => Stream.value([
-            if (day == demoDay)
-              for (final minute in _demoMinutes(5))
-                (minute: minute, profit: _demoMove(minute)),
-          ]),
+        portfolioIntradayProvider.overrideWith((ref, day) => Stream.value([])),
+        portfolioIntradayHistoryProvider.overrideWith(
+          (ref, day) async => (
+            points: [
+              if (day == demoDay)
+                for (final minute in _demoMinutes(5))
+                  (minute: minute, profit: _demoMove(minute)),
+            ],
+            covered: 2,
+            eligible: 2,
+          ),
         ),
       ],
       child: Directionality(
@@ -142,6 +147,7 @@ class _PreviewKline extends KlineSource {
   @override
   Future<MarketIntraday?> fetchIntraday(String symbol) async => (
     date: date,
+    previousClose: 4.075,
     points: [
       for (final minute in _demoMinutes(1))
         (minute: minute, value: 4.075 + _demoMove(minute) / 38000),

@@ -294,6 +294,11 @@ class AssetDao {
   Future<List<TransactionRow>> getTransactions() =>
       _db.select(_db.transactions).get();
 
+  Future<List<TransactionRow>> getTransactionsSince(DateTime start) =>
+      (_db.select(_db.transactions)
+            ..where((t) => t.occurredAt.isBiggerOrEqualValue(start)))
+          .get();
+
   Future<int> createTransaction(TransactionsCompanion entry) =>
       _db.into(_db.transactions).insert(entry);
 
