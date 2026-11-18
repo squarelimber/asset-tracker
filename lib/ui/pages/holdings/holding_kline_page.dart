@@ -7,8 +7,10 @@ import '../../../core/responsive.dart';
 import '../../../data/database.dart';
 import '../../../domain/closed_holding.dart';
 import '../../../domain/holding_kline.dart';
+import '../../../domain/portfolio_intraday.dart';
 import '../../../services/market/kline_source.dart';
 import '../../components/error_state.dart';
+import '../../components/intraday_line_chart.dart';
 import '../../components/kline_chart.dart';
 import '../../components/terminal_card.dart';
 import '../../components/terminal_choice.dart';
@@ -93,6 +95,8 @@ class _HoldingChart extends ConsumerStatefulWidget {
 class _HoldingChartState extends ConsumerState<_HoldingChart> {
   late final KlineSource _source;
   KlinePeriod _period = KlinePeriod.day;
+  bool _showIntraday = false;
+  Future<MarketIntraday?>? _intraday;
   late Future<List<CandleBar>> _bars;
 
   @override
@@ -105,11 +109,18 @@ class _HoldingChartState extends ConsumerState<_HoldingChart> {
   @override
   void didUpdateWidget(covariant _HoldingChart oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.symbol != widget.symbol) _load();
+    if (oldWidget.symbol != widget.symbol) {
+      _intraday = null;
+      if (!supportsMarketIntraday(widget.symbol)) _showIntraday = false;
+      _load();
+      if (_showIntraday) _loadIntraday();
+    }
   }
 
   void _load() =>
       _bars = _source.fetch(widget.symbol, _period, adjusted: false);
+
+  void _loadIntraday() => _intraday = _source.fetchIntraday(widget.symbol);
 
   @override
   void dispose() {
@@ -151,7 +162,10 @@ class _HoldingChartState extends ConsumerState<_HoldingChart> {
             ),
           ],
         ),
-        Text('${widget.symbol.toUpperCase()} · 腾讯行情 · 未复权', style: T.label()),
+        Text(
+          '${widget.symbol.toUpperCase()} · 腾讯行情 · ${_showIntraday ? '分时' : '未复权'}',
+          style: T.label(),
+        ),
         const SizedBox(height: T.s2),
         Wrap(
           spacing: T.s4,
@@ -176,8 +190,18 @@ class _HoldingChartState extends ConsumerState<_HoldingChart> {
           ],
         ),
         const SizedBox(height: T.s2),
-        Row(
+        Wrap(
+          crossAxisAlignment: WrapCrossAlignment.center,
           children: [
+            if (supportsMarketIntraday(widget.symbol))
+              TerminalChoice(
+                label: '分时',
+                selected: _showIntraday,
+                onPressed: () => setState(() {
+                  _showIntraday = true;
+                  if (_intraday == null) _loadIntraday();
+                }),
+              ),
             for (final (period, label) in [
               (KlinePeriod.day, '日 K'),
               (KlinePeriod.week, '周 K'),
@@ -185,66 +209,72 @@ class _HoldingChartState extends ConsumerState<_HoldingChart> {
             ])
               TerminalChoice(
                 label: label,
-                selected: _period == period,
+                selected: !_showIntraday && _period == period,
                 onPressed: () {
-                  if (_period != period) {
+                  if (_showIntraday || _period != period) {
                     setState(() {
+                      _showIntraday = false;
                       _period = period;
                       _load();
                     });
                   }
                 },
               ),
-            const Spacer(),
             IconButton(
-              tooltip: '刷新 K 线',
-              onPressed: () => setState(_load),
+              tooltip: _showIntraday ? '刷新分时' : '刷新 K 线',
+              onPressed: () => setState(_showIntraday ? _loadIntraday : _load),
               icon: const Icon(Icons.refresh),
             ),
           ],
         ),
-        FutureBuilder<List<CandleBar>>(
-          future: _bars,
-          builder: (context, snapshot) {
-            if (snapshot.connectionState != ConnectionState.done) {
-              return const SizedBox(
-                height: 180,
-                child: Center(child: CircularProgressIndicator()),
-              );
-            }
-            final bars = snapshot.data ?? const <CandleBar>[];
-            if (snapshot.hasError || bars.isEmpty) {
-              return ErrorState(
-                message: '未能获取 K 线数据，请检查网络后重试',
-                onRetry: () => setState(_load),
-              );
-            }
-            final matched = mapKlineMarkersToBars(
-              bars,
-              markers,
-              _period,
-            ).values.fold<int>(0, (count, items) => count + items.length);
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('数据截至 ${Formats.date(bars.last.date)}', style: T.label()),
-                if (DateTime.now().difference(bars.last.date).inDays > 14)
-                  Text('行情已较长时间未更新，证券可能已停牌或退市。', style: T.label()),
-                TerminalCard(
-                  child: KlineChart(
-                    bars: bars,
-                    period: _period,
-                    markers: markers,
-                    hideTradePrices: hide,
-                    onMarkerTap: (items) => _showMarkers(context, items),
+        if (_showIntraday)
+          _buildIntraday(transactions.valueOrNull ?? const [], hidden: hide)
+        else
+          FutureBuilder<List<CandleBar>>(
+            future: _bars,
+            builder: (context, snapshot) {
+              if (snapshot.connectionState != ConnectionState.done) {
+                return const SizedBox(
+                  height: 180,
+                  child: Center(child: CircularProgressIndicator()),
+                );
+              }
+              final bars = snapshot.data ?? const <CandleBar>[];
+              if (snapshot.hasError || bars.isEmpty) {
+                return ErrorState(
+                  message: '未能获取 K 线数据，请检查网络后重试',
+                  onRetry: () => setState(_load),
+                );
+              }
+              final matched = mapKlineMarkersToBars(
+                bars,
+                markers,
+                _period,
+              ).values.fold<int>(0, (count, items) => count + items.length);
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '数据截至 ${Formats.date(bars.last.date)}',
+                    style: T.label(),
                   ),
-                ),
-                if (matched < markers.length)
-                  Text('部分交易无对应 K 线，可在下方交易流水查看。', style: T.label()),
-              ],
-            );
-          },
-        ),
+                  if (DateTime.now().difference(bars.last.date).inDays > 14)
+                    Text('行情已较长时间未更新，证券可能已停牌或退市。', style: T.label()),
+                  TerminalCard(
+                    child: KlineChart(
+                      bars: bars,
+                      period: _period,
+                      markers: markers,
+                      hideTradePrices: hide,
+                      onMarkerTap: (items) => _showMarkers(context, items),
+                    ),
+                  ),
+                  if (matched < markers.length)
+                    Text('部分交易无对应 K 线，可在下方交易流水查看。', style: T.label()),
+                ],
+              );
+            },
+          ),
         if (transactions.isLoading) Text('交易标记加载中…', style: T.label()),
         if (transactions.hasError)
           TextButton(
@@ -262,6 +292,87 @@ class _HoldingChartState extends ConsumerState<_HoldingChart> {
           Text('美股交易请将记录日期设为交易所的成交日期。', style: T.label()),
         const SizedBox(height: T.s4),
       ],
+    );
+  }
+
+  Widget _buildIntraday(
+    List<TransactionRow> transactions, {
+    required bool hidden,
+  }) {
+    final close = widget.symbol.startsWith('hk') ? 960 : 900;
+    return FutureBuilder<MarketIntraday?>(
+      future: _intraday,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState != ConnectionState.done) {
+          return const SizedBox(
+            height: 180,
+            child: Center(child: CircularProgressIndicator()),
+          );
+        }
+        final data = snapshot.data;
+        if (data == null) {
+          return ErrorState(
+            message: '暂无分时行情，请稍后重试',
+            onRetry: () => setState(_loadIntraday),
+          );
+        }
+        final trades = [
+          for (final t in transactions)
+            if (t.holdingId == widget.holding.id &&
+                (t.type == 'buy' || t.type == 'sell') &&
+                todayKey(chinaMarketTime(t.occurredAt)) == data.date)
+              (transaction: t, time: chinaMarketTime(t.occurredAt)),
+        ];
+        final markers = [
+          if (!hidden)
+            for (final trade in trades)
+              if (trade.transaction.price case final price?)
+                if (price.isFinite &&
+                    price > 0 &&
+                    trade.time.hour * 60 + trade.time.minute >=
+                        data.points.first.minute &&
+                    trade.time.hour * 60 + trade.time.minute <=
+                        data.points.last.minute)
+                  (
+                    minute: trade.time.hour * 60 + trade.time.minute,
+                    value: price,
+                    color: trade.transaction.type == 'buy' ? T.up : T.down,
+                  ),
+        ];
+        return TerminalCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '${data.date} · 截至 ${minuteLabel(data.points.last.minute)} · 北京时间',
+                style: T.label(),
+              ),
+              IntradayLineChart(
+                points: data.points,
+                markers: markers,
+                lastMinute: close,
+                morningEnd: close == 960 ? 720 : 690,
+                maxGap: 2,
+                formatValue: Formats.plainNum,
+              ),
+              if (trades.isNotEmpty)
+                Wrap(
+                  spacing: T.s2,
+                  children: [
+                    for (final trade in trades)
+                      ActionChip(
+                        onPressed: () =>
+                            showTransactionDetails(context, trade.transaction),
+                        label: Text(
+                          '${trade.transaction.type == 'buy' ? '买入' : '卖出'} ${minuteLabel(trade.time.hour * 60 + trade.time.minute)}',
+                        ),
+                      ),
+                  ],
+                ),
+            ],
+          ),
+        );
+      },
     );
   }
 

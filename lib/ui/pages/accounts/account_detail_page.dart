@@ -16,6 +16,7 @@ import '../../components/error_state.dart';
 import '../../components/status_chip.dart';
 import '../../components/terminal_card.dart';
 import '../../components/transaction_details.dart';
+import '../../components/transaction_presentation.dart';
 import '../../tokens.dart';
 import '../transaction_dialogs.dart';
 
@@ -219,6 +220,11 @@ class _TransactionRow extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final type = TransactionType.fromStorage(txn.type);
+    final repayment = repaymentOf(
+      txn,
+      holdingsById[txn.cashSourceId],
+      holdingsById[txn.cashTargetId],
+    );
     final isTransfer =
         type == TransactionType.transferIn ||
         type == TransactionType.transferOut;
@@ -231,20 +237,23 @@ class _TransactionRow extends ConsumerWidget {
         holdingsById[txn.cashTargetId] != null &&
         (sourceInAccount || targetInAccount);
     final isInternal = isTransfer && sourceInAccount && targetInAccount;
-    final neutralTransfer = isTransfer && (!directionKnown || isInternal);
+    final neutralTransfer =
+        isTransfer && (!directionKnown || isInternal || repayment != null);
     final isIn = isTransfer && sourceInAccount != targetInAccount
         ? targetInAccount
         : type == TransactionType.buy ||
               type == TransactionType.transferIn ||
               type == TransactionType.income ||
               type == TransactionType.dividend;
-    final label = isInternal
-        ? '账户内转账'
-        : isTransfer && !directionKnown
-        ? '转账'
-        : isTransfer && sourceInAccount != targetInAccount
-        ? (isIn ? '转入' : '转出')
-        : type.label;
+    final label =
+        repayment?.label ??
+        (isInternal
+            ? '账户内转账'
+            : isTransfer && !directionKnown
+            ? '转账'
+            : isTransfer && sourceInAccount != targetInAccount
+            ? (isIn ? '转入' : '转出')
+            : type.label);
     final color = neutralTransfer ? T.text2 : (isIn ? T.up : T.down);
     final hide = ref.watch(hideAmountsProvider);
     String? holdingName(int? id) {
@@ -269,8 +278,8 @@ class _TransactionRow extends ConsumerWidget {
     final contextParts = <String>[];
     if (product != null) contextParts.add(product);
     contextParts.addAll([
-      if (source != null) '来源 $source',
-      if (target != null) '$targetLabel $target',
+      if (source != null) '${repayment == null ? '来源' : '资金来源'} $source',
+      if (target != null) '${repayment == null ? targetLabel : '还款账户'} $target',
       if (txn.note != null && txn.note!.isNotEmpty) txn.note!,
       Formats.dateTime(txn.occurredAt.toLocal()),
     ]);
@@ -281,7 +290,9 @@ class _TransactionRow extends ConsumerWidget {
       child: Row(
         children: [
           Icon(
-            isTransfer && !neutralTransfer
+            repayment != null
+                ? Icons.payments_outlined
+                : isTransfer && !neutralTransfer
                 ? (isIn ? Icons.south_west : Icons.north_east)
                 : neutralTransfer
                 ? Icons.swap_horiz

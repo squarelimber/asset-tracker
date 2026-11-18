@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
@@ -11,6 +13,7 @@ import '../../../data/database.dart';
 import '../../../domain/chart_downsample.dart';
 import '../../../domain/nice_ticks.dart';
 import '../../../domain/portfolio_calculator.dart';
+import '../../../domain/portfolio_intraday.dart';
 import '../../../domain/range_stats.dart';
 import '../../../domain/rate_series.dart';
 import '../../../domain/target_allocation.dart';
@@ -18,10 +21,12 @@ import '../../../services/market/history_lookup.dart';
 import '../../../services/market/history_source.dart';
 import '../../../services/market/tencent_history_source.dart';
 import '../../components/section_header.dart';
+import '../../components/intraday_line_chart.dart';
 import '../../components/terminal_card.dart';
 import '../../components/terminal_choice.dart';
 import '../../tokens.dart';
 import 'day_detail_sheet.dart';
+import 'portfolio_intraday.dart';
 import 'target_allocation_dialog.dart';
 
 /// Asset allocation: donut + table (实际/目标/偏离), reference-mock layout.
@@ -331,8 +336,90 @@ class NetWorthChart extends ConsumerStatefulWidget {
   ConsumerState<NetWorthChart> createState() => _NetWorthChartState();
 }
 
+class _PortfolioIntradayTrend extends ConsumerWidget {
+  const _PortfolioIntradayTrend();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final day = todayKey(chinaMarketTime(DateTime.now()));
+    final samples = ref.watch(portfolioIntradayProvider(day));
+    final hidden = ref.watch(hideAmountsProvider);
+    return samples.when(
+      loading: () => const Center(child: CircularProgressIndicator()),
+      error: (_, _) => Text('今日记录加载失败', style: T.label()),
+      data: (points) => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (points.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 20),
+              child: Text('暂无今日分时记录，交易时段打开总览后开始记录。', style: T.label()),
+            )
+          else ...[
+            Text(
+              hidden
+                  ? Formats.masked()
+                  : '${points.last.profit >= 0 ? '+' : ''}${Formats.money(points.last.profit)}',
+              style: T.mono(size: 22, weight: FontWeight.w700),
+            ),
+            Text(
+              '截至 ${minuteLabel(points.last.minute)} · $day',
+              style: T.label(),
+            ),
+            if (!hidden) ...[
+              IntradayLineChart(
+                points: [
+                  for (final p in points) (minute: p.minute, value: p.profit),
+                ],
+                formatValue: Formats.money,
+              ),
+            ],
+          ],
+          const SizedBox(height: T.s2),
+          Text(
+            '相对上一日净值，扣除已记录的外部资金进出。总览打开时约每 5 分钟记录一次，按北京时间显示。',
+            style: T.label(),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _NetWorthChartState extends ConsumerState<NetWorthChart> {
-  RangeOption _range = RangeOption.ytd;
+  RangeOption? _manualRange;
+  late bool _autoToday;
+  late String _marketDay;
+  Timer? _sessionTimer;
+
+  RangeOption get _range =>
+      _manualRange ?? (_autoToday ? RangeOption.today : RangeOption.ytd);
+
+  @override
+  void initState() {
+    super.initState();
+    final now = DateTime.now();
+    _autoToday = prefersTodayTrend(now);
+    _marketDay = todayKey(chinaMarketTime(now));
+    _sessionTimer = Timer.periodic(const Duration(seconds: 15), (_) {
+      final now = DateTime.now();
+      final today = prefersTodayTrend(now);
+      final day = todayKey(chinaMarketTime(now));
+      if (day != _marketDay || (_manualRange == null && today != _autoToday)) {
+        setState(() {
+          _autoToday = today;
+          _marketDay = day;
+        });
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _sessionTimer?.cancel();
+    super.dispose();
+  }
+
   DateTime? _customFrom;
   DateTime? _customTo;
   _TrendView _view = _TrendView.returnRate;
@@ -506,7 +593,7 @@ class _NetWorthChartState extends ConsumerState<NetWorthChart> {
     setState(() {
       _customFrom = from;
       _customTo = to;
-      _range = RangeOption.custom;
+      _manualRange = RangeOption.custom;
     });
   }
 
@@ -522,31 +609,35 @@ class _NetWorthChartState extends ConsumerState<NetWorthChart> {
             overflowAlignment: OverflowBarAlignment.start,
             spacing: T.s2,
             children: [
-              const Text(
-                '净值趋势',
-                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+              Text(
+                _range == RangeOption.today ? '今日盈亏走势' : '净值趋势',
+                style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
-              Wrap(
-                spacing: T.s1,
-                crossAxisAlignment: WrapCrossAlignment.center,
-                children: [
-                  TextButton.icon(
-                    onPressed: _showBenchmarkPanel,
-                    icon: const Icon(Icons.compare_arrows, size: 16),
-                    label: Text(
-                      _benchSelected.isEmpty
-                          ? '指数对比'
-                          : '指数对比 (${_benchSelected.length})',
+              if (_range != RangeOption.today)
+                Wrap(
+                  spacing: T.s1,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    TextButton.icon(
+                      onPressed: _showBenchmarkPanel,
+                      icon: const Icon(Icons.compare_arrows, size: 16),
+                      label: Text(
+                        _benchSelected.isEmpty
+                            ? '指数对比'
+                            : '指数对比 (${_benchSelected.length})',
+                      ),
                     ),
-                  ),
-                  for (final view in _TrendView.values)
-                    TerminalChoice(
-                      label: view == _TrendView.returnRate ? '收益率' : '净值',
-                      selected: _view == view,
-                      onPressed: () => setState(() => _view = view),
-                    ),
-                ],
-              ),
+                    for (final view in _TrendView.values)
+                      TerminalChoice(
+                        label: view == _TrendView.returnRate ? '收益率' : '净值',
+                        selected: _view == view,
+                        onPressed: () => setState(() => _view = view),
+                      ),
+                  ],
+                ),
             ],
           ),
           const SizedBox(height: T.s2),
@@ -560,7 +651,7 @@ class _NetWorthChartState extends ConsumerState<NetWorthChart> {
                   selected: _range == option,
                   onPressed: option == RangeOption.custom
                       ? _pickCustomRange
-                      : () => setState(() => _range = option),
+                      : () => setState(() => _manualRange = option),
                 ),
             ],
           ),
@@ -573,227 +664,232 @@ class _NetWorthChartState extends ConsumerState<NetWorthChart> {
                 style: T.mono(size: 11, color: T.text2),
               ),
             ),
-          snapshots.when(
-            data: (all) {
-              final now = DateTime.now();
-              final startDate = _range == RangeOption.custom
-                  ? _customFrom
-                  : _range.startDate(now);
-              final endDate = _range == RangeOption.custom
-                  ? _customTo
-                  : (_range == RangeOption.all ? null : now);
-              final list = const RangeStatsCalculator().filter(
-                all,
-                from: startDate == null ? null : Formats.date(startDate),
-                to: endDate == null ? null : Formats.date(endDate),
-              );
-              if (list.isEmpty) {
-                return Padding(
-                  padding: const EdgeInsets.all(24),
-                  child: Center(
-                    child: Text(
-                      all.isEmpty ? '暂无净值记录' : '所选区间没有净值记录',
-                      style: const TextStyle(color: T.text3),
-                    ),
-                  ),
+          if (_range == RangeOption.today)
+            const _PortfolioIntradayTrend()
+          else
+            snapshots.when(
+              data: (all) {
+                final now = DateTime.now();
+                final startDate = _range == RangeOption.custom
+                    ? _customFrom
+                    : _range.startDate(now);
+                final endDate = _range == RangeOption.custom
+                    ? _customTo
+                    : (_range == RangeOption.all ? null : now);
+                final list = const RangeStatsCalculator().filter(
+                  all,
+                  from: startDate == null ? null : Formats.date(startDate),
+                  to: endDate == null ? null : Formats.date(endDate),
                 );
-              }
-              final stats = const RangeStatsCalculator().compute(list);
-              final isRate = _view == _TrendView.returnRate;
-              final showBenchmarks =
-                  isRate && _benchSelected.any(_benchData.containsKey);
-              final rates = const RateSeriesCalculator().ratesOf(list);
-              final rateDelta = const RateSeriesCalculator().rangeRatePct(list);
-              final rateAnnualized = const RateSeriesCalculator()
-                  .annualizedFromRange(list);
-              final mainValue = isRate
-                  ? (rateDelta ?? 0)
-                  : (stats?.profit ?? 0);
-              final mainPct = isRate
-                  ? (rateDelta ?? 0) / 100
-                  : (stats?.profitPct ?? 0);
-              final color = T.changeColor(mainValue);
-              final hideAmounts = ref.watch(hideAmountsProvider);
-              String moneyText(double v) =>
-                  hideAmounts ? Formats.masked() : Formats.money(v);
-              return Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  if (stats != null) ...[
-                    // 布局：左侧纵向说明（区间收益 → 年化/天数），右侧主金额
-                    // 右对齐，与趋势图右缘对齐；ⓘ 挂在收益率旁。
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
-                        // 左列：区间收益说明（纵向）
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Text(
-                                    isRate ? '区间收益' : '区间年化',
-                                    style: T.mono(size: 11, color: T.text3),
-                                  ),
-                                  const SizedBox(width: 4),
-                                  Tooltip(
-                                    message:
-                                        '收益率自区间首日归零，与指数同起点对比；'
-                                        '已剔除转入资金影响（成本口径近似）',
-                                    child: InkWell(
-                                      borderRadius: BorderRadius.circular(
-                                        T.rPill,
-                                      ),
-                                      onTap: () => showDialog<void>(
-                                        context: context,
-                                        builder: (context) => AlertDialog(
-                                          title: const Text('收益率口径'),
-                                          content: const Text(
-                                            '收益率自区间首日归零，与指数同起点对比；'
-                                            '已剔除转入资金影响（成本口径近似）',
-                                          ),
-                                          actions: [
-                                            TextButton(
-                                              onPressed: () =>
-                                                  Navigator.pop(context),
-                                              child: const Text('知道了'),
-                                            ),
-                                          ],
+                if (list.isEmpty) {
+                  return Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: Center(
+                      child: Text(
+                        all.isEmpty ? '暂无净值记录' : '所选区间没有净值记录',
+                        style: const TextStyle(color: T.text3),
+                      ),
+                    ),
+                  );
+                }
+                final stats = const RangeStatsCalculator().compute(list);
+                final isRate = _view == _TrendView.returnRate;
+                final showBenchmarks =
+                    isRate && _benchSelected.any(_benchData.containsKey);
+                final rates = const RateSeriesCalculator().ratesOf(list);
+                final rateDelta = const RateSeriesCalculator().rangeRatePct(
+                  list,
+                );
+                final rateAnnualized = const RateSeriesCalculator()
+                    .annualizedFromRange(list);
+                final mainValue = isRate
+                    ? (rateDelta ?? 0)
+                    : (stats?.profit ?? 0);
+                final mainPct = isRate
+                    ? (rateDelta ?? 0) / 100
+                    : (stats?.profitPct ?? 0);
+                final color = T.changeColor(mainValue);
+                final hideAmounts = ref.watch(hideAmountsProvider);
+                String moneyText(double v) =>
+                    hideAmounts ? Formats.masked() : Formats.money(v);
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (stats != null) ...[
+                      // 布局：左侧纵向说明（区间收益 → 年化/天数），右侧主金额
+                      // 右对齐，与趋势图右缘对齐；ⓘ 挂在收益率旁。
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          // 左列：区间收益说明（纵向）
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Text(
+                                      isRate ? '区间收益' : '区间年化',
+                                      style: T.mono(size: 11, color: T.text3),
+                                    ),
+                                    const SizedBox(width: 4),
+                                    Tooltip(
+                                      message:
+                                          '收益率自区间首日归零，与指数同起点对比；'
+                                          '已剔除转入资金影响（成本口径近似）',
+                                      child: InkWell(
+                                        borderRadius: BorderRadius.circular(
+                                          T.rPill,
                                         ),
-                                      ),
-                                      child: const Padding(
-                                        padding: EdgeInsets.all(2),
-                                        child: Icon(
-                                          Icons.info_outline,
-                                          size: 13,
-                                          color: T.text3,
+                                        onTap: () => showDialog<void>(
+                                          context: context,
+                                          builder: (context) => AlertDialog(
+                                            title: const Text('收益率口径'),
+                                            content: const Text(
+                                              '收益率自区间首日归零，与指数同起点对比；'
+                                              '已剔除转入资金影响（成本口径近似）',
+                                            ),
+                                            actions: [
+                                              TextButton(
+                                                onPressed: () =>
+                                                    Navigator.pop(context),
+                                                child: const Text('知道了'),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                        child: const Padding(
+                                          padding: EdgeInsets.all(2),
+                                          child: Icon(
+                                            Icons.info_outline,
+                                            size: 13,
+                                            color: T.text3,
+                                          ),
                                         ),
                                       ),
                                     ),
+                                  ],
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  isRate
+                                      ? '年化 ${rateAnnualized == null ? '--' : Formats.pct(rateAnnualized)}'
+                                            ' · ${stats.days} 天'
+                                      : '${stats.days} 天',
+                                  style: T.mono(size: 11, color: T.text3),
+                                ),
+                                // 方案①：已选指数的区间收益率（与资产同区间、
+                                // 同起点），一眼对比「我的收益率 vs 指数」。
+                                if (showBenchmarks)
+                                  Padding(
+                                    padding: const EdgeInsets.only(top: 3),
+                                    child: Wrap(
+                                      spacing: 10,
+                                      runSpacing: 2,
+                                      children: [
+                                        for (final code in _benchSelected)
+                                          if (_benchData.containsKey(code))
+                                            _benchRangePct(code, list),
+                                      ],
+                                    ),
                                   ),
-                                ],
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          // 右列：主数值 + 次级小字，右对齐趋势图右缘
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.end,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                isRate
+                                    ? '${mainValue >= 0 ? '+' : ''}${Formats.pct(mainPct)}'
+                                    : '${mainValue >= 0 ? '+' : ''}${moneyText(mainValue)}',
+                                style: T.mono(
+                                  size: 22,
+                                  weight: FontWeight.w700,
+                                  color: color,
+                                ),
                               ),
                               const SizedBox(height: 2),
                               Text(
                                 isRate
-                                    ? '年化 ${rateAnnualized == null ? '--' : Formats.pct(rateAnnualized)}'
-                                          ' · ${stats.days} 天'
-                                    : '${stats.days} 天',
-                                style: T.mono(size: 11, color: T.text3),
-                              ),
-                              // 方案①：已选指数的区间收益率（与资产同区间、
-                              // 同起点），一眼对比「我的收益率 vs 指数」。
-                              if (showBenchmarks)
-                                Padding(
-                                  padding: const EdgeInsets.only(top: 3),
-                                  child: Wrap(
-                                    spacing: 10,
-                                    runSpacing: 2,
-                                    children: [
-                                      for (final code in _benchSelected)
-                                        if (_benchData.containsKey(code))
-                                          _benchRangePct(code, list),
-                                    ],
-                                  ),
+                                    ? '${stats.profit >= 0 ? '+' : ''}${moneyText(stats.profit)}'
+                                    : '${stats.profitPct >= 0 ? '+' : ''}${Formats.pct(stats.profitPct)}',
+                                style: T.mono(
+                                  size: 12,
+                                  color: isRate ? T.text2 : color,
                                 ),
+                              ),
                             ],
                           ),
-                        ),
-                        const SizedBox(width: 8),
-                        // 右列：主数值 + 次级小字，右对齐趋势图右缘
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.end,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              isRate
-                                  ? '${mainValue >= 0 ? '+' : ''}${Formats.pct(mainPct)}'
-                                  : '${mainValue >= 0 ? '+' : ''}${moneyText(mainValue)}',
-                              style: T.mono(
-                                size: 22,
-                                weight: FontWeight.w700,
-                                color: color,
-                              ),
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              isRate
-                                  ? '${stats.profit >= 0 ? '+' : ''}${moneyText(stats.profit)}'
-                                  : '${stats.profitPct >= 0 ? '+' : ''}${Formats.pct(stats.profitPct)}',
-                              style: T.mono(
-                                size: 12,
-                                color: isRate ? T.text2 : color,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                  ],
-                  // Legend above the chart (no overlay).
-                  if (showBenchmarks)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 8),
-                      child: Wrap(
-                        spacing: 14,
-                        runSpacing: 4,
-                        children: [
-                          _LegendDot(gradient: T.trendGradient, label: '资产'),
-                          for (final code in _benchSelected)
-                            if (_benchData.containsKey(code))
-                              _LegendDot(
-                                color: _benchColor(code),
-                                label: _benchIndexes
-                                    .firstWhere((b) => b.code == code)
-                                    .label,
-                              ),
                         ],
                       ),
+                      const SizedBox(height: 12),
+                    ],
+                    // Legend above the chart (no overlay).
+                    if (showBenchmarks)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: Wrap(
+                          spacing: 14,
+                          runSpacing: 4,
+                          children: [
+                            _LegendDot(gradient: T.trendGradient, label: '资产'),
+                            for (final code in _benchSelected)
+                              if (_benchData.containsKey(code))
+                                _LegendDot(
+                                  color: _benchColor(code),
+                                  label: _benchIndexes
+                                      .firstWhere((b) => b.code == code)
+                                      .label,
+                                ),
+                          ],
+                        ),
+                      ),
+                    _TrendChart(
+                      list: list,
+                      view: _view,
+                      rates: rates,
+                      hideAmounts: hideAmounts,
+                      benchmarks: {
+                        for (final code in _benchSelected)
+                          if (_benchData.containsKey(code))
+                            code: _BenchSeries(
+                              name: _benchIndexes
+                                  .firstWhere((b) => b.code == code)
+                                  .label,
+                              color: _benchColor(code),
+                              lookup: _benchData[code]!,
+                            ),
+                      },
+                      onDayTap: (date) => _showDayDetail(context, date),
                     ),
-                  _TrendChart(
-                    list: list,
-                    view: _view,
-                    rates: rates,
-                    hideAmounts: hideAmounts,
-                    benchmarks: {
-                      for (final code in _benchSelected)
-                        if (_benchData.containsKey(code))
-                          code: _BenchSeries(
-                            name: _benchIndexes
-                                .firstWhere((b) => b.code == code)
-                                .label,
-                            color: _benchColor(code),
-                            lookup: _benchData[code]!,
-                          ),
-                    },
-                    onDayTap: (date) => _showDayDetail(context, date),
-                  ),
-                ],
-              );
-            },
-            loading: () => const SizedBox(
-              height: 220,
-              child: Center(child: CircularProgressIndicator()),
-            ),
-            error: (e, _) => Padding(
-              padding: const EdgeInsets.all(24),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Text('净值数据加载失败', style: T.mono(size: 12, color: T.text2)),
-                  const SizedBox(width: 8),
-                  TextButton(
-                    onPressed: () => ref.invalidate(snapshotsProvider),
-                    child: const Text('重试'),
-                  ),
-                ],
+                  ],
+                );
+              },
+              loading: () => const SizedBox(
+                height: 220,
+                child: Center(child: CircularProgressIndicator()),
+              ),
+              error: (e, _) => Padding(
+                padding: const EdgeInsets.all(24),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text('净值数据加载失败', style: T.mono(size: 12, color: T.text2)),
+                    const SizedBox(width: 8),
+                    TextButton(
+                      onPressed: () => ref.invalidate(snapshotsProvider),
+                      child: const Text('重试'),
+                    ),
+                  ],
+                ),
               ),
             ),
-          ),
         ],
       ),
     );

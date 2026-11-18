@@ -12,6 +12,7 @@ import '../../../domain/trade_stats.dart';
 import '../../components/error_state.dart';
 import '../../components/status_chip.dart';
 import '../../components/terminal_card.dart';
+import '../../components/transaction_presentation.dart';
 import '../../components/transaction_tile.dart';
 import '../../tokens.dart';
 import '../transaction_dialogs.dart';
@@ -57,6 +58,13 @@ class HoldingDetailSheet extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final txns = ref.watch(transactionsByHoldingProvider(holding.id));
     final txnList = txns.valueOrNull ?? const <TransactionRow>[];
+    final holdingsById = <int, HoldingRow>{
+      if (txnList.any(isTransferRecord))
+        for (final row
+            in ref.watch(holdingsProvider).valueOrNull ?? const <HoldingRow>[])
+          row.id: row,
+      holding.id: holding,
+    };
     final type = AssetType.fromStorage(holding.assetType);
     // Sold-out: positions with nothing left. Repaid liabilities keep the
     // normal debt view.
@@ -242,16 +250,11 @@ class HoldingDetailSheet extends ConsumerWidget {
                 )
               : Column(
                   children: [
-                    for (final t in list) ...[
-                      // Amount-based holdings store the invested total in
-                      // costPrice; a per-row realized figure is not
-                      // meaningful for them (exactly 0 by construction).
-                      TransactionTile(
-                        txn: t,
-                        costPrice: type.isAmountBased ? null : holding.costPrice,
+                    for (final t in list)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 4),
+                        child: _holdingTransaction(t, type, holdingsById),
                       ),
-                      const SizedBox(height: 4),
-                    ],
                   ],
                 ),
           loading: () => const Center(child: CircularProgressIndicator()),
@@ -261,6 +264,27 @@ class HoldingDetailSheet extends ConsumerWidget {
           ),
         ),
       ],
+    );
+  }
+
+  Widget _holdingTransaction(
+    TransactionRow transaction,
+    AssetType type,
+    Map<int, HoldingRow> holdingsById,
+  ) {
+    final repayment = repaymentOf(
+      transaction,
+      holdingsById[transaction.cashSourceId],
+      holdingsById[transaction.cashTargetId],
+    );
+    return TransactionTile(
+      txn: transaction,
+      // Amount-based holdings store invested principal, not unit cost.
+      costPrice: type.isAmountBased ? null : holding.costPrice,
+      repaymentLabel: repayment?.label,
+      counterpartyText: repayment == null
+          ? null
+          : '资金来源：${repayment.source.name} · 还款账户：${repayment.target.name}',
     );
   }
 }

@@ -63,9 +63,10 @@ class DayEarningsPanel extends ConsumerWidget {
             const SizedBox(height: 8),
             if (!data.verified && data.profit != null)
               Text(
-                kIsWeb
-                    ? '部分交易、历史汇率或快照信息不完整，暂不能准确拆分。请检查记录，在手机或桌面端重建历史快照后同步。'
-                    : '部分交易、历史汇率或快照信息不完整，暂不能准确拆分。请检查记录并等待历史快照重算。',
+                data.issue ??
+                    (kIsWeb
+                        ? '持仓明细与总收益无法核对。请在手机或桌面端重建历史快照后同步。'
+                        : '持仓明细与总收益无法核对，请重建历史快照后重试。'),
                 style: const TextStyle(
                   fontSize: 12,
                   color: T.warning,

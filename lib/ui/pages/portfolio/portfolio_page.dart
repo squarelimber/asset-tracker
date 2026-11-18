@@ -12,6 +12,7 @@ import '../../../core/market_session.dart';
 import '../../../core/responsive.dart';
 import '../../../core/symbols.dart';
 import '../../../domain/portfolio_calculator.dart';
+import '../../../domain/portfolio_intraday.dart';
 import '../../../services/history_backfill_service.dart';
 import '../../../services/market/market_service.dart';
 import '../../components/app_bar_actions.dart';
@@ -22,6 +23,7 @@ import '../../components/rotating_spotlight_card.dart';
 import '../../components/session_chip.dart';
 import '../../tokens.dart';
 import 'day_detail_sheet.dart';
+import 'portfolio_intraday.dart';
 import 'portfolio_widgets.dart';
 import 'portfolio_welcome.dart';
 
@@ -65,6 +67,8 @@ class PortfolioPage extends ConsumerStatefulWidget {
 
 class _PortfolioPageState extends ConsumerState<PortfolioPage> {
   final _refreshing = ValueNotifier<bool>(false);
+  Timer? _intradayTimer;
+  String? _closingSampleDay;
   DateTime? _lastRefreshAt;
   String? _refreshIssue;
 
@@ -74,15 +78,34 @@ class _PortfolioPageState extends ConsumerState<PortfolioPage> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _refreshPrices(showSnack: false);
     });
+    _intradayTimer = Timer.periodic(const Duration(minutes: 5), (_) {
+      if (!(ModalRoute.of(context)?.isCurrent ?? true)) return;
+      final lifecycle = WidgetsBinding.instance.lifecycleState;
+      if (lifecycle != null && lifecycle != AppLifecycleState.resumed) return;
+      final time = chinaMarketTime(DateTime.now());
+      final session = aShareSession(time);
+      final closing =
+          session == MarketSession.closed &&
+          time.hour == 15 &&
+          time.minute < 5 &&
+          _closingSampleDay != todayKey(time);
+      if (session == MarketSession.open || closing) {
+        unawaited(_refreshPrices(showSnack: false, intradayOnly: true));
+      }
+    });
   }
 
   @override
   void dispose() {
+    _intradayTimer?.cancel();
     _refreshing.dispose();
     super.dispose();
   }
 
-  Future<void> _refreshPrices({bool showSnack = true}) async {
+  Future<void> _refreshPrices({
+    bool showSnack = true,
+    bool intradayOnly = false,
+  }) async {
     if (_refreshing.value) return;
     _refreshing.value = true;
     MarketRefreshResult? result;
@@ -97,12 +120,35 @@ class _PortfolioPageState extends ConsumerState<PortfolioPage> {
       // a fake daily return (the 有色/能源化工/五年国债/guozhaiEtf
       // replay-vs-current cost gaps). The backfill runs on its own trigger
       // (historySyncProvider) and reacts to the refresh.
-      ref.invalidate(historySyncProvider);
+      if (!intradayOnly) ref.invalidate(historySyncProvider);
       // FX rates may have changed with the refresh.
       ref.invalidate(cnyRatesProvider);
       // Prices are fresh: re-evaluate alert rules and notify for anything
       // newly fired (no-op when disabled or nothing changed today).
-      unawaited(ref.read(alertNotificationServiceProvider).checkAndNotify());
+      if (!intradayOnly) {
+        unawaited(ref.read(alertNotificationServiceProvider).checkAndNotify());
+      }
+      final time = chinaMarketTime(result.fetchedAt);
+      final session = aShareSession(time);
+      final closing =
+          session == MarketSession.closed && time.hour == 15 && time.minute < 5;
+      if (result.updated > 0 &&
+          (session == MarketSession.open ||
+              (session == MarketSession.lunch &&
+                  time.hour == 11 &&
+                  time.minute == 30) ||
+              closing)) {
+        try {
+          await recordPortfolioSample(
+            ref.read(daoProvider),
+            ref.read(marketServiceProvider),
+            result.fetchedAt,
+          );
+          if (closing) _closingSampleDay = todayKey(time);
+        } catch (error, stack) {
+          debugPrint('Intraday sample failed: $error\n$stack');
+        }
+      }
     } catch (_) {
       result = null;
     } finally {

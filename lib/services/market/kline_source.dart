@@ -6,6 +6,14 @@ import 'market_data_source.dart';
 
 enum KlinePeriod { day, week, month }
 
+typedef MarketIntraday = ({
+  String date,
+  List<({int minute, double value})> points,
+});
+
+bool supportsMarketIntraday(String symbol) =>
+    RegExp(r'^(?:(?:sh|sz|bj)\d{6}|hk\d{5})$').hasMatch(symbol);
+
 class CandleBar {
   const CandleBar({
     required this.date,
@@ -42,6 +50,71 @@ class KlineSource {
     'https://ifzq.gtimg.cn/appstock/app/fqkline/get',
     'https://web.ifzq.gtimg.cn/appstock/app/fqkline/get',
   ];
+
+  /// Tencent's latest dated minute series for mainland and HK securities.
+  Future<MarketIntraday?> fetchIntraday(String symbol) async {
+    if (!supportsMarketIntraday(symbol)) return null;
+    final lastMinute = symbol.startsWith('hk') ? 960 : 900;
+    for (final endpoint in const [
+      'https://proxy.finance.qq.com/ifzqgtimg/appstock/app/minute/query',
+      'https://web.ifzq.gtimg.cn/appstock/app/minute/query',
+    ]) {
+      try {
+        final response = await _client
+            .get(Uri.parse(endpoint).replace(queryParameters: {'code': symbol}))
+            .timeout(marketHttpTimeout);
+        if (response.statusCode != 200) continue;
+        final root = jsonDecode(utf8.decode(response.bodyBytes));
+        if (root is! Map || root['code'] != 0 || root['data'] is! Map) continue;
+        final security = (root['data'] as Map)[symbol];
+        if (security is! Map || security['data'] is! Map) continue;
+        final minuteData = security['data'] as Map;
+        final rawDate = minuteData['date'];
+        final records = minuteData['data'];
+        if (rawDate is! String ||
+            !RegExp(r'^\d{8}$').hasMatch(rawDate) ||
+            records is! List) {
+          continue;
+        }
+        final date =
+            '${rawDate.substring(0, 4)}-${rawDate.substring(4, 6)}-${rawDate.substring(6)}';
+        if (DateTime.tryParse(date)?.toIso8601String().split('T').first !=
+            date) {
+          continue;
+        }
+        final prices = <int, double>{};
+        for (final row in records) {
+          if (row is! String) continue;
+          final fields = row.trim().split(RegExp(r'\s+'));
+          if (fields.length < 2 || !RegExp(r'^\d{4}$').hasMatch(fields.first)) {
+            continue;
+          }
+          final time = fields.first;
+          final minute = int.parse(time.substring(2));
+          final minuteOfDay = int.parse(time.substring(0, 2)) * 60 + minute;
+          final price = double.tryParse(fields[1]);
+          if (minute >= 60 ||
+              minuteOfDay < 570 ||
+              minuteOfDay > lastMinute ||
+              price == null ||
+              !price.isFinite ||
+              price <= 0) {
+            continue;
+          }
+          prices[minuteOfDay] = price;
+        }
+        if (prices.isEmpty) continue;
+        final minutes = prices.keys.toList()..sort();
+        return (
+          date: date,
+          points: [for (final m in minutes) (minute: m, value: prices[m]!)],
+        );
+      } catch (_) {
+        // Try the alternate host after a failed or malformed response.
+      }
+    }
+    return null;
+  }
 
   /// Fetch adjusted prices by default. Raw prices use the provider's `bfq`
   /// mode so recorded, unadjusted transaction prices can be charted directly.

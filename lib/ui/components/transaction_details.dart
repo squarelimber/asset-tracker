@@ -7,6 +7,7 @@ import '../../core/enums.dart';
 import '../../core/formats.dart';
 import '../../data/database.dart';
 import '../tokens.dart';
+import 'transaction_presentation.dart';
 
 /// Shows the values recorded on this transaction, without deriving missing
 /// prices or quantities from the current holding.
@@ -57,6 +58,11 @@ class _TransactionDetails extends ConsumerWidget {
     }
 
     final type = TransactionType.fromStorage(transaction.type);
+    final repayment = repaymentOf(
+      transaction,
+      findHolding(transaction.cashSourceId),
+      findHolding(transaction.cashTargetId),
+    );
     final product = findHolding(transaction.holdingId);
     final isAmountBased =
         product != null &&
@@ -80,7 +86,7 @@ class _TransactionDetails extends ConsumerWidget {
     };
     final note = transaction.note?.trim();
     final rows = <(String, String)>[
-      ('交易类型', type.label),
+      ('交易类型', repayment?.label ?? type.label),
       (
         '交易时间',
         DateFormat('yyyy-MM-dd HH:mm').format(transaction.occurredAt.toLocal()),
@@ -93,9 +99,9 @@ class _TransactionDetails extends ConsumerWidget {
       if (type == TransactionType.transferIn ||
           type == TransactionType.transferOut) ...[
         if (counterparty(transaction.cashSourceId) case final name?)
-          ('来源', name),
+          (repayment == null ? '来源' : '资金来源', name),
         if (counterparty(transaction.cashTargetId) case final name?)
-          ('去向', name),
+          (repayment == null ? '去向' : '还款账户', name),
       ],
       if (!isAmountBased) ...[
         if (transaction.price case final price?)

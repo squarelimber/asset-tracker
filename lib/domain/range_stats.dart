@@ -4,6 +4,7 @@ import '../data/database.dart';
 
 /// Selectable trend ranges for the net worth chart.
 enum RangeOption {
+  today('今日'),
   month1('近1月'),
   month3('近3月'),
   ytd('今年以来'),
@@ -18,6 +19,7 @@ enum RangeOption {
 
   /// Computes the inclusive start date for a preset option, or null for all.
   DateTime? startDate(DateTime now) => switch (this) {
+        today => DateTime(now.year, now.month, now.day),
         month1 => DateTime(now.year, now.month - 1, now.day),
         month3 => DateTime(now.year, now.month - 3, now.day),
         ytd => DateTime(now.year, 1, 1),

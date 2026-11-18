@@ -139,4 +139,70 @@ void main() {
     await tester.pumpWidget(const SizedBox());
     await tester.pump();
   });
+
+  testWidgets('旧转入和转出记录按资金方向显示还款', (tester) async {
+    final (db, purchase) = await _fixture();
+    final dao = AssetDao(db);
+    final cashId = await dao.createHolding(
+      HoldingsCompanion.insert(
+        accountId: purchase.accountId,
+        name: '天天宝',
+        assetType: 'liquid_wealth',
+      ),
+    );
+    final cardId = await dao.createHolding(
+      HoldingsCompanion.insert(
+        accountId: purchase.accountId,
+        name: '信用卡',
+        assetType: 'liability',
+      ),
+    );
+    for (final (type, source, target, amount) in [
+      ('transfer_in', cashId, cardId, 500.0),
+      ('transfer_out', cashId, cardId, 300.0),
+      ('transfer_out', cardId, cashId, 200.0),
+    ]) {
+      await dao.createTransaction(
+        TransactionsCompanion.insert(
+          accountId: purchase.accountId,
+          type: type,
+          cashSourceId: Value(source),
+          cashTargetId: Value(target),
+          amount: amount,
+          occurredAt: DateTime(2026, 9, 22),
+        ),
+      );
+    }
+
+    await pumpFixture(tester, db, const TransactionsPage());
+    expect(find.text('信用卡还款'), findsNWidgets(2));
+    expect(find.text('¥500.00'), findsOneWidget);
+    final payment = find.text('信用卡还款').first;
+    await tester.ensureVisible(payment);
+    await tester.tap(payment);
+    await tester.pumpAndSettle();
+    expect(find.text('资金来源'), findsOneWidget);
+    expect(find.text('还款账户'), findsOneWidget);
+    expect(find.text('测试账户 / 天天宝'), findsOneWidget);
+    expect(find.text('测试账户 / 信用卡'), findsOneWidget);
+    await tester.tap(find.byTooltip('关闭'));
+    await tester.pumpAndSettle();
+
+    // Replace the route under the same provider scope to check the account list.
+    final navigator = tester.state<NavigatorState>(
+      find.byType(Navigator).first,
+    );
+    navigator.pushReplacement(
+      MaterialPageRoute<void>(
+        builder: (_) => AccountDetailPage(accountId: purchase.accountId),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('交易流水'));
+    await tester.pumpAndSettle();
+    expect(find.text('信用卡还款'), findsNWidgets(2));
+    expect(find.text('账户内转账'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump();
+  });
 }

@@ -136,6 +136,7 @@ void main() {
       ProviderScope(
         overrides: [
           snapshotsProvider.overrideWith((ref) => Stream.value([snapshot])),
+          transactionsProvider.overrideWith((ref) => Stream.value([])),
           historySyncProvider.overrideWith((ref) async => null),
           hideAmountsProvider.overrideWith((ref) => false),
         ],
@@ -187,6 +188,7 @@ void main() {
               snapshot('2026-11-05', 1125),
             ]),
           ),
+          transactionsProvider.overrideWith((ref) => Stream.value([])),
           hideAmountsProvider.overrideWith((ref) => false),
         ],
       );
@@ -199,8 +201,7 @@ void main() {
           ),
         ),
       );
-      await tester.pump();
-      await tester.pump();
+      await tester.pumpAndSettle();
       expect(find.text('日历收益 +¥25.00'), findsOneWidget);
       expect(find.text('+¥125.00'), findsNothing);
       container.read(hideAmountsProvider.notifier).state = true;

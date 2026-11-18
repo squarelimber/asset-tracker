@@ -2,6 +2,19 @@
 
 All notable changes to Asset Tracker. Entries are condensed from the commit history; dates follow the release tags.
 
+## [0.11.8] - 2026-11-18
+
+### Added
+
+- 总览新增组合今日盈亏分时图，排除已记录的外部资金进出。A 股盘中和午休默认显示今日，收盘后默认显示今年以来
+- A 股和港股股票及 ETF 的持仓详情支持分钟走势和买卖标记。两张分时图均压缩午休时段
+
+### Fixed
+
+- 资产转入负债按还款展示，详情列出资金来源和还款账户，兼容已有流水
+- 信用卡等负债还款不再阻断产品收益计算。收益信息不足时提示对应日期和缺失原因
+- 修复收益明细测试依赖未模拟的交易流水，避免 CI 因本地数据库状态而失败
+
 ## [0.11.7] - 2026-11-18
 
 ### Changed

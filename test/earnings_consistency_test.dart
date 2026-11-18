@@ -20,10 +20,11 @@ DayHoldingValue _holding(
   double value,
   double cost, {
   bool debt = false,
+  AssetType type = AssetType.etf,
 }) => DayHoldingValue(
   holdingId: id,
   name: '产品$id',
-  type: debt ? AssetType.liability : AssetType.etf,
+  type: debt ? AssetType.liability : type,
   value: value,
   cost: cost,
   liability: debt,
@@ -299,13 +300,66 @@ void main() {
         transactions: scenario.value,
       );
       expect(detail.verified, isFalse, reason: scenario.key);
+      expect(detail.issue, contains('2026-11-16'), reason: scenario.key);
       expect(
         () => productsFromSnapshots(snapshots, transactions: scenario.value),
-        throwsStateError,
+        throwsA(
+          isA<StateError>().having(
+            (e) => e.message,
+            'dated issue',
+            detail.issue,
+          ),
+        ),
         reason: scenario.key,
       );
     }
   });
+
+  test(
+    'credit card repayment does not block daily or monthly asset attribution',
+    () {
+      final snapshots = [
+        _snapshot('2026-11-15', [
+          _holding(1, 600, 500, type: AssetType.liquidWealth),
+          _holding(2, 120, 0, debt: true),
+        ]),
+        _snapshot('2026-11-17', [
+          _holding(1, 480, 400, type: AssetType.liquidWealth),
+        ]),
+      ];
+      final repayment = TransactionRow(
+        id: 1,
+        accountId: 1,
+        cashSourceId: 1,
+        cashTargetId: 2,
+        type: 'transfer_in',
+        amount: 120,
+        currency: 'CNY',
+        occurredAt: DateTime(2026, 11, 16),
+        costMoved: true,
+        costMovedAmount: 100,
+        internalMove: false,
+        updatedAt: DateTime(2026),
+      );
+      final detail = earningsBreakdownOf(
+        snapshots,
+        '2026-11-17',
+        transactions: [repayment],
+      );
+      expect(detail.verified, isTrue);
+      expect(detail.rows.single.holdingId, 1);
+      final products = productsFromSnapshots(
+        snapshots,
+        transactions: [repayment],
+      );
+      expect(
+        const ProductEarningsCalculator()
+            .monthOf(products.single, 2026, 11)
+            .profit,
+        detail.detailTotal,
+      );
+    },
+  );
 
   test('daily detail is the day delta, not cumulative profit', () {
     final snapshots = [

@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:asset_tracker/app/providers.dart';
 import 'package:asset_tracker/data/database.dart';
 import 'package:asset_tracker/services/market/kline_source.dart';
+import 'package:asset_tracker/ui/components/intraday_line_chart.dart';
 import 'package:asset_tracker/ui/pages/holdings/holding_kline_page.dart';
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
@@ -105,6 +106,23 @@ void main() {
     );
     final requests = <String>[];
     final client = MockClient((request) async {
+      if (request.url.queryParameters['code'] == 'sh510300') {
+        requests.add('minute:sh510300');
+        return http.Response(
+          jsonEncode({
+            'code': 0,
+            'data': {
+              'sh510300': {
+                'data': {
+                  'date': '20261106',
+                  'data': ['0930 3.24 110', '0931 3.25 200'],
+                },
+              },
+            },
+          }),
+          200,
+        );
+      }
       final param = request.url.queryParameters['param']!;
       requests.add(param);
       final parts = param.split(',');
@@ -197,6 +215,17 @@ void main() {
     await tester.pumpAndSettle();
     Navigator.of(tester.element(find.text('交易记录'))).pop();
     await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('分时'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('分时'));
+    await tester.pumpAndSettle();
+    expect(requests.last, 'minute:sh510300');
+    expect(find.textContaining('2026-11-06 · 截至 09:31'), findsOneWidget);
+    final chart = tester.widget<IntradayLineChart>(
+      find.byType(IntradayLineChart),
+    );
+    expect(chart.points.last.value, 3.25);
+    expect(chart.markers, isEmpty);
     await tester.ensureVisible(find.text('周 K'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('周 K'));

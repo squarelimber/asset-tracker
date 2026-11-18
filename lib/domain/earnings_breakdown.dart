@@ -27,12 +27,14 @@ class EarningsBreakdown {
     this.profit,
     this.baselineDate,
     this.verified = false,
+    this.issue,
   });
   final String date;
   final String? baselineDate;
   final double? profit;
   final List<HoldingDayEarning> rows;
   final bool verified;
+  final String? issue;
   double get detailTotal => rows.fold(0.0, (sum, row) => sum + row.profit);
 }
 
@@ -64,6 +66,9 @@ EarningsBreakdown earningsBreakdownOf(
       baselineDate: previous?.date,
       profit: expected,
       rows: const [],
+      issue: _missingSnapshotDetail(
+        currentValues == null ? current.date : previous!.date,
+      ),
     );
   }
   final before = {
@@ -74,24 +79,26 @@ EarningsBreakdown earningsBreakdownOf(
     for (final h in currentValues)
       if (!h.liability) h.holdingId: h,
   };
+  final ids = _observedHoldings(before, after);
   final adjustments = previous == null
       ? const <int, double>{}
       : internalTransferProfitAdjustments(
           transactions,
           previous.date,
           current.date,
-          _observedHoldings(before, after),
+          ids,
           snapshotCreatedAt: current.createdAt,
         );
-  final incomplete =
-      previous != null &&
-      _hasIncompleteAttribution(
-        transactions,
-        previous.date,
-        current.date,
-        current.createdAt,
-        _observedHoldings(before, after),
-      );
+  final issue = previous == null
+      ? null
+      : _incompleteAttribution(
+          transactions,
+          previous.date,
+          current.date,
+          current.createdAt,
+          ids,
+          _knownLiabilities(previousValues, currentValues),
+        );
   final rows = <HoldingDayEarning>[];
   for (final id in {...before.keys, ...after.keys}) {
     final a = after[id];
@@ -127,7 +134,8 @@ EarningsBreakdown earningsBreakdownOf(
     baselineDate: previous?.date,
     profit: expected,
     rows: rows,
-    verified: !incomplete && (total - expected).abs() < 0.000001,
+    verified: issue == null && (total - expected).abs() < 0.000001,
+    issue: issue,
   );
 }
 
@@ -227,12 +235,27 @@ Set<int> _observedHoldings(
       id,
 };
 
-bool _hasIncompleteAttribution(
+Set<int> _knownLiabilities(
+  List<DayHoldingValue> before,
+  List<DayHoldingValue> after,
+) {
+  final liabilities = <int>{};
+  final assets = <int>{};
+  for (final valuation in [...before, ...after]) {
+    (valuation.liability ? liabilities : assets).add(valuation.holdingId);
+  }
+  return liabilities.difference(assets);
+}
+
+String _missingSnapshotDetail(String date) => '$date 的快照缺少可核对的产品明细。请重建历史快照后重试。';
+
+String? _incompleteAttribution(
   List<TransactionRow> transactions,
   String previousDate,
   String currentDate,
   DateTime snapshotCreatedAt,
   Set<int> ids,
+  Set<int> liabilities,
 ) {
   final interval = transactions.where((t) {
     final day = todayKey(t.occurredAt.toLocal());
@@ -247,6 +270,8 @@ bool _hasIncompleteAttribution(
       a.currency.toUpperCase() == b.currency.toUpperCase();
 
   for (final t in interval) {
+    String issue(String reason) =>
+        '${todayKey(t.occurredAt.toLocal())} 的${TransactionType.fromStorage(t.type).label}流水$reason';
     final type = TransactionType.fromStorage(t.type);
     final isBuy = type == TransactionType.buy;
     final isSell = type == TransactionType.sell;
@@ -267,7 +292,18 @@ bool _hasIncompleteAttribution(
         !ids.contains(t.cashTargetId)) {
       continue;
     }
-    if (t.updatedAt.isAfter(snapshotCreatedAt)) return true;
+    if (t.updatedAt.isAfter(snapshotCreatedAt)) {
+      return issue('晚于收益快照更新，请重建历史快照。');
+    }
+    // Debt is not a product in the asset-side return. A known cash/debt
+    // transfer has no second product that should receive an adjustment.
+    if (isTransfer &&
+        ((ids.contains(t.cashSourceId) &&
+                liabilities.contains(t.cashTargetId)) ||
+            (liabilities.contains(t.cashSourceId) &&
+                ids.contains(t.cashTargetId)))) {
+      continue;
+    }
     // With precisely equal amount and recorded transferred principal there
     // is no carried gain to reattribute, even across currencies or when the
     // counterpart is unavailable. A later changed transaction still makes
@@ -278,11 +314,13 @@ bool _hasIncompleteAttribution(
         t.amount == t.costMovedAmount) {
       continue;
     }
-    if (t.currency.toUpperCase() != 'CNY' ||
-        !t.amount.isFinite ||
+    if (!t.amount.isFinite ||
         t.costMovedAmount == null ||
         !t.costMovedAmount!.isFinite) {
-      return true;
+      return issue('缺少有效的转移本金，重建快照无法补齐原流水字段。');
+    }
+    if (t.currency.toUpperCase() != 'CNY') {
+      return issue('缺少 ${t.currency.toUpperCase()} 的历史折算汇率，无法拆分产品收益。');
     }
 
     if (pairedLeg) {
@@ -296,12 +334,14 @@ bool _hasIncompleteAttribution(
                 matchingLegs(t, other),
           )
           .toList();
-      if (opposite.length != 1 ||
-          opposite.single.updatedAt.isAfter(snapshotCreatedAt) ||
-          !ids.contains(t.holdingId) ||
+      if (opposite.length != 1) return issue('无法唯一匹配对应的赎回或买入记录。');
+      if (opposite.single.updatedAt.isAfter(snapshotCreatedAt)) {
+        return issue('的配对记录晚于收益快照更新，请重建历史快照。');
+      }
+      if (!ids.contains(t.holdingId) ||
           !ids.contains(opposite.single.holdingId) ||
           t.holdingId == opposite.single.holdingId) {
-        return true;
+        return issue('的买入或赎回产品缺少可核对的持仓快照。');
       }
       final sameSide = interval.where(
         (other) =>
@@ -310,7 +350,7 @@ bool _hasIncompleteAttribution(
             (isBuy ? other.cashSourceId == null : other.cashTargetId == null) &&
             matchingLegs(other, opposite.single),
       );
-      if (sameSide.length != 1) return true;
+      if (sameSide.length != 1) return issue('无法唯一匹配对应的赎回或买入记录。');
     } else {
       final from = isBuy
           ? t.cashSourceId
@@ -327,11 +367,11 @@ bool _hasIncompleteAttribution(
           from == to ||
           !ids.contains(from) ||
           !ids.contains(to)) {
-        return true;
+        return issue('缺少可核对的资金来源、去向或对应持仓快照。');
       }
     }
   }
-  return false;
+  return null;
 }
 
 /// Monthly product views use the same recorded states, including a zero
@@ -347,7 +387,7 @@ List<ProductEarnings> productsFromSnapshots(
   final identities = <int, DayHoldingValue>{};
   for (final snapshot in ordered) {
     final values = snapshotHoldingValues(snapshot);
-    if (values == null) throw StateError('历史快照尚无可核对的产品明细，请重建历史快照后重试');
+    if (values == null) throw StateError(_missingSnapshotDetail(snapshot.date));
     decoded[snapshot.date] = values;
     for (final value in values) {
       if (!value.liability) identities[value.holdingId] = value;
@@ -366,16 +406,18 @@ List<ProductEarnings> productsFromSnapshots(
         if (!h.liability) h.holdingId: h,
     };
     final ids = _observedHoldings(before, after);
-    if (_hasIncompleteAttribution(
+    final issue = _incompleteAttribution(
       transactions,
       previous.date,
       current.date,
       current.createdAt,
       ids,
-    )) {
+      _knownLiabilities(decoded[previous.date]!, decoded[current.date]!),
+    );
+    if (issue != null) {
       if (attributionRequiredFrom == null ||
           current.date.compareTo(attributionRequiredFrom) >= 0) {
-        throw StateError('部分交易、历史汇率或快照信息不完整，暂不能准确计算产品收益');
+        throw StateError(issue);
       }
       // The states still form the baseline for later intervals. Their own
       // attribution is outside the requested window and is not presented.

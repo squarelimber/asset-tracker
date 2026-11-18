@@ -19,6 +19,7 @@ import '../../components/error_state.dart';
 import '../../components/form_fields.dart';
 import '../../components/secondary_page_back_button.dart';
 import '../../components/terminal_card.dart';
+import '../../components/transaction_presentation.dart';
 import '../../components/transaction_tile.dart';
 import '../../tokens.dart';
 
@@ -434,25 +435,40 @@ class _TransactionsPageState extends ConsumerState<TransactionsPage> {
                   else
                     for (final (day, rows) in _groupByDay(filtered)) ...[
                       _DayHeader(day: day, net: _dayNet(rows, rates)),
-                      for (final t in rows) ...[
-                        TransactionTile(
-                          txn: t,
-                          costPrice: _tileCostPrice(t, holdingsById),
-                          holdingName: t.holdingId == null
-                              ? null
-                              : holdingsById[t.holdingId]?.name,
-                          accountName: accountName[t.accountId],
-                          counterpartyText: _counterpartyText(t, holdingsById),
-                          onEditDate: () => _editDate(t),
-                        ),
-                        const SizedBox(height: 4),
-                      ],
+                      for (final t in rows)
+                        _transactionRow(t, holdingsById, accountName),
                     ],
                 ],
               ),
             ),
           );
         },
+      ),
+    );
+  }
+
+  Widget _transactionRow(
+    TransactionRow t,
+    Map<int, HoldingRow> holdingsById,
+    Map<int, String> accountNames,
+  ) {
+    final repayment = repaymentOf(
+      t,
+      holdingsById[t.cashSourceId],
+      holdingsById[t.cashTargetId],
+    );
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: TransactionTile(
+        txn: t,
+        costPrice: _tileCostPrice(t, holdingsById),
+        holdingName: holdingsById[t.holdingId]?.name,
+        accountName: accountNames[t.accountId],
+        repaymentLabel: repayment?.label,
+        counterpartyText: repayment == null
+            ? _counterpartyText(t, holdingsById)
+            : '资金来源：${repayment.source.name} · 还款账户：${repayment.target.name}',
+        onEditDate: () => _editDate(t),
       ),
     );
   }

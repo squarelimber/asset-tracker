@@ -3,14 +3,18 @@ import 'dart:math' as math;
 
 import 'package:asset_tracker/app/app.dart';
 import 'package:asset_tracker/app/providers.dart';
+import 'package:asset_tracker/app/theme.dart';
 import 'package:asset_tracker/core/enums.dart';
 import 'package:asset_tracker/core/formats.dart';
 import 'package:asset_tracker/core/market_session.dart';
 import 'package:asset_tracker/data/asset_dao.dart';
 import 'package:asset_tracker/data/database.dart';
 import 'package:asset_tracker/domain/holding_valuation.dart';
+import 'package:asset_tracker/domain/portfolio_intraday.dart';
 import 'package:asset_tracker/services/market/market_service.dart';
 import 'package:asset_tracker/services/market/kline_source.dart';
+import 'package:asset_tracker/ui/pages/holdings/holding_kline_page.dart';
+import 'package:asset_tracker/ui/pages/portfolio/portfolio_intraday.dart';
 import 'package:drift/drift.dart' show Value;
 import 'package:drift_flutter/drift_flutter.dart';
 import 'package:flutter/material.dart';
@@ -34,6 +38,20 @@ Future<void> main() async {
     await _writePreviewSnapshots(dao);
     await dao.setSetting('preview_snapshot_v2', '1');
   }
+  final showSecurity = Uri.base.queryParameters['chart'] == 'security';
+  final holdings = await dao.getHoldings();
+  final etf = holdings.where((h) => h.symbol == '510300').firstOrNull;
+  final marketTime = chinaMarketTime(DateTime.now());
+  final demoDay = todayKey(marketTime);
+  final trades = showSecurity && etf != null
+      ? await dao.getTransactionsForHolding(etf.id)
+      : const <TransactionRow>[];
+  final demoTrades = trades.where((t) => t.note == '演示交易').toList()
+    ..sort((a, b) => b.occurredAt.compareTo(a.occurredAt));
+  final demoDate = demoTrades.isEmpty
+      ? demoDay
+      : todayKey(chinaMarketTime(demoTrades.first.occurredAt));
+  final securitySource = showSecurity ? _PreviewKline(demoDate) : null;
   runApp(
     ProviderScope(
       overrides: [
@@ -41,18 +59,93 @@ Future<void> main() async {
         hideAmountsProvider.overrideWith((ref) => false),
         historySyncProvider.overrideWith((ref) async => null),
         marketServiceProvider.overrideWithValue(_PreviewMarket(dao)),
+        portfolioIntradayProvider.overrideWith(
+          (ref, day) => Stream.value([
+            if (day == demoDay)
+              for (final minute in _demoMinutes(5))
+                (minute: minute, profit: _demoMove(minute)),
+          ]),
+        ),
       ],
-      child: const Directionality(
+      child: Directionality(
         textDirection: TextDirection.ltr,
         child: Banner(
           message: '演示数据',
           location: BannerLocation.topEnd,
           color: Color(0xFF5B4D34),
           textDirection: TextDirection.ltr,
-          child: AssetTrackerApp(),
+          child: showSecurity && etf != null
+              ? MaterialApp(
+                  title: 'Asset Tracker · 分时预览',
+                  debugShowCheckedModeBanner: false,
+                  theme: AppTheme.dark(),
+                  home: HoldingKlinePage(
+                    holdingId: etf.id,
+                    source: securitySource,
+                  ),
+                )
+              : const AssetTrackerApp(),
         ),
       ),
     ),
+  );
+}
+
+Iterable<int> _demoMinutes(int step) sync* {
+  for (var minute = 570; minute <= 900; minute += step) {
+    if (minute <= 690 || minute >= 780) yield minute;
+  }
+}
+
+double _demoMove(int minute) {
+  final elapsed = (minute - 570).toDouble();
+  return 4.8 * elapsed +
+      math.sin(elapsed / 17) * 280 -
+      math.sin(elapsed / 39) * 400 +
+      math.sin(elapsed * .81) * 50;
+}
+
+class _PreviewKline extends KlineSource {
+  _PreviewKline(this.date);
+
+  final String date;
+
+  @override
+  Future<List<CandleBar>> fetch(
+    String symbol,
+    KlinePeriod period, {
+    bool adjusted = true,
+  }) async {
+    final end = DateTime.parse(date);
+    final days = <DateTime>[];
+    for (var offset = 0; days.length < 65; offset++) {
+      final day = switch (period) {
+        KlinePeriod.day => DateTime(end.year, end.month, end.day - offset),
+        KlinePeriod.week => DateTime(end.year, end.month, end.day - offset * 7),
+        KlinePeriod.month => DateTime(end.year, end.month - offset, 1),
+      };
+      if (period != KlinePeriod.day || isTradingDay(day)) days.add(day);
+    }
+    return [
+      for (final (index, day) in days.reversed.indexed)
+        CandleBar(
+          date: day,
+          open: 3.89 + index * .003 + math.sin(index / 2) * .025,
+          close: 3.89 + index * .003 + math.cos(index / 2) * .025,
+          high: 3.93 + index * .003,
+          low: 3.85 + index * .003,
+          volume: 1000.0 + (index % 11) * 90,
+        ),
+    ];
+  }
+
+  @override
+  Future<MarketIntraday?> fetchIntraday(String symbol) async => (
+    date: date,
+    points: [
+      for (final minute in _demoMinutes(1))
+        (minute: minute, value: 4.075 + _demoMove(minute) / 38000),
+    ],
   );
 }
 

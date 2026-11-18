@@ -24,6 +24,7 @@ class TransactionTile extends ConsumerWidget {
     this.holdingName,
     this.accountName,
     this.counterpartyText,
+    this.repaymentLabel,
     this.onEditDate,
   });
 
@@ -32,6 +33,7 @@ class TransactionTile extends ConsumerWidget {
   final String? holdingName;
   final String? accountName;
   final String? counterpartyText;
+  final String? repaymentLabel;
   final Future<void> Function()? onEditDate;
 
   @override
@@ -44,6 +46,9 @@ class TransactionTile extends ConsumerWidget {
         type == TransactionType.income ||
         type == TransactionType.dividend;
     final isSplit = type == TransactionType.split;
+    final color = repaymentLabel != null || isSplit
+        ? T.text3
+        : T.changeColor(isIn ? 1 : -1);
     final realized =
         type == TransactionType.sell &&
             !txn.internalMove &&
@@ -73,11 +78,14 @@ class TransactionTile extends ConsumerWidget {
         onTap: () =>
             showTransactionDetails(context, txn, onEditDate: onEditDate),
         leading: Icon(
-          type.icon,
+          repaymentLabel != null ? Icons.payments_outlined : type.icon,
           size: 20,
-          color: isSplit ? T.text3 : T.changeColor(isIn ? 1 : -1),
+          color: color,
         ),
-        title: Text(type.label, style: T.mono(size: 13, color: T.text1)),
+        title: Text(
+          repaymentLabel ?? type.label,
+          style: T.mono(size: 13, color: T.text1),
+        ),
         subtitle: Text(
           subtitleParts.join(' · '),
           style: T.mono(size: 11, color: T.text3),
@@ -92,13 +100,9 @@ class TransactionTile extends ConsumerWidget {
                     ? '****'
                     : isSplit
                     ? '×${Formats.smartNum(txn.amount)}'
-                    : '${isIn ? '+' : '-'}${Formats.money(txn.amount, txn.currency)}',
+                    : '${repaymentLabel != null ? '' : (isIn ? '+' : '-')}${Formats.money(txn.amount, txn.currency)}',
                 textAlign: TextAlign.end,
-                style: T.mono(
-                  size: 13,
-                  weight: FontWeight.w600,
-                  color: isSplit ? T.text3 : T.changeColor(isIn ? 1 : -1),
-                ),
+                style: T.mono(size: 13, weight: FontWeight.w600, color: color),
               ),
             ),
             const Icon(Icons.chevron_right, size: 18, color: T.text3),
