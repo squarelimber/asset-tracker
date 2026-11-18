@@ -4,8 +4,8 @@ import 'package:asset_tracker/app/providers.dart';
 import 'package:asset_tracker/core/enums.dart';
 import 'package:asset_tracker/core/formats.dart';
 import 'package:asset_tracker/core/ui_prefs.dart';
+import 'package:asset_tracker/domain/earnings_breakdown.dart';
 import 'package:asset_tracker/domain/product_monthly_earnings.dart';
-import 'package:asset_tracker/services/history_backfill_service.dart';
 import 'package:asset_tracker/ui/components/rotating_spotlight_card.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -13,6 +13,83 @@ import 'package:flutter_test/flutter_test.dart';
 
 /// Rotation remains stable across provider rebuilds and persisted preferences.
 void main() {
+  testWidgets('聚焦卡使用已归因的当日收益和包含月初的月度收益', (tester) async {
+    tester.view.physicalSize = const Size(1280, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final preceding = DateTime(now.year, now.month, 0);
+    String day(DateTime d) =>
+        '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+    final container = ProviderContainer(
+      overrides: [
+        hideAmountsProvider.overrideWith((ref) => false),
+        spotlightHoldMsProvider.overrideWith((ref) => Stream.value(2300)),
+        earningsBreakdownProvider(today).overrideWith(
+          (ref) => const EarningsBreakdown(
+            date: '',
+            verified: true,
+            rows: [
+              HoldingDayEarning(
+                holdingId: 1,
+                name: '现金',
+                type: AssetType.cash,
+                value: 5000,
+                profit: 0,
+              ),
+              HoldingDayEarning(
+                holdingId: 2,
+                name: '测试ETF',
+                type: AssetType.etf,
+                value: 4590,
+                profit: -10,
+              ),
+              HoldingDayEarning(
+                holdingId: 3,
+                name: '测试股票',
+                type: AssetType.stock,
+                value: 1100,
+                profit: 20,
+              ),
+            ],
+          ),
+        ),
+        productEarningsProvider(today.year).overrideWith(
+          (ref) => [
+            ProductEarnings(
+              name: '月度产品',
+              type: AssetType.etf,
+              closed: false,
+              daily: [
+                (date: day(preceding), value: 1000, cost: 1000),
+                (date: day(today), value: 1105, cost: 1000),
+              ],
+            ),
+          ],
+        ),
+      ],
+    );
+    addTearDown(container.dispose);
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: const MaterialApp(home: Scaffold(body: RotatingSpotlightCard())),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+    expect(find.text('现金'), findsNothing);
+    expect(find.text('测试ETF'), findsOneWidget);
+    expect(find.text('-10.00'), findsOneWidget);
+    expect(find.text('测试股票'), findsOneWidget);
+    expect(find.text('+20.00'), findsOneWidget);
+    expect(find.text('月度产品'), findsOneWidget);
+    expect(find.text('+105.00'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(milliseconds: 1));
+  });
+
   int frontFace(WidgetTester tester) {
     const labels = ['今日最佳', '今日最差', '本月最佳', '资产聚焦'];
     return labels.indexWhere((label) => find.text(label).evaluate().isNotEmpty);
@@ -35,7 +112,6 @@ void main() {
     // 卡片的 family key 是归一化后的「当天 0 点」。
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
-    final prevDay = DateTime(now.year, now.month, now.day - 1);
 
     final container = ProviderContainer(
       overrides: [
@@ -44,12 +120,9 @@ void main() {
         spotlightHoldMsProvider.overrideWith(
           (ref) => Stream<int>.value(defaultSpotlightHoldMs),
         ),
-        dayHoldingsBreakdownProvider(
+        earningsBreakdownProvider(
           today,
-        ).overrideWith((ref) => const <DayHoldingValue>[]),
-        dayHoldingsBreakdownProvider(
-          prevDay,
-        ).overrideWith((ref) => const <DayHoldingValue>[]),
+        ).overrideWith((ref) => const EarningsBreakdown(date: '', rows: [])),
         productEarningsProvider(
           today.year,
         ).overrideWith((ref) => const <ProductEarnings>[]),
@@ -78,7 +151,7 @@ void main() {
       await pumpFor(tester, const Duration(milliseconds: 2300));
       await pumpFor(tester, const Duration(milliseconds: 200));
       // 停留期强制重建一次：相位必须仍停在同一面（旧实现会跳到下一面）。
-      container.invalidate(dayHoldingsBreakdownProvider(today));
+      container.invalidate(earningsBreakdownProvider(today));
       await tester.pump();
     }
 
@@ -104,7 +177,6 @@ void main() {
 
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
-    final prevDay = DateTime(now.year, now.month, now.day - 1);
 
     // 今日 +100（1100 − 1000），昨日 1000 ⇒ 今日最佳/最差都指向同一持仓。
     final container = ProviderContainer(
@@ -114,29 +186,20 @@ void main() {
         spotlightHoldMsProvider.overrideWith(
           (ref) => Stream<int>.value(defaultSpotlightHoldMs),
         ),
-        dayHoldingsBreakdownProvider(today).overrideWith(
-          (ref) => const [
-            DayHoldingValue(
-              holdingId: 1,
-              name: '测试股票',
-              type: AssetType.stock,
-              value: 1100,
-              cost: 1000,
-              liability: false,
-            ),
-          ],
-        ),
-        dayHoldingsBreakdownProvider(prevDay).overrideWith(
-          (ref) => const [
-            DayHoldingValue(
-              holdingId: 1,
-              name: '测试股票',
-              type: AssetType.stock,
-              value: 1000,
-              cost: 1000,
-              liability: false,
-            ),
-          ],
+        earningsBreakdownProvider(today).overrideWith(
+          (ref) => const EarningsBreakdown(
+            date: '',
+            verified: true,
+            rows: [
+              HoldingDayEarning(
+                holdingId: 1,
+                name: '测试股票',
+                type: AssetType.stock,
+                value: 1100,
+                profit: 100,
+              ),
+            ],
+          ),
         ),
         productEarningsProvider(
           today.year,
@@ -181,18 +244,14 @@ void main() {
 
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
-    final prevDay = DateTime(now.year, now.month, now.day - 1);
 
     final container = ProviderContainer(
       overrides: [
         // 设置页把「滚动卡停留时间」调成 1.5 秒。
         spotlightHoldMsProvider.overrideWith((ref) => Stream<int>.value(1500)),
-        dayHoldingsBreakdownProvider(
+        earningsBreakdownProvider(
           today,
-        ).overrideWith((ref) => const <DayHoldingValue>[]),
-        dayHoldingsBreakdownProvider(
-          prevDay,
-        ).overrideWith((ref) => const <DayHoldingValue>[]),
+        ).overrideWith((ref) => const EarningsBreakdown(date: '', rows: [])),
         productEarningsProvider(
           today.year,
         ).overrideWith((ref) => const <ProductEarnings>[]),
@@ -239,17 +298,13 @@ void main() {
 
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
-    final prevDay = DateTime(now.year, now.month, now.day - 1);
 
     final container = ProviderContainer(
       overrides: [
         spotlightHoldMsProvider.overrideWith((ref) => Stream<int>.value(8000)),
-        dayHoldingsBreakdownProvider(
+        earningsBreakdownProvider(
           today,
-        ).overrideWith((ref) => const <DayHoldingValue>[]),
-        dayHoldingsBreakdownProvider(
-          prevDay,
-        ).overrideWith((ref) => const <DayHoldingValue>[]),
+        ).overrideWith((ref) => const EarningsBreakdown(date: '', rows: [])),
         productEarningsProvider(
           today.year,
         ).overrideWith((ref) => const <ProductEarnings>[]),
@@ -296,7 +351,6 @@ void main() {
 
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
-    final prevDay = DateTime(now.year, now.month, now.day - 1);
 
     final hold = StreamController<int>.broadcast();
     addTearDown(hold.close);
@@ -304,12 +358,9 @@ void main() {
     final container = ProviderContainer(
       overrides: [
         spotlightHoldMsProvider.overrideWith((ref) => hold.stream),
-        dayHoldingsBreakdownProvider(
+        earningsBreakdownProvider(
           today,
-        ).overrideWith((ref) => const <DayHoldingValue>[]),
-        dayHoldingsBreakdownProvider(
-          prevDay,
-        ).overrideWith((ref) => const <DayHoldingValue>[]),
+        ).overrideWith((ref) => const EarningsBreakdown(date: '', rows: [])),
         productEarningsProvider(
           today.year,
         ).overrideWith((ref) => const <ProductEarnings>[]),

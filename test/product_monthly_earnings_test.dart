@@ -257,6 +257,94 @@ void main() {
   });
 
   group('ProductEarningsCalculator', () {
+    test('monthly product attribution excludes gain carried in by a buy', () {
+      final products = calc.compute([
+        HoldingSeries(
+          holdingId: 1,
+          name: 'ETF',
+          type: AssetType.etf,
+          closed: false,
+          days: const [
+            HoldingDay(date: '2026-10-31', value: 1000, cost: 1000),
+            HoldingDay(
+              date: '2026-11-01',
+              value: 5595,
+              cost: 4800,
+              profitAdjustment: -800,
+            ),
+          ],
+        ),
+        HoldingSeries(
+          holdingId: 2,
+          name: '现金',
+          type: AssetType.cash,
+          closed: false,
+          days: const [
+            HoldingDay(date: '2026-10-31', value: 10000, cost: 9000),
+            HoldingDay(
+              date: '2026-11-01',
+              value: 5400,
+              cost: 5200,
+              profitAdjustment: 800,
+            ),
+          ],
+        ),
+      ]);
+      final fund = products.firstWhere((p) => p.name == 'ETF');
+      final cash = products.firstWhere((p) => p.name == '现金');
+      expect(fund.daily.last.cost, 4800); // Preserve the recorded basis.
+      expect(calc.monthOf(fund, 2026, 11).profit, closeTo(-5, 1e-9));
+      expect(calc.monthOf(cash, 2026, 11).profit, closeTo(0, 1e-9));
+      expect(calc.yearlyProfit(calc.yearOf(fund, 2026)), closeTo(-5, 1e-9));
+    });
+
+    test('same-name adjustments merge without creating a phantom position', () {
+      HoldingSeries member(int id, double adjustment) => HoldingSeries(
+        holdingId: id,
+        name: '基金',
+        type: AssetType.etf,
+        closed: true,
+        days: [
+          const HoldingDay(date: '2026-10-31', value: 100, cost: 100),
+          HoldingDay(
+            date: '2026-11-01', value: 0, cost: 0,
+            profitAdjustment: adjustment,
+          ),
+          const HoldingDay(date: '2026-11-02', value: 0, cost: 0),
+        ],
+      );
+      final product = calc.compute([member(1, 4), member(2, 6)]).single;
+      final month = calc.monthOf(product, 2026, 11);
+      expect(month.dailyProfits, [10]);
+      expect(month.closed, true);
+      expect(product.daily.last.cost, 0);
+    });
+
+    test('first snapshot of new year uses prior snapshot and its correction', () {
+      final product = calc.compute([
+        HoldingSeries(
+          holdingId: 1,
+          name: 'ETF',
+          type: AssetType.etf,
+          closed: false,
+          days: const [
+            HoldingDay(date: '2025-12-30', value: 1000, cost: 1000),
+            HoldingDay(
+              date: '2026-01-02',
+              value: 5595,
+              cost: 4800,
+              profitAdjustment: -800,
+            ),
+          ],
+        ),
+      ]).single;
+      final month = calc.monthOf(product, 2026, 1);
+      expect(month.days, 1);
+      expect(month.profit, closeTo(-5, 1e-9));
+      expect(calc.yearlyProfit(calc.yearOf(product, 2026)), closeTo(-5, 1e-9));
+      expect(month.rate, closeTo(-5 / 5595, 1e-9));
+    });
+
     test('monthly profit is the sum of daily value-cost deltas', () {
       // value rises 100 -> 110 over the month, cost constant 100.
       final p = ProductEarnings(

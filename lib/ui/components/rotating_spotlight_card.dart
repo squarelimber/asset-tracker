@@ -9,8 +9,8 @@ import '../../core/enums.dart';
 import '../../core/formats.dart';
 import '../../core/market_session.dart';
 import '../../core/ui_prefs.dart';
+import '../../domain/earnings_breakdown.dart';
 import '../../domain/product_monthly_earnings.dart';
-import '../../services/history_backfill_service.dart';
 import '../tokens.dart';
 
 /// Desktop shows all three observations at once. Compact layouts retain the
@@ -64,9 +64,7 @@ class _RotatingSpotlightCardState extends ConsumerState<RotatingSpotlightCard> {
   Widget build(BuildContext context) {
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
-    final prevDay = DateTime(now.year, now.month, now.day - 1);
-    final todayAsync = ref.watch(dayHoldingsBreakdownProvider(today));
-    final prevAsync = ref.watch(dayHoldingsBreakdownProvider(prevDay));
+    final todayAsync = ref.watch(earningsBreakdownProvider(today));
     final productsAsync = ref.watch(productEarningsProvider(today.year));
     final hidden = ref.watch(hideAmountsProvider);
     final holdMs = ref.watch(spotlightHoldMsProvider).valueOrNull;
@@ -74,13 +72,7 @@ class _RotatingSpotlightCardState extends ConsumerState<RotatingSpotlightCard> {
       _holdMs = holdMs;
       _scheduleNext();
     }
-    final faces = _buildFaces(
-      todayAsync,
-      prevAsync,
-      productsAsync,
-      today,
-      hidden: hidden,
-    );
+    final faces = _buildFaces(todayAsync, productsAsync, today, hidden: hidden);
     final desktop = MediaQuery.sizeOf(context).width >= 1100;
     return MouseRegion(
       onEnter: (_) {
@@ -143,17 +135,20 @@ class _RotatingSpotlightCardState extends ConsumerState<RotatingSpotlightCard> {
   }
 
   List<_Face> _buildFaces(
-    AsyncValue<List<DayHoldingValue>> todayAsync,
-    AsyncValue<List<DayHoldingValue>> prevAsync,
+    AsyncValue<EarningsBreakdown> todayAsync,
     AsyncValue<List<ProductEarnings>> productsAsync,
     DateTime now, {
     required bool hidden,
   }) {
     final out = <_Face>[];
-    final spot = _todaySpotlight(todayAsync.valueOrNull, prevAsync.valueOrNull);
+    final spot = _todaySpotlight(todayAsync.valueOrNull);
     final monthBest = _monthBest(productsAsync.valueOrNull, now);
     final emptyToday = _emptyTodayText(
-      loading: todayAsync.isLoading || prevAsync.isLoading,
+      loading: todayAsync.isLoading,
+      unavailable:
+          todayAsync.hasError ||
+          (todayAsync.valueOrNull?.profit != null &&
+              todayAsync.valueOrNull?.verified == false),
       today: now,
     );
 
@@ -212,9 +207,11 @@ class _RotatingSpotlightCardState extends ConsumerState<RotatingSpotlightCard> {
   /// 在 0 点只会返回 weekend（非交易日）或 preOpen，判据稳定。
   static String _emptyTodayText({
     required bool loading,
+    required bool unavailable,
     required DateTime today,
   }) {
     if (loading) return '正在加载今日行情…';
+    if (unavailable) return '收益明细待更新';
     if (aShareSession(today) == MarketSession.weekend) {
       return '今日休市 · 无行情变动';
     }
@@ -224,19 +221,15 @@ class _RotatingSpotlightCardState extends ConsumerState<RotatingSpotlightCard> {
   static Widget _hintFace() =>
       const _FaceContent(title: '资产聚焦', emptyText: '点按卡片跳转 · 持仓与产品收益');
 
-  /// 今日最佳/最差：按「今日 Δ(value)」取最大/最小（口径 A），排除负债。
+  /// 今日最佳/最差沿用收益日历的产品分解，不将本金流入流出当作收益。
   ({_SpotEntry? winner, _SpotEntry? loser}) _todaySpotlight(
-    List<DayHoldingValue>? today,
-    List<DayHoldingValue>? prev,
+    EarningsBreakdown? today,
   ) {
-    if (today == null || prev == null) return (winner: null, loser: null);
-    final prevBy = {for (final p in prev) p.holdingId: p};
+    if (today == null || !today.verified) return (winner: null, loser: null);
     _SpotEntry? winner;
     _SpotEntry? loser;
-    for (final t in today) {
-      if (t.liability) continue;
-      final p = prevBy[t.holdingId];
-      final delta = p == null ? t.value : (t.value - p.value);
+    for (final t in today.rows) {
+      final delta = t.profit;
       if (delta.abs() < 0.01) continue; // 无变动
       if (winner == null || delta > winner.delta) {
         winner = _SpotEntry(name: t.name, type: t.type, delta: delta);
@@ -248,21 +241,18 @@ class _RotatingSpotlightCardState extends ConsumerState<RotatingSpotlightCard> {
     return (winner: winner, loser: loser);
   }
 
-  /// 本月最佳：月内 Δ(value−cost) 最大的产品。
+  /// 本月最佳与产品收益月历使用相同的月度汇总。
   _SpotEntry? _monthBest(List<ProductEarnings>? products, DateTime now) {
     if (products == null) return null;
-    final prefix = '${now.year}-${now.month.toString().padLeft(2, '0')}';
     _SpotEntry? best;
     for (final p in products) {
-      double? first;
-      double? last;
-      for (final d in p.daily) {
-        if (!d.date.startsWith(prefix)) continue;
-        first ??= d.value - d.cost;
-        last = d.value - d.cost;
-      }
-      if (first == null || last == null) continue;
-      final delta = last - first;
+      final month = const ProductEarningsCalculator().monthOf(
+        p,
+        now.year,
+        now.month,
+      );
+      if (month.days == 0) continue;
+      final delta = month.profit;
       if (best == null || delta > best.delta) {
         best = _SpotEntry(name: p.name, type: p.type, delta: delta);
       }

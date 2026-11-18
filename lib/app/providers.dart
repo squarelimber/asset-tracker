@@ -166,8 +166,15 @@ final dailyEarningsProvider = FutureProvider<List<DailyEarning>>((ref) async {
 
 final earningsBreakdownProvider = FutureProvider.autoDispose
     .family<EarningsBreakdown, DateTime>((ref, day) async {
-      final snapshots = await ref.watch(snapshotsProvider.future);
-      return earningsBreakdownOf(snapshots, todayKey(day));
+      final snapshotsFuture = ref.watch(snapshotsProvider.future);
+      final transactionsFuture = ref.watch(transactionsProvider.future);
+      final snapshots = await snapshotsFuture;
+      final transactions = await transactionsFuture;
+      return earningsBreakdownOf(
+        snapshots,
+        todayKey(day),
+        transactions: transactions,
+      );
     });
 
 /// Records one net-worth snapshot per day.
@@ -266,12 +273,17 @@ final productEarningsServiceProvider = Provider<ProductEarningsService>(
 final productEarningsProvider = FutureProvider.autoDispose
     .family<List<ProductEarnings>, int>((ref, year) async {
       ref.watch(historySyncProvider);
-      final snapshots = await ref.watch(snapshotsProvider.future);
+      final snapshotsFuture = ref.watch(snapshotsProvider.future);
+      final transactionsFuture = ref.watch(transactionsProvider.future);
+      final snapshots = await snapshotsFuture;
+      final transactions = await transactionsFuture;
       final end = '$year-12-31';
       // Keep the complete baseline: filtering the series first loses the
       // gain on Jan 1 and creates another month/year-boundary discrepancy.
       return productsFromSnapshots(
         snapshots.where((s) => s.date.compareTo(end) <= 0).toList(),
+        transactions: transactions,
+        attributionRequiredFrom: '$year-01-01',
       );
     });
 

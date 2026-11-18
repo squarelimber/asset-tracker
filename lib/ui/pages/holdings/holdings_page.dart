@@ -83,8 +83,7 @@ double _holdingCost(HoldingRow h) {
   return type.isAmountBased ? effectiveCostOf(h) : h.quantity * h.costPrice;
 }
 
-/// Today's profit for a holding from its cached quote: the cached unit
-/// price change x quantity.
+/// Today's profit in the quote currency, adjusted for intraday trades.
 ///
 /// Returns null when the quote is missing, when the cache was not written
 /// today, or when the quote's `change` still describes an earlier session
@@ -96,12 +95,69 @@ double? todayProfitOf(
   double quantity, {
   DateTime? now,
   MarketSource? source,
+  Iterable<TransactionRow>? transactions,
+  int? holdingId,
 }) {
   if (row == null || row.change == null) return null;
   final n = now ?? DateTime.now();
   if (!_isSameDay(row.fetchedAt, n)) return null;
   if (source != null && !quoteChangeIsToday(n, source)) return null;
-  return row.change! * quantity;
+  if (transactions == null) return row.change! * quantity;
+  if (!quantity.isFinite ||
+      quantity < 0 ||
+      !row.price.isFinite ||
+      row.price <= 0) {
+    return null;
+  }
+  final previousClose = row.prevClose ?? row.price - row.change!;
+  if (!previousClose.isFinite || previousClose <= 0) return null;
+  final trades = <TransactionRow>[];
+  var openingQuantity = quantity;
+  for (final transaction in transactions) {
+    if (holdingId != null && transaction.holdingId != holdingId) continue;
+    if (!_isSameDay(transaction.occurredAt.toLocal(), n)) continue;
+    final type = TransactionType.fromStorage(transaction.type);
+    if (type == TransactionType.split ||
+        type == TransactionType.transferIn ||
+        type == TransactionType.transferOut) {
+      return null;
+    }
+    if (type != TransactionType.buy && type != TransactionType.sell) continue;
+    final tradedQuantity = transaction.quantity;
+    final tradedPrice = transaction.price;
+    if (tradedQuantity == null ||
+        !tradedQuantity.isFinite ||
+        tradedQuantity <= 0 ||
+        tradedPrice == null ||
+        !tradedPrice.isFinite ||
+        tradedPrice <= 0 ||
+        transaction.currency.toUpperCase() != row.currency.toUpperCase() ||
+        transaction.occurredAt.isAfter(row.fetchedAt)) {
+      return null;
+    }
+    openingQuantity += type == TransactionType.buy
+        ? -tradedQuantity
+        : tradedQuantity;
+    trades.add(transaction);
+  }
+  const epsilon = 0.00000001;
+  if (openingQuantity < -epsilon) return null;
+  trades.sort((a, b) => a.occurredAt.compareTo(b.occurredAt));
+  var runningQuantity = openingQuantity;
+  var result = quantity * row.change!;
+  for (final transaction in trades) {
+    final tradedQuantity = transaction.quantity!;
+    final tradedPrice = transaction.price!;
+    if (transaction.type == TransactionType.buy.storageName) {
+      runningQuantity += tradedQuantity;
+      result += tradedQuantity * (previousClose - tradedPrice);
+    } else {
+      runningQuantity -= tradedQuantity;
+      if (runningQuantity < -epsilon) return null;
+      result += tradedQuantity * (tradedPrice - previousClose);
+    }
+  }
+  return result;
 }
 
 /// Today's change percentage (fraction) from the cached quote, or null.
@@ -515,8 +571,6 @@ class _HoldingsPageState extends ConsumerState<HoldingsPage> {
                           onTap: () => _openHolding(h),
                           onMenu: (at) =>
                               showHoldingMenu(context, ref, h, at: at),
-                          onArchive: () =>
-                              setHoldingArchived(context, ref, h, true),
                         );
                       },
                     ),
@@ -761,13 +815,11 @@ class _HoldingRowCard extends ConsumerWidget {
     required this.holding,
     required this.onTap,
     required this.onMenu,
-    required this.onArchive,
   });
 
   final HoldingRow holding;
   final VoidCallback onTap;
   final ValueChanged<Offset> onMenu;
-  final Future<void> Function() onArchive;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -778,12 +830,18 @@ class _HoldingRowCard extends ConsumerWidget {
         ref.watch(priceCacheProvider).value ?? const <String, PriceCacheRow>{};
     final todayRow = cachedQuoteForHolding(cache, holding);
     final source = MarketSource.fromStorage(holding.marketSource);
-    final todayProfit = todayProfitOf(
-      todayRow,
-      holding.quantity,
-      source: source,
-    );
-    final todayPct = todayChangePctOf(todayRow, source: source);
+    final transactions = ref
+        .watch(transactionsByHoldingProvider(holding.id))
+        .valueOrNull;
+    final todayProfit = transactions == null
+        ? null
+        : todayProfitOf(
+            todayRow,
+            holding.quantity,
+            source: source,
+            transactions: transactions,
+            holdingId: holding.id,
+          );
     final hide = ref.watch(hideAmountsProvider);
     final closed = isHoldingClosed(holding);
     final subtitle = closed
@@ -840,7 +898,7 @@ class _HoldingRowCard extends ConsumerWidget {
                     FittedBox(
                       fit: BoxFit.scaleDown,
                       child: DeltaText(
-                        value: todayPct ?? 0,
+                        value: todayProfit,
                         text: hide
                             ? '今日 ****'
                             : '今日 ${todayProfit >= 0 ? '+' : ''}${Formats.money(todayProfit, holding.currency)}',
@@ -856,34 +914,9 @@ class _HoldingRowCard extends ConsumerWidget {
         ),
       ),
     );
-    return Dismissible(
-      key: ValueKey(holding.id),
-      direction: holding.archived
-          ? DismissDirection.none
-          : DismissDirection.endToStart,
-      background: Container(
-        alignment: Alignment.centerRight,
-        margin: const EdgeInsets.only(bottom: T.s2),
-        padding: const EdgeInsets.only(right: T.s4),
-        color: T.surface2,
-        child: const Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.archive_outlined, size: 17, color: T.text2),
-            SizedBox(width: T.s2),
-            Text('归档', style: TextStyle(color: T.text2)),
-          ],
-        ),
-      ),
-      confirmDismiss: (_) async {
-        await onArchive();
-        // The database stream removes the row when the archive succeeds.
-        return false;
-      },
-      child: GestureDetector(
-        onLongPressStart: (details) => onMenu(details.globalPosition),
-        child: card,
-      ),
+    return GestureDetector(
+      onLongPressStart: (details) => onMenu(details.globalPosition),
+      child: card,
     );
   }
 }

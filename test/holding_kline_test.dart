@@ -46,6 +46,108 @@ void main() {
     );
   });
 
+  test('兼容旧持仓的场内基金代码和行情来源', () {
+    expect(
+      klineSymbolForHolding(holding(type: 'stock', symbol: 'sz159980')),
+      'sz159980',
+    );
+    expect(
+      klineSymbolForHolding(holding(type: 'stock', symbol: 'sh510300')),
+      'sh510300',
+    );
+    expect(
+      klineSymbolForHolding(holding(type: 'stock', symbol: '159980')),
+      'sz159980',
+    );
+    expect(
+      klineSymbolForHolding(
+        holding(type: 'stock', symbol: '510300', source: 'manual'),
+      ),
+      'sh510300',
+    );
+    expect(
+      klineSymbolForHolding(holding(type: 'stock', symbol: 'sh588000')),
+      'sh588000',
+    );
+    for (final type in [
+      'stock',
+      'mutual_fund',
+      'gold',
+      'bond',
+      'crypto',
+      'futures',
+    ]) {
+      expect(
+        klineSymbolForHolding(
+          holding(type: type, symbol: ' SZ159980 ', source: 'eastmoney'),
+        ),
+        'sz159980',
+        reason: type,
+      );
+    }
+    expect(
+      klineSymbolForHolding(
+        holding(type: 'mutual_fund', symbol: 'sh510300', source: 'eastmoney'),
+      ),
+      'sh510300',
+    );
+    expect(
+      klineSymbolForHolding(
+        holding(type: 'mutual_fund', symbol: 'sz160125', source: 'eastmoney'),
+      ),
+      'sz160125',
+    );
+    expect(
+      klineSymbolForHolding(
+        holding(type: 'etf', symbol: '159980', source: 'eastmoney'),
+      ),
+      'sz159980',
+    );
+  });
+
+  test('旧分类的裸代码、场外代码及无关资产不能推断为场内基金', () {
+    for (final symbol in [
+      '159980',
+      '510300',
+      'sh519001',
+      'sz000001',
+      'sz510300',
+    ]) {
+      expect(
+        klineSymbolForHolding(
+          holding(type: 'mutual_fund', symbol: symbol, source: 'eastmoney'),
+        ),
+        isNull,
+        reason: symbol,
+      );
+    }
+    for (final type in [
+      'savings',
+      'bank_wealth',
+      'property',
+      'liability',
+      'future_type',
+    ]) {
+      expect(
+        klineSymbolForHolding(holding(type: type, symbol: 'sz159980')),
+        isNull,
+        reason: type,
+      );
+    }
+    expect(
+      klineSymbolForHolding(
+        holding(type: 'mutual_fund', symbol: 'sz159980', currency: 'USD'),
+      ),
+      isNull,
+    );
+    expect(
+      klineSymbolForHolding(
+        holding(type: 'stock', symbol: '159980', source: 'eastmoney'),
+      ),
+      isNull,
+    );
+  });
+
   test('识别北交所、港股、美股和 ETF，保留明确市场代码', () {
     expect(
       klineSymbolForHolding(holding(type: 'stock', symbol: '920003')),

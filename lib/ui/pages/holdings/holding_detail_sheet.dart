@@ -98,10 +98,10 @@ class HoldingDetailSheet extends ConsumerWidget {
     final cache = ref.watch(priceCacheProvider).value ?? const <String, PriceCacheRow>{};
     final todayRow = cachedQuoteForHolding(cache, holding);
     final source = MarketSource.fromStorage(holding.marketSource);
-    final todayProfit = isClosed
+    final todayProfit = isClosed || txns.valueOrNull == null
         ? null
-        : todayProfitOf(todayRow, holding.quantity, source: source);
-    final todayPct = todayChangePctOf(todayRow, source: source);
+        : todayProfitOf(todayRow, holding.quantity, source: source,
+            transactions: txnList, holdingId: holding.id);
     return ListView(
       controller: scrollController,
       shrinkWrap: embedded,
@@ -219,10 +219,7 @@ class HoldingDetailSheet extends ConsumerWidget {
               if (todayProfit != null)
                 InfoRow(
                   label: '最新收益',
-                  value: todayPct == null
-                      ? '${todayProfit >= 0 ? '+' : ''}${Formats.money(todayProfit, holding.currency)}'
-                      : '${todayProfit >= 0 ? '+' : ''}${Formats.money(todayProfit, holding.currency)}'
-                          ' (${Formats.pct(todayPct)})',
+                  value: '${todayProfit >= 0 ? '+' : ''}${Formats.money(todayProfit, holding.currency)}',
                   valueColor: T.changeColor(todayProfit),
                 ),
               if (annualized != null && type != AssetType.liability)

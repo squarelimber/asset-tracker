@@ -14,6 +14,7 @@ import '../../components/monthly_profit_chart.dart';
 import '../../components/section_header.dart';
 import '../../components/terminal_card.dart';
 import '../../tokens.dart';
+import 'risk_metrics_card.dart';
 
 final statsProvider = FutureProvider<TradeStats>((ref) async {
   final txns = await ref.watch(transactionsProvider.future);
@@ -124,6 +125,9 @@ class StatsPage extends ConsumerWidget {
                   ),
                 ),
               ),
+              const SizedBox(height: T.s3),
+              const SectionHeader(label: '风险与收益'),
+              const RiskMetricsCard(),
               const SizedBox(height: T.s3),
               const SectionHeader(label: '交易流水'),
               stats.when(

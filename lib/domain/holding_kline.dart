@@ -6,14 +6,45 @@ import 'bse_code_mapping.dart';
 /// explicit exchange prefix resolve collisions between markets.
 String? klineSymbolForHolding(HoldingRow holding) {
   final type = AssetType.fromStorage(holding.assetType);
-  if (type != AssetType.stock && type != AssetType.etf) return null;
-  if (holding.marketSource != MarketSource.sina.storageName &&
-      holding.marketSource != MarketSource.manual.storageName) {
-    return null;
-  }
   final raw = holding.symbol?.trim();
   if (raw == null || raw.isEmpty) return null;
   final currency = holding.currency.trim().toUpperCase();
+
+  // Older holdings can carry an exposure type (gold, commodity, bond, etc.)
+  // or an Eastmoney source even though their product is exchange traded.
+  // Normally require an explicit exchange prefix: bare fund codes can also
+  // refer to off-exchange holdings. Stock holdings with a stock quote source
+  // are already exchange-traded and may safely use a bare code.
+  final legacyFundType = switch (type) {
+    AssetType.stock ||
+    AssetType.mutualFund ||
+    AssetType.gold ||
+    AssetType.bond ||
+    AssetType.crypto ||
+    AssetType.futures => true,
+    _ => false,
+  };
+  if (currency == 'CNY' && legacyFundType) {
+    var symbol = raw.toLowerCase();
+    if (type == AssetType.stock &&
+        (holding.marketSource == MarketSource.sina.storageName ||
+            holding.marketSource == MarketSource.manual.storageName) &&
+        RegExp(r'^[15]\d{5}$').hasMatch(symbol)) {
+      symbol = '${symbol.startsWith('5') ? 'sh' : 'sz'}$symbol';
+    }
+    if (RegExp(
+      r'^(?:sh5(?!19)\d{5}|sz(?:159\d{3}|1[68]\d{4}))$',
+    ).hasMatch(symbol)) {
+      return symbol;
+    }
+  }
+
+  if (type != AssetType.stock && type != AssetType.etf) return null;
+  if (type == AssetType.stock &&
+      holding.marketSource != MarketSource.sina.storageName &&
+      holding.marketSource != MarketSource.manual.storageName) {
+    return null;
+  }
 
   if (currency == 'CNY') {
     var symbol = raw.toLowerCase();

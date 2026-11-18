@@ -8,6 +8,7 @@ import '../../core/history_sync.dart';
 import '../../data/database.dart';
 import '../tokens.dart';
 import 'terminal_card.dart';
+import 'transaction_details.dart';
 
 /// One transaction row, shared by the holding detail sheet and the unified
 /// transaction history page.
@@ -23,6 +24,7 @@ class TransactionTile extends ConsumerWidget {
     this.holdingName,
     this.accountName,
     this.counterpartyText,
+    this.onEditDate,
   });
 
   final TransactionRow txn;
@@ -30,20 +32,24 @@ class TransactionTile extends ConsumerWidget {
   final String? holdingName;
   final String? accountName;
   final String? counterpartyText;
+  final Future<void> Function()? onEditDate;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final type = TransactionType.fromStorage(txn.type);
     final hide = ref.watch(hideAmountsProvider);
-    final isIn = type == TransactionType.buy ||
+    final isIn =
+        type == TransactionType.buy ||
         type == TransactionType.transferIn ||
         type == TransactionType.income ||
         type == TransactionType.dividend;
     final isSplit = type == TransactionType.split;
-    final realized = type == TransactionType.sell &&
+    final realized =
+        type == TransactionType.sell &&
             !txn.internalMove &&
             costPrice != null &&
-            txn.quantity != null && txn.price != null
+            txn.quantity != null &&
+            txn.price != null
         ? (txn.price! - costPrice!) * txn.quantity!
         : null;
     // Built with plain statements: the null-aware element syntax the
@@ -55,12 +61,17 @@ class TransactionTile extends ConsumerWidget {
     if (accountName != null) subtitleParts.add(accountName!);
     if (realized != null) {
       subtitleParts.add(
-          hide ? '落袋 ****' : '落袋 ${realized >= 0 ? '+' : ''}${Formats.money(realized, txn.currency)}');
+        hide
+            ? '落袋 ****'
+            : '落袋 ${realized >= 0 ? '+' : ''}${Formats.money(realized, txn.currency)}',
+      );
     }
     return TerminalCard(
       margin: EdgeInsets.zero,
       child: ListTile(
         dense: true,
+        onTap: () =>
+            showTransactionDetails(context, txn, onEditDate: onEditDate),
         leading: Icon(
           type.icon,
           size: 20,
@@ -90,6 +101,7 @@ class TransactionTile extends ConsumerWidget {
                 ),
               ),
             ),
+            const Icon(Icons.chevron_right, size: 18, color: T.text3),
             IconButton(
               visualDensity: VisualDensity.compact,
               icon: const Icon(Icons.delete_outline, size: 18),
@@ -114,15 +126,20 @@ class TransactionTile extends ConsumerWidget {
                   ),
                 );
                 if (ok != true || !context.mounted) return;
-                final result =
-                    await ref.read(transactionServiceProvider).remove(txn.id);
+                final result = await ref
+                    .read(transactionServiceProvider)
+                    .remove(txn.id);
                 if (!context.mounted) return;
                 if (result.ok) {
-                  ref.read(daoProvider).setSetting(historySyncDirtyKey, historyDirtySet);
+                  ref
+                      .read(daoProvider)
+                      .setSetting(historySyncDirtyKey, historyDirtySet);
                 }
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
-                    content: Text(result.ok ? '已删除并回滚' : (result.message ?? '删除失败')),
+                    content: Text(
+                      result.ok ? '已删除并回滚' : (result.message ?? '删除失败'),
+                    ),
                     backgroundColor: result.ok ? null : T.up,
                   ),
                 );

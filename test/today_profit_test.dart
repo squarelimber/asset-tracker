@@ -12,7 +12,8 @@ HoldingRow _holding({
   double quantity = 100,
   String currency = 'CNY',
 }) {
-  return HoldingRow(costRecorded: false, 
+  return HoldingRow(
+    costRecorded: false,
     id: 1,
     accountId: 1,
     name: '测试',
@@ -32,11 +33,7 @@ HoldingRow _holding({
   );
 }
 
-PriceCacheRow _cache({
-  double? change,
-  double? changePct,
-  DateTime? fetchedAt,
-}) {
+PriceCacheRow _cache({double? change, double? changePct, DateTime? fetchedAt}) {
   return PriceCacheRow(
     symbol: 'sh600519',
     source: 'sina',
@@ -93,9 +90,99 @@ void main() {
     });
   });
 
+  group('todayProfitOf intraday trades', () {
+    final now = DateTime(2026, 9, 14, 15);
+    final row = _cache(change: 10, fetchedAt: now);
+    TransactionRow trade(
+      String type,
+      double? qty,
+      double? price, {
+      int holdingId = 1,
+      DateTime? occurredAt,
+    }) => TransactionRow(
+      id: 1,
+      accountId: 1,
+      holdingId: holdingId,
+      type: type,
+      quantity: qty,
+      price: price,
+      amount: (qty ?? 0) * (price ?? 0),
+      currency: 'CNY',
+      occurredAt: occurredAt ?? DateTime(2026, 9, 14, 14),
+      costMoved: false,
+      internalMove: false,
+      updatedAt: now,
+    );
+    double? calculate(double quantity, List<TransactionRow> trades) =>
+        todayProfitOf(
+          row,
+          quantity,
+          now: now,
+          transactions: trades,
+          holdingId: 1,
+        );
+
+    test('no trade retains the day change for opening shares', () {
+      expect(calculate(100, []), 1000);
+    });
+    test(
+      'new position measures from actual buy price, not yesterday close',
+      () {
+        expect(calculate(46, [trade('buy', 46, 101)]), -46);
+      },
+    );
+    test('existing position and newly bought shares use their own bases', () {
+      expect(calculate(150, [trade('buy', 50, 98)]), 1100);
+    });
+    test('sold shares use the actual sale price rather than last price', () {
+      expect(calculate(60, [trade('sell', 40, 95)]), 800);
+    });
+    test('intraday round trip uses buy and sell execution prices', () {
+      expect(
+        calculate(0, [
+          trade('buy', 10, 92, occurredAt: DateTime(2026, 9, 14, 10)),
+          trade('sell', 10, 95, occurredAt: DateTime(2026, 9, 14, 11)),
+        ]),
+        30,
+      );
+    });
+    test('unrelated holding and previous day trades do not affect result', () {
+      expect(
+        calculate(100, [
+          trade('buy', 50, 99, holdingId: 2),
+          trade('buy', 50, 99, occurredAt: DateTime(2026, 9, 13, 14)),
+        ]),
+        1000,
+      );
+    });
+    test(
+      'missing trade data, share splits and impossible shares are unavailable',
+      () {
+        expect(calculate(100, [trade('buy', null, 99)]), isNull);
+        expect(calculate(100, [trade('buy', 10, null)]), isNull);
+        expect(calculate(100, [trade('split', null, null)]), isNull);
+        expect(calculate(10, [trade('buy', 100, 99)]), isNull);
+        expect(
+          calculate(100, [
+            trade(
+              'buy',
+              10,
+              99,
+              occurredAt: now.add(const Duration(minutes: 1)),
+            ),
+          ]),
+          isNull,
+        );
+      },
+    );
+  });
+
   group('todayChangePctOf', () {
     test('returns the fraction change for today', () {
-      expect(todayChangePctOf(_cache(changePct: 0.0123)), closeTo(0.0123, 1e-9));
+      expect(
+        todayChangePctOf(_cache(changePct: 0.0123)),
+        closeTo(0.0123, 1e-9),
+      );
     });
 
     test('null for stale or missing data', () {
@@ -167,7 +254,10 @@ void main() {
     test('assets only: liabilities are excluded from the asset total', () {
       final list = [
         amountHolding('savings', 1000), // 现金 1000
-        _holding(symbol: 'sh600519', quantity: 100), // 茅台 100 * latestPrice(1) = 100
+        _holding(
+          symbol: 'sh600519',
+          quantity: 100,
+        ), // 茅台 100 * latestPrice(1) = 100
         amountHolding('liability', 3000), // 负债 3000 -> excluded
       ];
       const rates = <String, double>{};

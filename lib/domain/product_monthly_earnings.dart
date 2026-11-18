@@ -41,6 +41,7 @@ class ProductEarnings {
     required this.type,
     required this.closed,
     required this.daily,
+    this.dailyProfitAdjustments = const {},
   });
 
   /// Product name - the merge key across accounts.
@@ -54,15 +55,26 @@ class ProductEarnings {
 
   /// Merged per-day (date, value, cost) series, CNY-converted, ascending.
   final List<({String date, double value, double cost})> daily;
+
+  /// Adjustments to the change in unrealized profit attributable to this
+  /// product, e.g. gains carried between holdings by an internal transfer.
+  /// These do not alter the recorded values or cost bases.
+  final Map<String, double> dailyProfitAdjustments;
 }
 
 /// One day's value/cost for one holding, CNY-converted.
 class HoldingDay {
-  const HoldingDay({required this.date, required this.value, required this.cost});
+  const HoldingDay({
+    required this.date,
+    required this.value,
+    required this.cost,
+    this.profitAdjustment = 0,
+  });
 
   final String date;
   final double value;
   final double cost;
+  final double profitAdjustment;
 }
 
 /// Per-day value/cost series for one holding (ascending dates).
@@ -104,8 +116,13 @@ class ProductEarningsCalculator {
     for (final entry in groups.entries) {
       final members = entry.value;
       final byDate = <String, (double value, double cost)>{};
+      final adjustmentsByDate = <String, double>{};
       for (final m in members) {
         for (final d in m.days) {
+          if (d.profitAdjustment != 0) {
+            adjustmentsByDate[d.date] =
+                (adjustmentsByDate[d.date] ?? 0) + d.profitAdjustment;
+          }
           final cur = byDate[d.date];
           byDate[d.date] = cur == null
               ? (d.value, d.cost)
@@ -117,6 +134,7 @@ class ProductEarningsCalculator {
         name: entry.key,
         type: members.first.type,
         closed: members.every((m) => m.closed),
+        dailyProfitAdjustments: adjustmentsByDate,
         daily: [
           for (final date in dates)
             (date: date, value: byDate[date]!.$1, cost: byDate[date]!.$2),
@@ -141,7 +159,11 @@ class ProductEarningsCalculator {
       base ??= cur.value;
       lastIndex = i;
       dailyProfits.add(
-        prev == null ? 0.0 : (cur.value - cur.cost) - (prev.value - prev.cost),
+        prev == null
+            ? 0.0
+            : (cur.value - cur.cost) -
+                  (prev.value - prev.cost) +
+                  (p.dailyProfitAdjustments[cur.date] ?? 0),
       );
     }
     final profit = dailyProfits.fold(0.0, (sum, profit) => sum + profit);

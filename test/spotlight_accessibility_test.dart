@@ -2,7 +2,7 @@ import 'package:asset_tracker/app/providers.dart';
 import 'package:asset_tracker/app/theme.dart';
 import 'package:asset_tracker/core/enums.dart';
 import 'package:asset_tracker/core/formats.dart';
-import 'package:asset_tracker/services/history_backfill_service.dart';
+import 'package:asset_tracker/domain/earnings_breakdown.dart';
 import 'package:asset_tracker/ui/components/rotating_spotlight_card.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -22,27 +22,27 @@ void main() {
           overrides: [
             spotlightHoldMsProvider.overrideWith((ref) => Stream.value(2300)),
             productEarningsProvider.overrideWith((ref, year) async => const []),
-            dayHoldingsBreakdownProvider.overrideWith((ref, day) async {
-              final today = DateUtils.dateOnly(DateTime.now());
-              final previous = day.isBefore(today);
-              return [
-                DayHoldingValue(
-                  holdingId: 1,
-                  name: '演示基金',
-                  type: AssetType.etf,
-                  value: previous ? 90 : 100,
-                  cost: 80,
-                  liability: false,
-                ),
-                DayHoldingValue(
-                  holdingId: 2,
-                  name: '演示股票',
-                  type: AssetType.stock,
-                  value: previous ? 220 : 200,
-                  cost: 200,
-                  liability: false,
-                ),
-              ];
+            earningsBreakdownProvider.overrideWith((ref, day) async {
+              return const EarningsBreakdown(
+                date: '',
+                verified: true,
+                rows: [
+                  HoldingDayEarning(
+                    holdingId: 1,
+                    name: '演示基金',
+                    type: AssetType.etf,
+                    value: 100,
+                    profit: 10,
+                  ),
+                  HoldingDayEarning(
+                    holdingId: 2,
+                    name: '演示股票',
+                    type: AssetType.stock,
+                    value: 200,
+                    profit: -20,
+                  ),
+                ],
+              );
             }),
           ],
         );

@@ -435,21 +435,15 @@ class _TransactionsPageState extends ConsumerState<TransactionsPage> {
                     for (final (day, rows) in _groupByDay(filtered)) ...[
                       _DayHeader(day: day, net: _dayNet(rows, rates)),
                       for (final t in rows) ...[
-                        InkWell(
-                          borderRadius: BorderRadius.circular(6),
-                          onTap: () => _editDate(t),
-                          child: TransactionTile(
-                            txn: t,
-                            costPrice: _tileCostPrice(t, holdingsById),
-                            holdingName: t.holdingId == null
-                                ? null
-                                : holdingsById[t.holdingId]?.name,
-                            accountName: accountName[t.accountId],
-                            counterpartyText: _counterpartyText(
-                              t,
-                              holdingsById,
-                            ),
-                          ),
+                        TransactionTile(
+                          txn: t,
+                          costPrice: _tileCostPrice(t, holdingsById),
+                          holdingName: t.holdingId == null
+                              ? null
+                              : holdingsById[t.holdingId]?.name,
+                          accountName: accountName[t.accountId],
+                          counterpartyText: _counterpartyText(t, holdingsById),
+                          onEditDate: () => _editDate(t),
                         ),
                         const SizedBox(height: 4),
                       ],

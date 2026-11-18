@@ -169,11 +169,14 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('当日 ****'), findsOneWidget);
 
-    // 点流水项（tile 标题，避开顶部同名筛选 chip）→ 「修改日期」确认对话框。
+    // 点流水项先查看详情，再从详情进入原有的日期修改流程。
     await tester.tap(find.descendant(
       of: find.byType(TransactionTile),
       matching: find.text('卖出'),
     ));
+    await tester.pumpAndSettle();
+    expect(find.text('交易详情'), findsOneWidget);
+    await tester.tap(find.text('修改日期'));
     await tester.pumpAndSettle();
     expect(find.text('修改流水日期'), findsOneWidget);
     await tester.tap(find.text('取消'));

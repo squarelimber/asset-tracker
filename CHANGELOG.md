@@ -2,6 +2,18 @@
 
 All notable changes to Asset Tracker. Entries are condensed from the commit history; dates follow the release tags.
 
+## [0.11.7] - 2026-11-18
+
+### Changed
+
+- 优化目标配置界面，统计页新增估算夏普比率和年化波动率，支持调整无风险利率
+- 交易流水支持查看成交详情，移除持仓左滑归档
+
+### Fixed
+
+- 修复历史分类的场内基金无法进入 K 线页面
+- 修复内部资金转移及当日买卖导致的收益归因错误
+
 ## [0.11.6] - 2026-11-17
 
 ### Changed

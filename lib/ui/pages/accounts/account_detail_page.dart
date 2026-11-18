@@ -15,6 +15,7 @@ import '../../components/empty_state.dart';
 import '../../components/error_state.dart';
 import '../../components/status_chip.dart';
 import '../../components/terminal_card.dart';
+import '../../components/transaction_details.dart';
 import '../../tokens.dart';
 import '../transaction_dialogs.dart';
 
@@ -276,6 +277,7 @@ class _TransactionRow extends ConsumerWidget {
     return TerminalCard(
       margin: const EdgeInsets.only(bottom: T.s2),
       padding: const EdgeInsets.symmetric(horizontal: T.s3, vertical: T.s2),
+      onTap: () => showTransactionDetails(context, txn),
       child: Row(
         children: [
           Icon(
@@ -314,6 +316,7 @@ class _TransactionRow extends ConsumerWidget {
               ),
             ),
           ),
+          const Icon(Icons.chevron_right, size: 18, color: T.text3),
           IconButton(
             visualDensity: VisualDensity.compact,
             icon: const Icon(Icons.delete_outline, size: 18),

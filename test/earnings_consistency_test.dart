@@ -51,6 +51,262 @@ SnapshotRow _snapshot(String date, List<DayHoldingValue> values) {
 }
 
 void main() {
+  test('internal gain attribution is balanced and conservative', () {
+    TransactionRow row({
+      required int id,
+      required String type,
+      int? holding,
+      int? source,
+      int? target,
+      double? moved = 80,
+      bool internal = false,
+      String currency = 'CNY',
+      DateTime? when,
+    }) => TransactionRow(
+      id: id,
+      accountId: 1,
+      holdingId: holding,
+      cashSourceId: source,
+      cashTargetId: target,
+      type: type,
+      amount: 100,
+      currency: currency,
+      occurredAt: when ?? DateTime(2026, 11, 16),
+      costMoved: true,
+      costMovedAmount: moved,
+      internalMove: internal,
+      updatedAt: DateTime(2026),
+    );
+    Map<int, double> adjusted(List<TransactionRow> rows, [Set<int>? ids]) =>
+        internalTransferProfitAdjustments(
+          rows,
+          '2026-11-15',
+          '2026-11-17',
+          ids ?? {1, 2},
+        );
+    expect(adjusted([row(id: 1, type: 'sell', holding: 1, target: 2)]), {
+      1: 20,
+      2: -20,
+    });
+    expect(adjusted([row(id: 1, type: 'transfer_out', source: 1, target: 2)]), {
+      1: 20,
+      2: -20,
+    });
+    expect(
+      adjusted([
+        row(id: 1, type: 'sell', holding: 1, internal: true),
+        row(id: 2, type: 'buy', holding: 2, internal: true),
+      ]),
+      {1: 20, 2: -20},
+    );
+    expect(
+      adjusted([row(id: 1, type: 'buy', holding: 2, source: 1, moved: null)]),
+      isEmpty,
+    );
+    expect(
+      adjusted([
+        row(id: 1, type: 'buy', holding: 2, source: 1, currency: 'USD'),
+      ]),
+      isEmpty,
+    );
+    expect(
+      adjusted([row(id: 1, type: 'buy', holding: 2, source: 1)], {2}),
+      isEmpty,
+    );
+    expect(
+      adjusted([row(id: 1, type: 'dividend', holding: 1, target: 2)]),
+      isEmpty,
+    );
+    expect(
+      adjusted([
+        row(
+          id: 1,
+          type: 'buy',
+          holding: 2,
+          source: 1,
+          when: DateTime(2026, 11, 15),
+        ),
+      ]),
+      isEmpty,
+    );
+    expect(
+      adjusted([
+        row(id: 1, type: 'sell', holding: 1, internal: true),
+        row(id: 2, type: 'buy', holding: 2, internal: true),
+        row(id: 3, type: 'buy', holding: 2, internal: true),
+      ]),
+      isEmpty,
+    );
+  });
+
+  test('funded ETF purchase attributes only the new price loss to the ETF', () {
+    final snapshots = [
+      _snapshot('2026-11-15', [
+        _holding(1, 10000, 8148),
+        _holding(2, 3000, 3500),
+      ]),
+      _snapshot('2026-11-17', [
+        _holding(1, 5397.7, 4398),
+        _holding(2, 7595.4, 7250),
+      ]),
+    ];
+    final buy = TransactionRow(
+      id: 1,
+      accountId: 1,
+      holdingId: 2,
+      cashSourceId: 1,
+      type: 'buy',
+      quantity: 2300,
+      price: 2.001,
+      amount: 4602.3,
+      currency: 'CNY',
+      occurredAt: DateTime(2026, 11, 16),
+      costMoved: true,
+      costMovedAmount: 3750,
+      internalMove: false,
+      updatedAt: DateTime(2026),
+    );
+    final detail = earningsBreakdownOf(
+      snapshots,
+      '2026-11-17',
+      transactions: [buy],
+    );
+    expect(
+      detail.rows.singleWhere((r) => r.holdingId == 1).profit,
+      closeTo(0, 1e-8),
+    );
+    expect(
+      detail.rows.singleWhere((r) => r.holdingId == 2).profit,
+      closeTo(-6.9, 1e-8),
+    );
+    expect(detail.detailTotal, closeTo(-6.9, 1e-8));
+    expect(detail.verified, isTrue);
+    final stale = buy.copyWith(updatedAt: DateTime(2026, 11, 17));
+    expect(
+      earningsBreakdownOf(
+        snapshots,
+        '2026-11-17',
+        transactions: [stale],
+      ).verified,
+      isFalse,
+    );
+    expect(
+      () => productsFromSnapshots(snapshots, transactions: [stale]),
+      throwsStateError,
+    );
+    final products = productsFromSnapshots(snapshots, transactions: [buy]);
+    const calc = ProductEarningsCalculator();
+    expect(
+      calc
+          .monthOf(products.singleWhere((p) => p.name == '产品1'), 2026, 11)
+          .profit,
+      closeTo(0, 1e-8),
+    );
+    expect(
+      calc
+          .monthOf(products.singleWhere((p) => p.name == '产品2'), 2026, 11)
+          .profit,
+      closeTo(-6.9, 1e-8),
+    );
+  });
+
+  test(
+    'internal move with no observable position on one side is not applied',
+    () {
+      final snapshots = [
+        _snapshot('2026-11-15', [_holding(1, 600, 500), _holding(2, 0, 0)]),
+        _snapshot('2026-11-17', [_holding(1, 480, 400), _holding(2, 0, 0)]),
+      ];
+      final transfer = TransactionRow(
+        id: 1,
+        accountId: 1,
+        holdingId: 2,
+        cashSourceId: 1,
+        type: 'buy',
+        amount: 120,
+        currency: 'CNY',
+        occurredAt: DateTime(2026, 11, 16),
+        costMoved: true,
+        costMovedAmount: 100,
+        internalMove: false,
+        updatedAt: DateTime(2026),
+      );
+      final detail = earningsBreakdownOf(
+        snapshots,
+        '2026-11-17',
+        transactions: [transfer],
+      );
+      expect(detail.rows.single.profit, -20);
+      expect(detail.verified, isFalse);
+      expect(
+        () => productsFromSnapshots(snapshots, transactions: [transfer]),
+        throwsStateError,
+      );
+    },
+  );
+
+  test('incomplete internal movements do not claim reliable attribution', () {
+    final snapshots = [
+      _snapshot('2026-11-15', [_holding(1, 600, 500), _holding(2, 200, 200)]),
+      _snapshot('2026-11-17', [_holding(1, 480, 400), _holding(2, 320, 300)]),
+    ];
+    TransactionRow movement({
+      required int id,
+      required String type,
+      int? holding,
+      int? source,
+      double? moved = 100,
+      bool internal = false,
+      String currency = 'CNY',
+    }) => TransactionRow(
+      id: id,
+      accountId: 1,
+      holdingId: holding,
+      cashSourceId: source,
+      type: type,
+      amount: 120,
+      currency: currency,
+      occurredAt: DateTime(2026, 11, 16),
+      costMoved: true,
+      costMovedAmount: moved,
+      internalMove: internal,
+      updatedAt: DateTime(2026),
+    );
+
+    final scenarios = <String, List<TransactionRow>>{
+      'missing transferred cost': [
+        movement(id: 1, type: 'buy', holding: 2, source: 1, moved: null),
+      ],
+      'foreign currency without historical exchange rate': [
+        movement(id: 1, type: 'buy', holding: 2, source: 1, currency: 'USD'),
+      ],
+      'unpaired redemption leg': [
+        movement(id: 1, type: 'sell', holding: 1, internal: true),
+      ],
+      'unpaired purchase leg': [
+        movement(id: 1, type: 'buy', holding: 2, internal: true),
+      ],
+      'ambiguous paired purchase legs': [
+        movement(id: 1, type: 'sell', holding: 1, internal: true),
+        movement(id: 2, type: 'buy', holding: 2, internal: true),
+        movement(id: 3, type: 'buy', holding: 2, internal: true),
+      ],
+    };
+    for (final scenario in scenarios.entries) {
+      final detail = earningsBreakdownOf(
+        snapshots,
+        '2026-11-17',
+        transactions: scenario.value,
+      );
+      expect(detail.verified, isFalse, reason: scenario.key);
+      expect(
+        () => productsFromSnapshots(snapshots, transactions: scenario.value),
+        throwsStateError,
+        reason: scenario.key,
+      );
+    }
+  });
+
   test('daily detail is the day delta, not cumulative profit', () {
     final snapshots = [
       _snapshot('2026-11-04', [_holding(1, 1100, 1000)]),
@@ -106,7 +362,10 @@ void main() {
       _snapshot('2026-11-14', [_holding(1, 0, 0), _holding(2, 2050, 1900)]),
     ];
     final closingDay = earningsBreakdownOf(snapshots, '2026-11-12');
-    expect(closingDay.rows.singleWhere((row) => row.holdingId == 1).profit, -100);
+    expect(
+      closingDay.rows.singleWhere((row) => row.holdingId == 1).profit,
+      -100,
+    );
     expect(closingDay.detailTotal, 40);
     expect(closingDay.verified, isTrue);
 
@@ -226,6 +485,7 @@ void main() {
           snapshotsProvider.overrideWith(
             (ref) => Stream.error(StateError('read failed')),
           ),
+          transactionsProvider.overrideWith((ref) => Stream.value([])),
         ],
       );
       addTearDown(container.dispose);
@@ -241,7 +501,10 @@ void main() {
     () async {
       final stream = StreamController<List<SnapshotRow>>();
       final container = ProviderContainer(
-        overrides: [snapshotsProvider.overrideWith((ref) => stream.stream)],
+        overrides: [
+          snapshotsProvider.overrideWith((ref) => stream.stream),
+          transactionsProvider.overrideWith((ref) => Stream.value([])),
+        ],
       );
       final subscription = container.listen(
         earningsBreakdownProvider(DateTime(2026, 11, 5)),

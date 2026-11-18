@@ -11,6 +11,54 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  testWidgets('窄屏下目标合计和保存操作保持可见，分类可滚动编辑', (tester) async {
+    tester.view.physicalSize = const Size(320, 640);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final db = AppDatabase(NativeDatabase.memory());
+    final container = ProviderContainer(
+      overrides: [databaseProvider.overrideWithValue(db)],
+    );
+    addTearDown(() async {
+      container.dispose();
+      await db.close();
+    });
+    const summary = PortfolioSummary(
+      totalAssets: 100,
+      totalLiabilities: 0,
+      totalCost: 100,
+      todayChange: 0,
+      todayChangePct: 0,
+      breakdown: [],
+      categoryBreakdown: [
+        CategoryBreakdown(
+          category: AssetCategory.equity,
+          marketValue: 60,
+          cost: 60,
+        ),
+      ],
+    );
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: const MaterialApp(
+          home: TargetAllocationDialog(summary: summary),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('目标合计'), findsOneWidget);
+    expect(find.textContaining('剩余可分配'), findsOneWidget);
+    expect(find.widgetWithText(FilledButton, '保存'), findsOneWidget);
+    final field = find.byKey(const ValueKey('target-property'));
+    await tester.ensureVisible(field);
+    await tester.enterText(field, '10');
+    await tester.pump();
+    expect(find.textContaining('目标总和不能超过 100%'), findsOneWidget);
+    expect(find.text('目标合计'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('目标配置显示两位小数并保留未修改的原始精度', (tester) async {
     tester.view.physicalSize = const Size(390, 844);
     tester.view.devicePixelRatio = 1;

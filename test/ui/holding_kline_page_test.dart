@@ -12,6 +12,76 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
 void main() {
+  testWidgets('股票分类的旧 ETF 持仓加载对应 K 线', (tester) async {
+    final db = AppDatabase(NativeDatabase.memory());
+    final holding = HoldingRow(
+      id: 1,
+      accountId: 1,
+      name: '测试ETF',
+      assetType: 'stock',
+      marketSource: 'sina',
+      symbol: 'sz159980',
+      quantity: 1,
+      costPrice: 1,
+      latestPrice: 1,
+      currency: 'CNY',
+      costRecorded: false,
+      archived: false,
+      createdAt: DateTime(2026),
+      updatedAt: DateTime(2026),
+    );
+    final requests = <String>[];
+    final client = MockClient((request) async {
+      final param = request.url.queryParameters['param']!;
+      requests.add(param);
+      return http.Response(
+        jsonEncode({
+          'code': 0,
+          'data': {
+            'sz159980': {
+              'day': [
+                ['2026-11-06', '1', '1', '1', '1', '100'],
+              ],
+            },
+          },
+        }),
+        200,
+      );
+    });
+    final container = ProviderContainer(
+      overrides: [
+        databaseProvider.overrideWithValue(db),
+        holdingsProvider.overrideWith((ref) => Stream.value([holding])),
+        transactionsByHoldingProvider(
+          1,
+        ).overrideWith((ref) => Stream.value([])),
+        priceCacheProvider.overrideWith((ref) => Future.value({})),
+        historySyncProvider.overrideWith((ref) => null),
+      ],
+    );
+    addTearDown(() async {
+      container.dispose();
+      client.close();
+      await db.close();
+    });
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp(
+          home: HoldingKlinePage(
+            holdingId: 1,
+            source: KlineSource(client: client),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(requests.single, startsWith('sz159980,day,'));
+    expect(find.textContaining('SZ159980 · 腾讯行情'), findsOneWidget);
+    expect(find.text('日 K'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('持仓图表按持仓代码加载，隐藏金额并保留详情', (tester) async {
     tester.view.physicalSize = const Size(390, 844);
     tester.view.devicePixelRatio = 1;
@@ -118,6 +188,13 @@ void main() {
     expect(find.textContaining('数量 ****'), findsNWidgets(2));
     expect(find.textContaining('金额 ****'), findsNWidgets(2));
     expect(find.textContaining('17.25'), findsNothing);
+    await tester.tap(find.textContaining('成交价 ****').first);
+    await tester.pumpAndSettle();
+    expect(find.text('交易详情'), findsOneWidget);
+    expect(find.text('成交价'), findsOneWidget);
+    expect(find.text('3.45'), findsNothing);
+    await tester.tap(find.byTooltip('关闭'));
+    await tester.pumpAndSettle();
     Navigator.of(tester.element(find.text('交易记录'))).pop();
     await tester.pumpAndSettle();
     await tester.ensureVisible(find.text('周 K'));

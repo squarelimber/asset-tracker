@@ -64,8 +64,8 @@ class DayEarningsPanel extends ConsumerWidget {
             if (!data.verified && data.profit != null)
               Text(
                 kIsWeb
-                    ? '旧快照缺少可核对的持仓明细。请在手机或桌面端重建历史快照后同步。'
-                    : '旧快照缺少可核对的持仓明细。请在设置中重建历史快照后重试。',
+                    ? '部分交易、历史汇率或快照信息不完整，暂不能准确拆分。请检查记录，在手机或桌面端重建历史快照后同步。'
+                    : '部分交易、历史汇率或快照信息不完整，暂不能准确拆分。请检查记录并等待历史快照重算。',
                 style: const TextStyle(
                   fontSize: 12,
                   color: T.warning,
@@ -121,7 +121,7 @@ class DayEarningsPanel extends ConsumerWidget {
                 ),
               const SizedBox(height: 12),
               const Text(
-                '当日收益 = 本次快照的（资产 − 成本）减去上一快照的（资产 − 成本）；负债不计入投资收益。合计按原始精度计算，分项四舍五入可能产生分币尾差。',
+                '当日收益根据相邻快照计算，分项剔除内部资金流转带来的历史收益迁移；负债不计入投资收益。合计按原始精度计算，分项四舍五入可能产生分币尾差。',
                 style: TextStyle(fontSize: 11, color: T.text3, height: 1.6),
               ),
             ],

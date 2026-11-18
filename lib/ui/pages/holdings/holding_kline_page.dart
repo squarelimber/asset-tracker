@@ -12,6 +12,7 @@ import '../../components/error_state.dart';
 import '../../components/kline_chart.dart';
 import '../../components/terminal_card.dart';
 import '../../components/terminal_choice.dart';
+import '../../components/transaction_details.dart';
 import '../../tokens.dart';
 import '../transaction_dialogs.dart';
 import 'holding_detail_sheet.dart';
@@ -283,18 +284,21 @@ class _HoldingChartState extends ConsumerState<_HoldingChart> {
                   const SizedBox(height: T.s2),
                   Text(Formats.date(marker.date), style: T.label()),
                   for (final transaction in marker.transactions)
-                    Padding(
-                      padding: const EdgeInsets.symmetric(vertical: T.s2),
-                      child: Text(
-                        [
-                          transaction.type == 'buy' ? '买入' : '卖出',
-                          if (transaction.price != null)
-                            '成交价 ${hide ? '****' : Formats.plainNum(transaction.price!)}',
-                          if (transaction.quantity != null)
-                            '数量 ${hide ? '****' : Formats.smartNum(transaction.quantity!)}',
-                          '金额 ${hide ? '****' : Formats.money(transaction.amount, transaction.currency)}',
-                        ].join(' · '),
-                        style: T.mono(size: 12),
+                    InkWell(
+                      onTap: () => showTransactionDetails(context, transaction),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: T.s2),
+                        child: Text(
+                          [
+                            transaction.type == 'buy' ? '买入' : '卖出',
+                            if (transaction.price != null)
+                              '成交价 ${hide ? '****' : Formats.plainNum(transaction.price!)}',
+                            if (transaction.quantity != null)
+                              '数量 ${hide ? '****' : Formats.smartNum(transaction.quantity!)}',
+                            '金额 ${hide ? '****' : Formats.money(transaction.amount, transaction.currency)}',
+                          ].join(' · '),
+                          style: T.mono(size: 12),
+                        ),
                       ),
                     ),
                 ],
