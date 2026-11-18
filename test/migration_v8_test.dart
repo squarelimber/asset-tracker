@@ -119,7 +119,7 @@ const _v7Ddl = [
 
 /// Opens the app database on top of a hand-built v7 schema and seed data,
 /// exercising the real v7 -> v8 upgrade path that production databases hit.
-Future<AppDatabase> _openOnV7() async {
+Future<AppDatabase> _openOnV7({bool partiallyUpgraded = false}) async {
   final db = AppDatabase(
     NativeDatabase.memory(
       setup: (sqlite) {
@@ -137,6 +137,21 @@ Future<AppDatabase> _openOnV7() async {
           "VALUES (1, 1, '某基金', 'mutual_fund', 'eastmoney', '110022', "
           "100, 10, 15, 'CNY', NULL, NULL, NULL, NULL, 1787000000, 1788000000);",
         );
+        if (partiallyUpgraded) {
+          sqlite.execute(
+            'ALTER TABLE holdings ADD COLUMN archived INTEGER NOT NULL DEFAULT 0',
+          );
+          sqlite.execute('UPDATE holdings SET archived = 1 WHERE id = 1');
+          sqlite.execute(
+            'ALTER TABLE holdings ADD COLUMN category_override TEXT',
+          );
+          sqlite.execute(
+            "UPDATE holdings SET category_override = 'gold' WHERE id = 1",
+          );
+          sqlite.execute(
+            "INSERT INTO transactions (account_id, holding_id, type, amount, occurred_at) VALUES (1, 1, 'buy', 1000, 1788000000)",
+          );
+        }
         // Mark the database as schema version 7 so drift runs the upgrade.
         sqlite.execute('PRAGMA user_version = 7;');
       },
@@ -146,58 +161,88 @@ Future<AppDatabase> _openOnV7() async {
 }
 
 void main() {
-  test('v7 -> v8 migration adds holdings.archived defaulting to false', () async {
-    final db = await _openOnV7();
-    final dao = AssetDao(db);
+  test(
+    'v7 -> v8 migration adds holdings.archived defaulting to false',
+    () async {
+      final db = await _openOnV7();
+      final dao = AssetDao(db);
 
-    // The seeded row survives the migration and reads archived = false.
-    final holdings = await dao.getHoldings();
-    expect(holdings, hasLength(1));
-    expect(holdings.single.archived, isFalse);
+      // The seeded row survives the migration and reads archived = false.
+      final holdings = await dao.getHoldings();
+      expect(holdings, hasLength(1));
+      expect(holdings.single.archived, isFalse);
 
-    // Raw storage: the column exists and the default is 0.
-    // The schema has since moved on (v9 added category_override), so a v7
-    // database migrates straight through — assert at least the v8 step ran.
-    final userVersion = await db
-        .customSelect('PRAGMA user_version;')
-        .getSingle();
-    expect(userVersion.data.values.single, greaterThanOrEqualTo(8));
+      // Raw storage: the column exists and the default is 0.
+      // The schema has since moved on (v9 added category_override), so a v7
+      // database migrates straight through — assert at least the v8 step ran.
+      final userVersion = await db
+          .customSelect('PRAGMA user_version;')
+          .getSingle();
+      expect(userVersion.data.values.single, greaterThanOrEqualTo(8));
 
-    final archivedValue = await db
-        .customSelect('SELECT archived FROM holdings WHERE id = 1;')
-        .getSingle();
-    expect(archivedValue.data.values.single, 0);
+      final archivedValue = await db
+          .customSelect('SELECT archived FROM holdings WHERE id = 1;')
+          .getSingle();
+      expect(archivedValue.data.values.single, 0);
 
-    // setArchived flips the flag and bumps updated_at. Dates are stored as
-    // unix seconds, so use a whole-second timestamp for an exact round trip.
-    final now = DateTime(2026, 9, 4, 10, 30);
-    await dao.setArchived(1, true, now: now);
-    final archived = await dao.getHolding(1);
-    expect(archived!.archived, isTrue);
-    expect(archived.updatedAt, now);
+      // setArchived flips the flag and bumps updated_at. Dates are stored as
+      // unix seconds, so use a whole-second timestamp for an exact round trip.
+      final now = DateTime(2026, 9, 4, 10, 30);
+      await dao.setArchived(1, true, now: now);
+      final archived = await dao.getHolding(1);
+      expect(archived!.archived, isTrue);
+      expect(archived.updatedAt, now);
 
-    // Restore works too.
-    await dao.setArchived(1, false, now: now);
-    expect((await dao.getHolding(1))!.archived, isFalse);
+      // Restore works too.
+      await dao.setArchived(1, false, now: now);
+      expect((await dao.getHolding(1))!.archived, isFalse);
 
-    // Writes still work after the migration.
-    await dao.createAccount(AccountsCompanion.insert(
-      name: '新账户2',
-      type: 'general',
-    ));
-    expect(await dao.getAccounts(), hasLength(2));
-    await db.close();
-  });
+      // Writes still work after the migration.
+      await dao.createAccount(
+        AccountsCompanion.insert(name: '新账户2', type: 'general'),
+      );
+      expect(await dao.getAccounts(), hasLength(2));
+      await db.close();
+    },
+  );
 
-  test('v8 database created from scratch still works (no regression)', () async {
-    final db = AppDatabase(NativeDatabase.memory());
-    final dao = AssetDao(db);
-    await dao.createAccount(AccountsCompanion.insert(
-      name: '全新库',
-      type: 'general',
-    ));
-    final accounts = await dao.getAccounts();
-    expect(accounts.single.name, '全新库');
-    await db.close();
-  });
+  test(
+    'a partially upgraded database resumes without modifying existing data',
+    () async {
+      final db = await _openOnV7(partiallyUpgraded: true);
+      addTearDown(db.close);
+      final dao = AssetDao(db);
+
+      final holding = (await dao.getHoldings()).single;
+      expect(holding.name, '某基金');
+      expect(holding.archived, isTrue);
+      expect(holding.categoryOverride, 'gold');
+      expect(holding.costRecorded, isTrue);
+      final trade = (await dao.getTransactions()).single;
+      expect(trade.holdingId, holding.id);
+      expect(trade.amount, 1000);
+      expect(trade.internalMove, isFalse);
+      expect(
+        (await db.customSelect('PRAGMA user_version').getSingle())
+            .data
+            .values
+            .single,
+        db.schemaVersion,
+      );
+    },
+  );
+
+  test(
+    'v8 database created from scratch still works (no regression)',
+    () async {
+      final db = AppDatabase(NativeDatabase.memory());
+      final dao = AssetDao(db);
+      await dao.createAccount(
+        AccountsCompanion.insert(name: '全新库', type: 'general'),
+      );
+      final accounts = await dao.getAccounts();
+      expect(accounts.single.name, '全新库');
+      await db.close();
+    },
+  );
 }

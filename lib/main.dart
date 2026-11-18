@@ -51,7 +51,7 @@ Future<void> main() async {
 }
 
 /// Minimal error screen shown when the database cannot be opened or
-/// migrated. The user can clear app data to start fresh.
+/// migrated. Keep the local database available for recovery.
 class _FatalStartupErrorApp extends StatelessWidget {
   const _FatalStartupErrorApp({required this.error});
 
@@ -66,7 +66,7 @@ class _FatalStartupErrorApp extends StatelessWidget {
             padding: const EdgeInsets.all(24),
             child: SelectableText(
               '数据库初始化失败：$error\n\n'
-              '如果问题持续，请清除应用数据后重试（会丢失本地未同步的数据）。',
+              '请关闭其他应用窗口或标签页后重新打开。如仍无法进入，请保留本地应用数据和上方错误信息。',
               textAlign: TextAlign.center,
             ),
           ),
