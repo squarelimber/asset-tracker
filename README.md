@@ -13,7 +13,7 @@ Most portfolio apps force a choice: a cloud service that wants your financial da
 ### Tracking
 
 - **13 asset types** — cash, bank deposits, demand & fixed wealth products, bank wealth management (银行理财), stocks, on- & off-exchange funds, gold accumulation, bonds, crypto, futures, property, and liabilities (credit cards & loans)
-- **Transaction log as the source of truth** — buy / sell / dividend / income / expense / transfer / card spend / unit split; deleting an entry rolls the holding back automatically
+- **Transaction history and corrections** — log buys, sells, dividends, income, expenses, transfers, card spending, and unit splits. View execution details and preview changes to trade amounts, quantities, or prices and their effect on linked holdings. Date edits check historical balances before saving.
 - **Amount-based and share-based holdings** — a deposit account and a stock position are modelled the way they actually behave, with cost basis conserved across transfers and redemptions
 - **Liabilities tracked separately** — repayments and borrowing are plain transfers; debt never pollutes asset totals or allocation ratios
 - **Manual category override** — a gold ETF is a fund by product but gold by exposure; file it where it belongs and every allocation view follows
@@ -23,23 +23,24 @@ Most portfolio apps force a choice: a cloud service that wants your financial da
 - **Automatic quotes from free public sources** — A-shares & exchange funds (Sina / Tencent), fund NAVs (Eastmoney), gold (SGE spot), FX rates, crypto (CoinGecko)
 - **Web endpoints as fallback** — on desktop, each source falls back to its CORS-friendly web twin if the primary fails
 - **Sanity guard** — a quote that jumps implausibly against the last known price is rejected instead of written (a mis-mapped ticker cannot fabricate a 99% loss)
-- **Bank wealth products without an API** — update the NAV manually; daily accrual is interpolated between your updates along the actual income/expense flows, so both ends are always real
+- **Manual NAV for bank wealth products** — record or backfill dated NAV observations. Historical valuations use the observed NAV on each recorded date and interpolate between observations.
 - **Corporate actions** — dividend cost-basis method (ex-dividend drops don't distort returns), unit splits, forward-adjusted price history
 
 ### Analysis
 
-- **Dashboard** — net-worth curve, allocation, per-type and per-category breakdowns, per-holding today's P&L
-- **Earnings calendar** — daily profit by month on a cost basis (immune to money moving between accounts); tap a day for the per-holding detail
+- **Dashboard** — historical portfolio trends, estimated intraday portfolio P&L for covered holdings, per-holding daily P&L, and allocation by type and category
+- **Earnings calendars** — review daily portfolio profit or monthly profit by product. Daily details show each holding's contribution, including realized gains on sales whose proceeds leave the tracked portfolio.
+- **Risk statistics** — estimated Sharpe ratio and annualized volatility from consecutive usable daily snapshots, with an adjustable risk-free rate
 - **Multi-currency cost basis** — record the purchase-time FX rate per holding; currency gains and FX gains are accounted separately
 - **CSV export** — holdings, transactions, snapshots
 
 ### Peace of mind
 
 - **Local-first & private** — SQLite on device (IndexedDB on web). No account, no cloud, no analytics
-- **Optional self-hosted sync** — a small Dart server you run yourself (Docker included); opaque last-write-wins merge with tombstones, your data never touches anyone else's machine
+- **Optional self-hosted sync** — run your own Dart sync server (Docker included). Clients reconcile independently recorded trades against a common opening balance and report conflicts they cannot resolve safely.
 - **Rule-engine alerts** — concentration risk, allocation drift, daily drawdown, cashflow reminders (loan / maturity / auto-invest dates); fired rules push local notifications, once per rule per day
 - **Privacy mode** — one toggle masks every amount on the overview
-- **Backup & restore** — JSON export/import preserving ids and transfer links
+- **Backup & restore** — JSON export/import preserves record IDs, transfer links, archived holdings, and the transaction timestamps used to validate historical snapshots
 
 ## Tech Stack
 
@@ -50,7 +51,7 @@ Most portfolio apps force a choice: a cloud service that wants your financial da
 | Database | Drift (SQLite; sqlite3.wasm on web) |
 | Charts | fl_chart |
 | Market data | Sina / Tencent / Eastmoney / SGE / CoinGecko free endpoints |
-| Sync | Optional self-hosted Dart (shelf) server, LWW + tombstones |
+| Sync | Optional self-hosted Dart (shelf) server with ledger reconciliation |
 | CI | GitHub Actions (analyze → test → web / Windows / Android builds, Pages deploy) |
 
 ## Getting Started
@@ -88,14 +89,16 @@ lib/
   data/         # drift tables & DAOs
   domain/       # calculators (portfolio, cost basis, earnings, smooth history), rule engine
   services/     # market data, alerts, backup, snapshots, migrations, CSV export
-  sync/         # multi-device sync (wire format, LWW merge, client)
+  sync/         # multi-device sync, wire format, and merge client
   ui/           # design tokens, shell, shared components, pages
 server/         # optional self-hosted sync server (Dart/shelf, Docker)
 ```
 
 ## Releases
 
-Latest: **v0.11.6** — see [CHANGELOG.md](CHANGELOG.md) for per-version notes. Releases ship Android APKs, Windows zip and the web build via GitHub Actions.
+- Download Android APKs and the Windows x64 ZIP. [Latest GitHub Release](https://github.com/squarelimber/asset-tracker/releases/latest)
+- Open the web build deployed by GitHub Actions. [Web app](https://squarelimber.github.io/asset-tracker/)
+- Read the changes in each release. [Changelog](CHANGELOG.md)
 
 ## Disclaimer
 
