@@ -12,6 +12,8 @@ class AssetOverviewCard extends StatelessWidget {
     required this.netWorth,
     required this.todayProfit,
     this.todayPct,
+    this.todayLabel = '今日盈亏',
+    this.todaySource,
     this.hidden = false,
     this.onToggleHidden,
     this.onOpenEarnings,
@@ -23,6 +25,8 @@ class AssetOverviewCard extends StatelessWidget {
   final double netWorth;
   final double? todayProfit;
   final double? todayPct;
+  final String todayLabel;
+  final String? todaySource;
   final bool hidden;
   final VoidCallback? onToggleHidden;
   final VoidCallback? onOpenEarnings;
@@ -96,10 +100,11 @@ class AssetOverviewCard extends StatelessWidget {
               flex: 2,
               child: _earningsAction(
                 _metric(
-                  '今日盈亏',
+                  todayLabel,
                   _profit,
                   color: _profitColor,
                   detail: _percentage,
+                  source: todaySource,
                   opensDetails: _todayAction != null,
                 ),
               ),
@@ -138,15 +143,30 @@ class AssetOverviewCard extends StatelessWidget {
       _number(_amount(netWorth), size: 28),
       const SizedBox(height: 14),
       _earningsAction(
-        Row(
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _metricLabel('今日盈亏', opensDetails: _todayAction != null),
-            const SizedBox(width: T.s2),
-            Flexible(child: _number(_profit, size: 14, color: _profitColor)),
-            if (_percentage != null) ...[
-              const SizedBox(width: 8),
-              Text(_percentage!, style: T.mono(size: 11, color: _profitColor)),
-            ],
+            Row(
+              children: [
+                _metricLabel(todayLabel, opensDetails: _todayAction != null),
+                const SizedBox(width: T.s2),
+                Flexible(
+                  child: _number(_profit, size: 14, color: _profitColor),
+                ),
+                if (_percentage != null) ...[
+                  const SizedBox(width: 8),
+                  Text(
+                    _percentage!,
+                    style: T.mono(size: 11, color: _profitColor),
+                  ),
+                ],
+              ],
+            ),
+            if (todaySource case final source?)
+              Padding(
+                padding: const EdgeInsets.only(top: T.s1),
+                child: Text(source, style: T.label(color: T.text3)),
+              ),
           ],
         ),
       ),
@@ -192,7 +212,7 @@ class AssetOverviewCard extends StatelessWidget {
             onTap: _todayAction,
             borderRadius: BorderRadius.circular(T.rInput),
             child: Tooltip(
-              message: '查看当日收益明细',
+              message: onOpenTodayDetail == null ? '查看收益日历' : '查看今日走势与收益明细',
               child: ConstrainedBox(
                 constraints: const BoxConstraints(minHeight: 44),
                 child: child,
@@ -220,6 +240,7 @@ class AssetOverviewCard extends StatelessWidget {
     double size = 22,
     Color? color,
     String? detail,
+    String? source,
     bool opensDetails = false,
   }) => Column(
     crossAxisAlignment: CrossAxisAlignment.start,
@@ -231,6 +252,7 @@ class AssetOverviewCard extends StatelessWidget {
         const SizedBox(height: 4),
         Text(detail, style: T.mono(size: 11, color: color)),
       ],
+      if (source != null) Text(source, style: T.label(color: T.text3)),
     ],
   );
 

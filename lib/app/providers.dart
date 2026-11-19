@@ -95,6 +95,23 @@ final cnyRatesProvider = FutureProvider<Map<String, double>>((ref) async {
   return ref.read(marketServiceProvider).loadCnyRates(currencies);
 });
 
+/// Ledger currencies may outlive the holdings using them.
+final transactionCnyRatesProvider = FutureProvider<Map<String, double>>((ref) async {
+  final txns = ref.watch(transactionsProvider.future);
+  final holdingRates = ref.watch(cnyRatesProvider.future);
+  final market = ref.watch(marketServiceProvider);
+  final currencies = (await txns).map((row) => row.currency.toUpperCase()).toSet();
+  final rates = Map<String, double>.of(await holdingRates);
+  final missing = currencies.where((code) {
+    final rate = rates[code];
+    return code != 'CNY' && (rate == null || !rate.isFinite || rate <= 0);
+  }).toList();
+  if (missing.isNotEmpty) {
+    rates.addAll(await market.loadCnyRates(missing));
+  }
+  return rates;
+});
+
 /// Market data orchestration engine.
 final marketServiceProvider = Provider<MarketService>(
   (ref) => MarketService(ref.watch(daoProvider)),
@@ -195,11 +212,15 @@ const historySyncV6Key = 'history_sync_v6';
 /// calendar's today cell. Null when today's snapshot is missing — see
 /// [todayEarningOf], which refuses to relabel an earlier day's move as
 /// today's.
-final todayEarningProvider = Provider<({double profit, double? pct})?>((ref) {
-  final list = ref.watch(snapshotsProvider).value;
-  if (list == null) return null;
-  return todayEarningOf(list, now: DateTime.now());
-});
+final todayEarningProvider =
+    Provider<({double profit, double? pct, DateTime updatedAt})?>((ref) {
+      final list = ref.watch(snapshotsProvider).value;
+      if (list == null) return null;
+      final value = todayEarningOf(list, now: DateTime.now());
+      return value == null
+          ? null
+          : (profit: value.profit, pct: value.pct, updatedAt: list.last.createdAt);
+    });
 
 /// Emits whenever the history dirty flag flips (settings row watch), so
 /// the history provider can rebuild in-session after a startup sync
@@ -270,23 +291,42 @@ final productEarningsServiceProvider = Provider<ProductEarningsService>(
   ),
 );
 
-/// Per-product earnings through [year], using the same recorded states as
-/// the calendar and retaining the full preceding baseline for Jan 1.
+/// Per-product earnings through [year], with the prior baseline retained.
+final _productEarningsInputsProvider = FutureProvider.autoDispose.family((
+  ref, int year,
+) async {
+  ref.watch(historySyncProvider);
+  final snapshots = ref.watch(snapshotsProvider.future);
+  final transactions = ref.watch(transactionsProvider.future);
+  final end = '$year-12-31';
+  return (
+    snapshots: (await snapshots).where((s) => s.date.compareTo(end) <= 0).toList(),
+    transactions: await transactions,
+  );
+});
+
 final productEarningsProvider = FutureProvider.autoDispose
     .family<List<ProductEarnings>, int>((ref, year) async {
-      ref.watch(historySyncProvider);
-      final snapshotsFuture = ref.watch(snapshotsProvider.future);
-      final transactionsFuture = ref.watch(transactionsProvider.future);
-      final snapshots = await snapshotsFuture;
-      final transactions = await transactionsFuture;
-      final end = '$year-12-31';
-      // Keep the complete baseline: filtering the series first loses the
-      // gain on Jan 1 and creates another month/year-boundary discrepancy.
+      final inputs = await ref.watch(_productEarningsInputsProvider(year).future);
       return productsFromSnapshots(
-        snapshots.where((s) => s.date.compareTo(end) <= 0).toList(),
-        transactions: transactions,
+        inputs.snapshots,
+        transactions: inputs.transactions,
         attributionRequiredFrom: '$year-01-01',
       );
+    });
+
+final productEarningsReportProvider = FutureProvider.autoDispose
+    .family<ProductEarningsReport, int>((ref, year) async {
+      final inputs = await ref.watch(_productEarningsInputsProvider(year).future);
+      final issues = <EarningsAttributionIssue>[];
+      final products = productsFromSnapshots(
+        inputs.snapshots,
+        transactions: inputs.transactions,
+        attributionRequiredFrom: '$year-01-01',
+        onIssue: issues.add,
+      );
+      issues.sort((a, b) => b.date.compareTo(a.date));
+      return ProductEarningsReport(products, issues: issues);
     });
 
 // ---------------------------------------------------------------------------

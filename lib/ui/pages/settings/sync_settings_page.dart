@@ -27,6 +27,20 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
   final _urlController = TextEditingController();
   final _tokenController = TextEditingController();
   bool _autoSync = false;
+  bool _loaded = false;
+  ({String url, String token, bool autoSync})? _saved;
+  String? _lastServerUrl;
+
+  ({String url, String token, bool autoSync}) get _config => (
+    url: _urlController.text.trim(),
+    token: _urlController.text.trim().isEmpty
+        ? ''
+        : _tokenController.text.trim(),
+    autoSync: _autoSync,
+  );
+
+  bool get _dirty => _config != _saved;
+  bool get _busy => !_loaded || _saving || _syncing;
   bool _saving = false;
   bool _syncing = false;
   String? _lastSyncAt;
@@ -54,6 +68,7 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
     final auto = await dao.getSetting(SyncSettingsKeys.autoSync);
     final lastSyncAt = await dao.getSetting(SyncSettingsKeys.lastSyncAt);
     final lastRev = await dao.getSetting(SyncSettingsKeys.lastRev);
+    final lastServerUrl = await dao.getSetting(SyncSettingsKeys.lastServerUrl);
     if (!mounted) return;
     setState(() {
       _urlController.text = url ?? '';
@@ -61,63 +76,80 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
       _autoSync = auto == 'true';
       _lastSyncAt = lastSyncAt;
       _lastRev = lastRev == null ? null : int.tryParse(lastRev);
+      _lastServerUrl = lastServerUrl;
+      _saved = _config;
+      _loaded = true;
     });
   }
 
-  Future<void> _save() async {
-    final url = _urlController.text.trim();
-    final error = url.isEmpty ? null : validateServerUrl(url);
+  Future<void> _save({bool sync = false}) async {
+    if (_busy) return;
+    final config = _config;
+    final url = config.url;
+    final error = url.isEmpty
+        ? (sync ? '请先填写服务器地址' : null)
+        : validateServerUrl(url);
     if (error != null) {
-      setState(() => _error = error);
+      setState(() {
+        _error = error;
+        _result = null;
+      });
       return;
     }
     setState(() {
-      _saving = true;
-      _error = null;
-    });
-    final dao = ref.read(daoProvider);
-    if (url.isEmpty) {
-      await dao.setSetting(SyncSettingsKeys.serverUrl, '');
-      await dao.setSetting(SyncSettingsKeys.token, '');
-    } else {
-      await dao.setSetting(SyncSettingsKeys.serverUrl, url);
-      await dao.setSetting(SyncSettingsKeys.token, _tokenController.text.trim());
-    }
-    await dao.setSetting(SyncSettingsKeys.autoSync, _autoSync ? 'true' : 'false');
-    if (!mounted) return;
-    setState(() {
-      _saving = false;
-      _result = url.isEmpty ? '已清除同步配置' : '已保存，可立即同步';
-    });
-  }
-
-  Future<void> _syncNow() async {
-    final url = _urlController.text.trim();
-    if (url.isEmpty) {
-      setState(() => _error = '请先填写服务器地址');
-      return;
-    }
-    setState(() {
-      _syncing = true;
+      _saving = !sync;
+      _syncing = sync;
       _error = null;
       _result = null;
     });
-    final result = await ref.read(syncServiceProvider).sync();
-    if (!mounted) return;
-    if (result.ok && result.dataChanged) {
-      // Source rows changed: rebuild the derived history snapshots right
-      // away so today's earnings reflects the merged holdings/transactions.
-      ref.invalidate(historySyncProvider);
-    }
-    setState(() {
-      _syncing = false;
-      if (result.ok) {
-        _result = '同步完成：更新 ${result.changed} 行，冲突 ${result.conflicts} 处（自动取较新版本）';
-      } else {
-        _error = result.message;
+    final dao = ref.read(daoProvider);
+    try {
+      if (_dirty) {
+        await dao.transaction(() async {
+          await dao.setSetting(SyncSettingsKeys.serverUrl, url);
+          await dao.setSetting(SyncSettingsKeys.token, config.token);
+          await dao.setSetting(
+            SyncSettingsKeys.autoSync,
+            config.autoSync.toString(),
+          );
+        });
+        _saved = config;
       }
-      _lastSyncAt = result.ok ? DateTime.now().toIso8601String() : _lastSyncAt;
-    });
+      if (!mounted) return;
+      if (sync) {
+        final result = await ref
+            .read(syncServiceProvider)
+            .sync(target: (url: url, token: config.token));
+        if (!mounted) return;
+        if (result.ok && result.dataChanged) {
+          ref.invalidate(historySyncProvider);
+        }
+        setState(() {
+          if (result.ok) {
+            _lastSyncAt = DateTime.now().toIso8601String();
+            _lastRev = result.rev;
+            _lastServerUrl = url;
+            _result =
+                '已与 ${_serverLabel(url)} 同步 · 更新 ${result.changed} 条 · 冲突 ${result.conflicts} 处';
+          } else {
+            _error = '${_serverLabel(url)} 同步失败：${result.message ?? '请重试'}';
+          }
+        });
+      } else {
+        setState(
+          () => _result = url.isEmpty ? '已清除同步配置' : '已保存 ${_serverLabel(url)}',
+        );
+      }
+    } catch (_) {
+      if (mounted) setState(() => _error = '保存同步设置失败，请重试');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _saving = false;
+          _syncing = false;
+        });
+      }
+    }
   }
 
   @override
@@ -138,6 +170,8 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
               children: [
                 TerminalTextField(
                   controller: _urlController,
+                  enabled: !_busy,
+                  onChanged: (_) => setState(() {}),
                   label: '服务器地址',
                   hint: 'http://192.168.1.100:8787',
                   keyboardType: TextInputType.url,
@@ -145,6 +179,8 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
                 const SizedBox(height: T.s3),
                 TerminalTextField(
                   controller: _tokenController,
+                  enabled: !_busy,
+                  onChanged: (_) => setState(() {}),
                   label: '访问令牌（可选）',
                   hint: '与服务器 ASSET_SYNC_TOKEN 一致',
                   obscureText: true,
@@ -155,7 +191,9 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
                   title: const Text('启动时自动同步'),
                   subtitle: const Text('打开应用时后台静默同步一次'),
                   value: _autoSync,
-                  onChanged: (v) => setState(() => _autoSync = v),
+                  onChanged: _busy
+                      ? null
+                      : (v) => setState(() => _autoSync = v),
                 ),
               ],
             ),
@@ -165,7 +203,7 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
             children: [
               Expanded(
                 child: FilledButton.icon(
-                  onPressed: _saving ? null : _save,
+                  onPressed: _busy || !_dirty ? null : () => _save(),
                   icon: const Icon(Icons.save_outlined),
                   label: const Text('保存设置'),
                 ),
@@ -173,7 +211,7 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
               const SizedBox(width: T.s3),
               Expanded(
                 child: FilledButton.tonalIcon(
-                  onPressed: _syncing ? null : _syncNow,
+                  onPressed: _busy ? null : () => _save(sync: true),
                   icon: _syncing
                       ? const SizedBox(
                           width: 16,
@@ -181,7 +219,13 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
                       : const Icon(Icons.sync),
-                  label: Text(_syncing ? '同步中…' : '立即同步'),
+                  label: Text(
+                    _syncing
+                        ? '同步中…'
+                        : _dirty
+                        ? '保存并同步'
+                        : '立即同步',
+                  ),
                 ),
               ),
             ],
@@ -200,9 +244,16 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
             child: DataRow(
               leading: const Icon(Icons.schedule),
               title: '上次同步',
-              subtitle: Text(_lastSyncAt == null
-                  ? '尚未同步过'
-                  : '${_formatTime(_lastSyncAt!)}（服务器版本 $_lastRev）'),
+              subtitle: Text(
+                _lastSyncAt == null
+                    ? '尚未同步过'
+                    : [
+                        _formatTime(_lastSyncAt!),
+                        if (_lastServerUrl case final server?)
+                          _serverLabel(server),
+                        if (_lastRev case final rev?) '服务器版本 $rev',
+                      ].join(' · '),
+              ),
               trailing: const SizedBox.shrink(),
             ),
           ),
@@ -215,6 +266,16 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
         ],
       ),
     );
+  }
+
+  static String _serverLabel(String url) {
+    final uri = Uri.parse(url);
+    return Uri(
+      scheme: uri.scheme,
+      host: uri.host,
+      port: uri.port,
+      path: uri.path,
+    ).toString();
   }
 
   static String _formatTime(String iso) {

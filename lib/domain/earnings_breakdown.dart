@@ -4,6 +4,7 @@ import '../data/database.dart';
 import 'daily_earnings.dart';
 import 'holding_valuation.dart';
 import 'product_monthly_earnings.dart';
+import 'transaction_identity.dart';
 
 class HoldingDayEarning {
   const HoldingDayEarning({
@@ -20,6 +21,27 @@ class HoldingDayEarning {
   final double profit;
 }
 
+class EarningsAttributionIssue {
+  const EarningsAttributionIssue({
+    required this.date,
+    required this.message,
+    this.canRebuild = false,
+    this.transactionId,
+  });
+
+  final String date;
+  final String message;
+  final bool canRebuild;
+  final int? transactionId;
+}
+
+class ProductEarningsReport {
+  const ProductEarningsReport(this.products, {this.issues = const []});
+
+  final List<ProductEarnings> products;
+  final List<EarningsAttributionIssue> issues;
+}
+
 class EarningsBreakdown {
   const EarningsBreakdown({
     required this.date,
@@ -28,6 +50,7 @@ class EarningsBreakdown {
     this.baselineDate,
     this.verified = false,
     this.issue,
+    this.attributionIssue,
   });
   final String date;
   final String? baselineDate;
@@ -35,6 +58,7 @@ class EarningsBreakdown {
   final List<HoldingDayEarning> rows;
   final bool verified;
   final String? issue;
+  final EarningsAttributionIssue? attributionIssue;
   double get detailTotal => rows.fold(0.0, (sum, row) => sum + row.profit);
 }
 
@@ -61,14 +85,16 @@ EarningsBreakdown earningsBreakdownOf(
       ? <DayHoldingValue>[]
       : snapshotHoldingValues(previous);
   if (currentValues == null || previousValues == null) {
+    final missing = _snapshotIssue(
+      date, currentValues == null ? current.date : previous!.date,
+    );
     return EarningsBreakdown(
       date: date,
       baselineDate: previous?.date,
       profit: expected,
       rows: const [],
-      issue: _missingSnapshotDetail(
-        currentValues == null ? current.date : previous!.date,
-      ),
+      issue: missing.message,
+      attributionIssue: missing,
     );
   }
   final before = {
@@ -135,7 +161,8 @@ EarningsBreakdown earningsBreakdownOf(
     profit: expected,
     rows: rows,
     verified: issue == null && (total - expected).abs() < 0.000001,
-    issue: issue,
+    issue: issue?.message,
+    attributionIssue: issue,
   );
 }
 
@@ -206,10 +233,10 @@ Map<int, double> internalTransferProfitAdjustments(
   // Pair only unambiguous records with the same timestamp, amount and moved
   // cost; guessing among duplicate legacy rows could attribute gains wrongly.
   bool matches(TransactionRow buy, TransactionRow sell) =>
-      buy.occurredAt == sell.occurredAt &&
-      buy.amount == sell.amount &&
       buy.costMovedAmount != null &&
-      buy.costMovedAmount == sell.costMovedAmount;
+      buy.costMovedAmount == sell.costMovedAmount &&
+      hasSameRedemption(buy, sell);
+
   for (final buy in internalBuys) {
     final matchingSells = internalSells.where((sell) => matches(buy, sell));
     if (matchingSells.length != 1) continue;
@@ -247,9 +274,14 @@ Set<int> _knownLiabilities(
   return liabilities.difference(assets);
 }
 
-String _missingSnapshotDetail(String date) => '$date 的快照缺少可核对的产品明细。请重建历史快照后重试。';
+EarningsAttributionIssue _snapshotIssue(String affected, String missing) =>
+    EarningsAttributionIssue(
+      date: affected,
+      message: '$missing 的快照缺少可核对的产品明细。请重建历史快照后重试。',
+      canRebuild: true,
+    );
 
-String? _incompleteAttribution(
+EarningsAttributionIssue? _incompleteAttribution(
   List<TransactionRow> transactions,
   String previousDate,
   String currentDate,
@@ -262,16 +294,14 @@ String? _incompleteAttribution(
     return day.compareTo(previousDate) > 0 && day.compareTo(currentDate) <= 0;
   }).toList();
 
-  bool matchingLegs(TransactionRow a, TransactionRow b) =>
-      a.occurredAt == b.occurredAt &&
-      a.amount == b.amount &&
-      a.costMovedAmount != null &&
-      a.costMovedAmount == b.costMovedAmount &&
-      a.currency.toUpperCase() == b.currency.toUpperCase();
-
   for (final t in interval) {
-    String issue(String reason) =>
-        '${todayKey(t.occurredAt.toLocal())} 的${TransactionType.fromStorage(t.type).label}流水$reason';
+    EarningsAttributionIssue issue(String reason, {bool canRebuild = false}) =>
+        EarningsAttributionIssue(
+          date: currentDate,
+          message: '${todayKey(t.occurredAt.toLocal())} 的${TransactionType.fromStorage(t.type).label}流水$reason',
+          transactionId: t.id,
+          canRebuild: canRebuild,
+        );
     final type = TransactionType.fromStorage(t.type);
     final isBuy = type == TransactionType.buy;
     final isSell = type == TransactionType.sell;
@@ -293,7 +323,7 @@ String? _incompleteAttribution(
       continue;
     }
     if (t.updatedAt.isAfter(snapshotCreatedAt)) {
-      return issue('晚于收益快照更新，请重建历史快照。');
+      return issue('晚于收益快照更新，请重建历史快照。', canRebuild: true);
     }
     // Debt is not a product in the asset-side return. A known cash/debt
     // transfer has no second product that should receive an adjustment.
@@ -331,12 +361,12 @@ String? _incompleteAttribution(
                 (isBuy
                     ? other.type == 'sell' && other.cashTargetId == null
                     : other.type == 'buy' && other.cashSourceId == null) &&
-                matchingLegs(t, other),
+                hasSameRedemption(t, other),
           )
           .toList();
       if (opposite.length != 1) return issue('无法唯一匹配对应的赎回或买入记录。');
       if (opposite.single.updatedAt.isAfter(snapshotCreatedAt)) {
-        return issue('的配对记录晚于收益快照更新，请重建历史快照。');
+        return issue('的配对记录晚于收益快照更新，请重建历史快照。', canRebuild: true);
       }
       if (!ids.contains(t.holdingId) ||
           !ids.contains(opposite.single.holdingId) ||
@@ -348,7 +378,7 @@ String? _incompleteAttribution(
             other.internalMove &&
             other.type == t.type &&
             (isBuy ? other.cashSourceId == null : other.cashTargetId == null) &&
-            matchingLegs(other, opposite.single),
+            hasSameRedemption(other, opposite.single),
       );
       if (sameSide.length != 1) return issue('无法唯一匹配对应的赎回或买入记录。');
     } else {
@@ -380,14 +410,24 @@ List<ProductEarnings> productsFromSnapshots(
   List<SnapshotRow> snapshots, {
   List<TransactionRow> transactions = const [],
   String? attributionRequiredFrom,
+  void Function(EarningsAttributionIssue)? onIssue,
 }) {
   final ordered = snapshots.where((s) => s.currency == 'CNY').toList()
     ..sort((a, b) => a.date.compareTo(b.date));
   final decoded = <String, List<DayHoldingValue>>{};
   final identities = <int, DayHoldingValue>{};
+  bool inWindow(String day) =>
+      attributionRequiredFrom == null || day.compareTo(attributionRequiredFrom) >= 0;
+  void report(EarningsAttributionIssue issue) {
+    if (onIssue == null) throw StateError(issue.message);
+    if (inWindow(issue.date)) onIssue(issue);
+  }
   for (final snapshot in ordered) {
     final values = snapshotHoldingValues(snapshot);
-    if (values == null) throw StateError(_missingSnapshotDetail(snapshot.date));
+    if (values == null) {
+      report(_snapshotIssue(snapshot.date, snapshot.date));
+      continue;
+    }
     decoded[snapshot.date] = values;
     for (final value in values) {
       if (!value.liability) identities[value.holdingId] = value;
@@ -397,12 +437,19 @@ List<ProductEarnings> productsFromSnapshots(
   for (var i = 1; i < ordered.length; i++) {
     final previous = ordered[i - 1];
     final current = ordered[i];
+    final previousValues = decoded[previous.date];
+    final currentValues = decoded[current.date];
+    if (currentValues == null) continue;
+    if (previousValues == null) {
+      report(_snapshotIssue(current.date, previous.date));
+      continue;
+    }
     final before = {
-      for (final h in decoded[previous.date]!)
+      for (final h in previousValues)
         if (!h.liability) h.holdingId: h,
     };
     final after = {
-      for (final h in decoded[current.date]!)
+      for (final h in currentValues)
         if (!h.liability) h.holdingId: h,
     };
     final ids = _observedHoldings(before, after);
@@ -412,15 +459,10 @@ List<ProductEarnings> productsFromSnapshots(
       current.date,
       current.createdAt,
       ids,
-      _knownLiabilities(decoded[previous.date]!, decoded[current.date]!),
+      _knownLiabilities(previousValues, currentValues),
     );
     if (issue != null) {
-      if (attributionRequiredFrom == null ||
-          current.date.compareTo(attributionRequiredFrom) >= 0) {
-        throw StateError(issue);
-      }
-      // The states still form the baseline for later intervals. Their own
-      // attribution is outside the requested window and is not presented.
+      if (inWindow(current.date)) report(issue);
       continue;
     }
     adjustmentsByDate[current.date] = internalTransferProfitAdjustments(
@@ -431,6 +473,7 @@ List<ProductEarnings> productsFromSnapshots(
       snapshotCreatedAt: current.createdAt,
     );
   }
+  final latestValues = ordered.isEmpty ? null : decoded[ordered.last.date];
   return const ProductEarningsCalculator().compute([
     for (final entry in identities.entries)
       HoldingSeries(
@@ -438,20 +481,20 @@ List<ProductEarnings> productsFromSnapshots(
         name: entry.value.name,
         type: entry.value.type,
         closed:
-            ordered.isNotEmpty &&
-            !(decoded[ordered.last.date] ?? []).any(
+            latestValues != null &&
+            !latestValues.any(
               (h) =>
                   !h.liability &&
                   h.holdingId == entry.key &&
                   (h.value != 0 || h.cost != 0),
             ),
         days: [
-          for (final snapshot in ordered)
+          for (final snapshot in decoded.entries)
             _holdingDay(
-              snapshot.date,
+              snapshot.key,
               entry.key,
-              decoded[snapshot.date]!,
-              adjustmentsByDate[snapshot.date]?[entry.key] ?? 0,
+              snapshot.value,
+              adjustmentsByDate[snapshot.key]?[entry.key] ?? 0,
             ),
         ],
       ),

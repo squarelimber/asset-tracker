@@ -4,7 +4,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../app/providers.dart';
 import '../../../core/enums.dart';
 import '../../../core/formats.dart';
-import '../../../core/history_sync.dart';
 import '../../../data/database.dart';
 import '../../../domain/closed_holding.dart';
 import '../../../domain/holding_cost.dart';
@@ -346,7 +345,7 @@ class _TransactionRow extends ConsumerWidget {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('删除流水'),
-        content: const Text('删除后持仓会自动回滚到该笔交易前的状态。'),
+        content: const Text('删除后会回滚持仓。若为赎回出资，关联的赎回和买入会一起撤销。'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
@@ -363,9 +362,6 @@ class _TransactionRow extends ConsumerWidget {
     if (ok != true || !context.mounted) return;
     final result = await ref.read(transactionServiceProvider).remove(txn.id);
     if (!context.mounted) return;
-    if (result.ok) {
-      ref.read(daoProvider).setSetting(historySyncDirtyKey, historyDirtySet);
-    }
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(result.ok ? '已删除并回滚' : (result.message ?? '删除失败')),

@@ -4,6 +4,42 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  testWidgets('shows signed money ticks and a zero baseline on a phone', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(320, 700);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: IntradayLineChart(
+            points: const [
+              (minute: 570, value: -300),
+              (minute: 575, value: 600),
+            ],
+            formatValue: (value) => '¥${value.toStringAsFixed(2)}',
+            formatAxisValue: (value) =>
+                '${value < 0 ? '-' : ''}¥${value.abs().round()}',
+            showZeroLine: true,
+            height: 150,
+          ),
+        ),
+      ),
+    );
+    final chart = tester.widget<LineChart>(find.byType(LineChart)).data;
+    expect(chart.titlesData.leftTitles.sideTitles.showTitles, isTrue);
+    expect(chart.extraLinesData.horizontalLines.single.y, 0);
+    expect(find.text('-¥500'), findsOneWidget);
+    expect(find.text('¥0'), findsOneWidget);
+    expect(find.text('¥500'), findsOneWidget);
+    expect(
+      tester.getTopLeft(find.text('09:30')).dx,
+      greaterThan(tester.getTopLeft(find.byType(LineChart)).dx),
+    );
+    expect(tester.takeException(), isNull);
+  });
+
   for (final (morningEnd, close) in [(690, 900), (720, 960)]) {
     testWidgets('compresses the lunch break after $morningEnd', (tester) async {
       await tester.pumpWidget(

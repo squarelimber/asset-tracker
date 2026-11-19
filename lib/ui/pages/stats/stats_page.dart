@@ -19,18 +19,7 @@ import 'risk_metrics_card.dart';
 final statsProvider = FutureProvider<TradeStats>((ref) async {
   final txns = await ref.watch(transactionsProvider.future);
   final holdings = await ref.watch(holdingsProvider.future);
-  final rates = Map<String, double>.of(
-    await ref.watch(cnyRatesProvider.future),
-  );
-  final missing = txns
-      .map((transaction) => transaction.currency.toUpperCase())
-      .where((currency) => currency != 'CNY' && (rates[currency] ?? 0) <= 0)
-      .toSet();
-  if (missing.isNotEmpty) {
-    rates.addAll(
-      await ref.read(marketServiceProvider).loadCnyRates(missing.toList()),
-    );
-  }
+  final rates = await ref.watch(transactionCnyRatesProvider.future);
   return const TradeStatsCalculator().compute(
     txns,
     holdings,

@@ -98,31 +98,43 @@ class HoldingKlinePage extends ConsumerWidget {
       child: ListView(
         key: PageStorageKey(holding.id),
         children: [
+          _HoldingHeader(holding: holding),
+          const SizedBox(height: T.s2),
           if (symbol != null)
-            _HoldingChart(holding: holding, symbol: symbol, source: source)
-          else
-            Padding(
-              padding: const EdgeInsets.only(bottom: T.s3),
-              child: Text(
-                holding.name,
-                style: const TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ),
+            _HoldingChart(holding: holding, symbol: symbol, source: source),
           if (symbol == null &&
               (hasManualNav(holding) ||
                   holding.assetType == AssetType.mutualFund.storageName))
             HoldingNavTrend(key: ValueKey(holding.id), holding: holding),
-          HoldingDetailSheet(
-            holding: holding,
-            showTransactionButton: symbol == null,
-          ),
+          HoldingDetailSheet(holding: holding),
         ],
       ),
     );
   }
+}
+
+class _HoldingHeader extends ConsumerWidget {
+  const _HoldingHeader({required this.holding});
+
+  final HoldingRow holding;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) => Row(
+    children: [
+      Expanded(
+        child: Text(
+          holding.name,
+          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+        ),
+      ),
+      const SizedBox(width: T.s2),
+      FilledButton.tonalIcon(
+        onPressed: () => showHoldingTransactionDialog(context, ref, holding),
+        icon: const Icon(Icons.edit_note, size: 18),
+        label: const Text('记一笔'),
+      ),
+    ],
+  );
 }
 
 class _HoldingChart extends ConsumerStatefulWidget {
@@ -189,26 +201,6 @@ class _HoldingChartState extends ConsumerState<_HoldingChart> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
-          children: [
-            Expanded(
-              child: Text(
-                holding.name,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ),
-            TextButton.icon(
-              onPressed: () =>
-                  showHoldingTransactionDialog(context, ref, holding),
-              icon: const Icon(Icons.edit_note),
-              label: const Text('记一笔'),
-            ),
-          ],
-        ),
         Text(
           '${widget.symbol.toUpperCase()} · 腾讯行情 · ${_showIntraday ? '分时' : '未复权'}',
           style: T.label(),

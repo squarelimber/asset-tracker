@@ -1,10 +1,12 @@
 import 'package:drift/drift.dart';
 
 import '../core/enums.dart';
+import '../core/formats.dart';
 import '../core/history_sync.dart';
 import '../data/asset_dao.dart';
 import '../data/database.dart';
 import 'holding_cost.dart';
+import 'transaction_identity.dart';
 
 /// Outcome of a transaction record/remove operation.
 class TransactionResult {
@@ -389,6 +391,7 @@ class TransactionService {
         note: note == null || note.isEmpty ? const Value.absent() : Value(note),
         costMovedAmount: Value(isAmountAsset ? effectiveCostOf(holding) : amount),
         internalMove: const Value(false),
+        opensHolding: const Value(true),
       ));
       return TransactionResult.success;
     } catch (e) {
@@ -408,8 +411,7 @@ class TransactionService {
   /// by [amount] directly, with the invested amount moving along (same as a
   /// plain buy deduction).
   ///
-  /// Removing either row later reverses that row's linkage only (existing
-  /// [remove] rules), so the pair is forgiving of partial cleanup.
+  /// Both ledger rows are undone together by [remove].
   Future<TransactionResult> recordBuyFundedByHolding({
     required int sourceHoldingId,
     required int targetHoldingId,
@@ -459,6 +461,7 @@ class TransactionService {
         );
 
         final when = occurredAt ?? DateTime.now();
+        final group = AssetDao.newSyncId().toString();
         await _dao.createTransaction(TransactionsCompanion.insert(
           accountId: source.accountId,
           holdingId: Value(sourceHoldingId),
@@ -471,6 +474,7 @@ class TransactionService {
           note: Value('赎回购买 ${target.name}'),
           costMovedAmount: Value(moved),
           internalMove: const Value(true),
+          redemptionGroup: Value(group),
         ));
         await _dao.createTransaction(TransactionsCompanion.insert(
           accountId: target.accountId,
@@ -489,6 +493,7 @@ class TransactionService {
           // gain/loss); reversing this row must undo exactly this number.
           costMovedAmount: Value(moved),
           internalMove: const Value(true),
+          redemptionGroup: Value(group),
         ));
       });
       return TransactionResult.okWith(moved);
@@ -524,6 +529,7 @@ class TransactionService {
         throw ArgumentError('入账份额必须大于 0');
       }
       final when = occurredAt ?? DateTime.now();
+      final group = targetHoldingId == null ? null : AssetDao.newSyncId().toString();
 
       double moved = 0;
       await _dao.transaction(() async {
@@ -551,9 +557,11 @@ class TransactionService {
           // caller reads [TransactionResult.movedCost] to set the new
           // holding's cost basis to the principal that travelled.
           internalMove: const Value(true),
+          redemptionGroup: Value(group),
         ));
         if (targetHoldingId != null && targetQuantity != null && targetQuantity > 0) {
           final target = await _getHolding(targetHoldingId);
+          if (source.id == target.id) throw ArgumentError('资金来源与目标产品不能相同');
           _assertSameCurrency(source, target);
           await _dao.createTransaction(TransactionsCompanion.insert(
             accountId: target.accountId,
@@ -567,6 +575,8 @@ class TransactionService {
             note: (note == null || note.isEmpty) ? const Value.absent() : Value(note),
             costMovedAmount: Value(moved),
             internalMove: const Value(true),
+            redemptionGroup: Value(group),
+            opensHolding: const Value(true),
           ));
         }
       });
@@ -1024,26 +1034,10 @@ class TransactionService {
         if (date.isAtSameMomentAs(local)) return TransactionResult.success;
         final now = DateTime.now();
         if (date.isAfter(now)) throw ArgumentError('调整后的交易时间晚于现在');
-        final rows = [transaction];
-        if (_isRedemptionLeg(transaction)) {
-          final atTime = await _dao.getTransactionsAt(transaction.occurredAt);
-          final matching = atTime.where(
-            (row) =>
-                _isRedemptionLeg(row) &&
-                row.amount == transaction.amount &&
-                row.currency.toUpperCase() == transaction.currency.toUpperCase() &&
-                row.costMovedAmount == transaction.costMovedAmount,
-          );
-          final opposite = matching.where((row) => row.type != transaction.type).toList();
-          if (opposite.isNotEmpty) {
-            if (opposite.length != 1 || matching.length != 2 ||
-                opposite.single.holdingId == transaction.holdingId) {
-              throw ArgumentError('关联的赎回与买入流水无法唯一匹配，日期未修改');
-            }
-            rows.add(opposite.single);
-          }
-        }
+        final partner = await _dao.getRedemptionPartner(transaction);
+        final rows = [transaction, ?partner];
         for (final row in rows) {
+          await _updateOpeningDate(row, date, now);
           await _dao.updateTransaction(row.copyWith(occurredAt: date), now: now);
         }
         await _dao.setSetting(historyFullRebuildKey, '1');
@@ -1058,58 +1052,101 @@ class TransactionService {
     }
   }
 
-  static bool _isRedemptionLeg(TransactionRow row) =>
-      row.internalMove && row.holdingId != null &&
-      row.cashSourceId == null && row.cashTargetId == null &&
-      (row.type == TransactionType.buy.storageName ||
-          row.type == TransactionType.sell.storageName);
+  Future<void> _updateOpeningDate(
+    TransactionRow row, DateTime date, DateTime now,
+  ) async {
+    final holdingId = row.holdingId;
+    if (holdingId == null) return;
+    final holding = await _getHolding(holdingId);
+    final original = holding.purchaseDate ?? holding.createdAt;
+    final opening = row.opensHolding ??
+        (todayKey(original) == todayKey(row.occurredAt) &&
+            ((row.note?.startsWith('新建持仓：') ?? false) ||
+                (isRedemptionLeg(row) &&
+                    row.type == TransactionType.buy.storageName)));
+    if (!opening) {
+      if (holding.purchaseDate != null &&
+          todayKey(date).compareTo(todayKey(original)) < 0) {
+        throw ArgumentError('交易日期不能早于持仓的建仓日期');
+      }
+      return;
+    }
+    final related = await _dao.getTransactionsForHolding(holdingId);
+    if (related.any((other) =>
+        other.id != row.id &&
+        todayKey(other.occurredAt).compareTo(todayKey(date)) < 0)) {
+      throw ArgumentError('建仓日期不能晚于该持仓的其他流水');
+    }
+    await _dao.updateHolding(holding.copyWith(purchaseDate: Value(date)), now: now);
+  }
 
   Future<TransactionResult> remove(int transactionId) async {
     try {
       await _dao.transaction(() async {
         final txn = await _dao.getTransaction(transactionId);
         if (txn == null) throw ArgumentError('流水不存在');
-        final type = TransactionType.fromStorage(txn.type);
-
-        switch (type) {
-          case TransactionType.buy:
-            await _reverseBuy(txn);
-          case TransactionType.sell:
-            await _reverseSell(txn);
-          case TransactionType.transferIn || TransactionType.transferOut:
-            // Reversing a transfer swaps the source and target; rolling the
-            // same direction back would deduct twice. Legacy transfers did
-            // not move the cash cost, so that is only rolled back when the
-            // original recording did (costMoved).
-            await _applyTransfer(
-              sourceId: txn.cashTargetId,
-              targetId: txn.cashSourceId,
-              amount: txn.amount,
-              moveCost: txn.costMoved,
-              movedCostOverride: txn.costMovedAmount,
+        final partner = await _dao.getRedemptionPartner(txn);
+        final rows = [txn, ?partner]
+          ..sort((a, b) => compareTransactionEntryOrder(b, a));
+        if (partner != null) {
+          for (final row in rows) {
+            final later = (await _dao.getTransactionsForHolding(row.holdingId!)).any(
+              (other) => other.id != partner.id && other.id != txn.id &&
+                  compareTransactionEntryOrder(other, row) > 0,
             );
-          case TransactionType.dividend:
-            await _applyDividend(txn.holdingId, -txn.amount, txn.cashTargetId);
-          case TransactionType.income:
-            await _applyCashMove(txn.cashTargetId, -txn.amount,
-                invested: true,
-                costCredit: txn.costMovedAmount == null
-                    ? null
-                    : -txn.costMovedAmount!);
-          case TransactionType.expense:
-            await _applyCashMove(txn.cashTargetId, txn.amount,
-                invested: true, costCredit: txn.costMovedAmount);
-          case TransactionType.consume:
-            await _applyConsume(txn.holdingId, -txn.amount);
-          case TransactionType.split:
-            await _reverseSplit(txn);
+            if (later) throw ArgumentError('关联持仓存在更晚的流水，请先撤销后续交易');
+          }
         }
-
-        await _dao.deleteTransaction(transactionId);
+        for (final row in rows) {
+          await _reverseTransaction(row);
+        }
+        for (final row in rows) {
+          await _dao.deleteTransaction(row.id);
+        }
+        await _dao.setSetting(historySyncDirtyKey, historyDirtySet);
+        await _dao.setSetting(historyFullRebuildKey, '1');
       });
       return TransactionResult.success;
     } catch (e) {
       return TransactionResult.fail(e is ArgumentError ? e.message.toString() : '删除失败: $e');
+    }
+  }
+
+  Future<void> _reverseTransaction(TransactionRow txn) async {
+    final type = TransactionType.fromStorage(txn.type);
+
+    switch (type) {
+      case TransactionType.buy:
+        await _reverseBuy(txn);
+      case TransactionType.sell:
+        await _reverseSell(txn);
+      case TransactionType.transferIn || TransactionType.transferOut:
+        // Reversing a transfer swaps the source and target; rolling the
+        // same direction back would deduct twice. Legacy transfers did
+        // not move the cash cost, so that is only rolled back when the
+        // original recording did (costMoved).
+        await _applyTransfer(
+          sourceId: txn.cashTargetId,
+          targetId: txn.cashSourceId,
+          amount: txn.amount,
+          moveCost: txn.costMoved,
+          movedCostOverride: txn.costMovedAmount,
+        );
+      case TransactionType.dividend:
+        await _applyDividend(txn.holdingId, -txn.amount, txn.cashTargetId);
+      case TransactionType.income:
+        await _applyCashMove(txn.cashTargetId, -txn.amount,
+            invested: true,
+            costCredit: txn.costMovedAmount == null
+                ? null
+                : -txn.costMovedAmount!);
+      case TransactionType.expense:
+        await _applyCashMove(txn.cashTargetId, txn.amount,
+            invested: true, costCredit: txn.costMovedAmount);
+      case TransactionType.consume:
+        await _applyConsume(txn.holdingId, -txn.amount);
+      case TransactionType.split:
+        await _reverseSplit(txn);
     }
   }
 
@@ -1120,7 +1157,7 @@ class TransactionService {
 
     // Moving average can only be reversed when this is the latest
     // transaction of the holding.
-    final newer = await _dao.hasNewerTransaction(holdingId, txn.id);
+    final newer = await _dao.hasNewerTransaction(holdingId, txn);
     if (newer) {
       throw ArgumentError('该持仓存在更晚的交易，请先删除更晚的流水');
     }
@@ -1168,7 +1205,7 @@ class TransactionService {
     final holdingId = txn.holdingId;
     if (holdingId == null) throw ArgumentError('卖出流水缺少持仓');
     final holding = await _getHolding(holdingId);
-    if (await _dao.hasNewerTransaction(holdingId, txn.id)) {
+    if (await _dao.hasNewerTransaction(holdingId, txn)) {
       throw ArgumentError('该持仓存在更晚的交易，请先删除更晚的流水');
     }
     final qty = txn.quantity ?? 0;
@@ -1212,7 +1249,7 @@ class TransactionService {
     if (holdingId == null) throw ArgumentError('折算流水缺少持仓');
     final ratio = txn.amount;
     if (ratio <= 0) throw ArgumentError('折算流水比例无效');
-    final newer = await _dao.hasNewerTransaction(holdingId, txn.id);
+    final newer = await _dao.hasNewerTransaction(holdingId, txn);
     if (newer) {
       throw ArgumentError('该持仓存在更晚的交易，请先删除更晚的流水');
     }

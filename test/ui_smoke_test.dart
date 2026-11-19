@@ -1,3 +1,4 @@
+import 'package:asset_tracker/domain/earnings_breakdown.dart';
 // Overflow / build regression smoke tests: every main page is pumped at a
 // phone (360x640) and a desktop (1280x800) viewport with a fully seeded
 // in-memory database. Any RenderFlex overflow or build exception is
@@ -232,6 +233,7 @@ List<Override> _overrides(AppDatabase db) => [
   quotesProvider.overrideWith((ref) async => _fakeQuotes),
   historySyncProvider.overrideWith((ref) async => null),
   productEarningsProvider.overrideWith((ref, year) async => const []),
+  productEarningsReportProvider.overrideWith((ref, year) async => const ProductEarningsReport([])),
 ];
 
 void _smokePage(String name, Widget Function() build, {required Size size}) {

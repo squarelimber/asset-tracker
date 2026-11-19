@@ -3,6 +3,7 @@ import 'dart:math';
 import '../core/enums.dart';
 import '../core/formats.dart';
 import '../data/database.dart';
+import 'transaction_identity.dart';
 import 'holding_cost.dart';
 
 /// Geometric interpolation: value on [dayIndex] of a [start]..[end] range
@@ -257,7 +258,10 @@ class SmoothHistoryCalculator {
     required double current,
   }) {
     final sorted = [...flows]
-      ..sort((a, b) => a.occurredAt.compareTo(b.occurredAt));
+      ..sort((a, b) {
+        final byTime = a.occurredAt.compareTo(b.occurredAt);
+        return byTime == 0 ? compareTransactionEntryOrder(a, b) : byTime;
+      });
     final events = <({DateTime at, double delta})>[];
     var deltaSum = 0.0;
     for (final t in sorted) {

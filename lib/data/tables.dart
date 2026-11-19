@@ -118,6 +118,16 @@ class Transactions extends Table {
   /// whose proceeds genuinely leave the tracker and do realize.
   BoolColumn get internalMove => boolean().withDefault(const Constant(false))();
 
+  /// Identifier shared by the two legs of a redemption-funded purchase.
+  TextColumn get redemptionGroup => text().nullable()();
+
+  /// Whether this flow establishes the position's historical start date.
+  /// Null leaves older transactions eligible for legacy identification.
+  BoolColumn get opensHolding => boolean().nullable()();
+
+  /// Entry order independent of the editable date and randomized row ID.
+  IntColumn get recordedAtMicros => integer().nullable()();
+
   DateTimeColumn get updatedAt => dateTime().withDefault(currentDateAndTime)();
 
   @override

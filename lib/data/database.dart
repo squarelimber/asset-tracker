@@ -22,7 +22,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase([QueryExecutor? executor]) : super(executor ?? _openConnection());
 
   @override
-  int get schemaVersion => 14;
+  int get schemaVersion => 15;
 
   static QueryExecutor _openConnection() {
     // Web requires explicit web options: sqlite3.wasm and drift_worker.js
@@ -170,6 +170,11 @@ class AppDatabase extends _$AppDatabase {
       }
       if (from < 14) {
         await _addMissingColumn(m, holdings, holdings.manualNavHistory);
+      }
+      if (from < 15) {
+        await _addMissingColumn(m, transactions, transactions.redemptionGroup);
+        await _addMissingColumn(m, transactions, transactions.opensHolding);
+        await _addMissingColumn(m, transactions, transactions.recordedAtMicros);
       }
     }),
   );

@@ -307,8 +307,16 @@ class SyncMerger {
     if (b == null) return a;
     final at = _updatedAt(a);
     final bt = _updatedAt(b);
-    final winner = bt.isAfter(at) ? b : a;
-    final other = identical(winner, a) ? b : a;
+    final newer = bt.isAfter(at) ? b : a;
+    final other = identical(newer, a) ? b : a;
+    final winner = newer.containsKey('occurredAt')
+        ? {
+            ...newer,
+            for (final field in ['redemptionGroup', 'opensHolding', 'recordedAtMicros'])
+              if (newer[field] == null && other[field] != null)
+                field: other[field],
+          }
+        : newer;
     final otherNav = other['manualNavHistory'];
     if (otherNav is! String ||
         winner['assetType'] != other['assetType'] ||

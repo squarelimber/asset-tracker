@@ -72,6 +72,8 @@ void main() {
       now: DateTime(2026),
     );
     expect(withFlow.sampleCount, 25);
+    expect(withFlow.interruptedDate, '2025-02-20');
+    expect(withFlow.interruptionReason, '当天存在交易流水');
     expect(withFlow.startDate, '2025-02-20');
     expect(withFlow.sharpe, isNull);
     final missing = [...values]..removeAt(50);
@@ -82,6 +84,8 @@ void main() {
       now: DateTime(2026),
     );
     expect(withGap.sampleCount, 24);
+    expect(withGap.interruptedDate, '2025-02-20');
+    expect(withGap.interruptionReason, '缺少每日快照');
     expect(withGap.sharpe, isNull);
   });
 

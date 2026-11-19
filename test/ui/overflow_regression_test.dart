@@ -1,3 +1,4 @@
+import 'package:asset_tracker/domain/earnings_breakdown.dart';
 import 'package:asset_tracker/app/providers.dart';
 import 'package:asset_tracker/app/theme.dart';
 import 'package:asset_tracker/core/enums.dart';
@@ -508,7 +509,7 @@ void main() {
       pe('产品乙', -50, now.year),
     ];
     final overrides = <Override>[
-      productEarningsProvider(now.year).overrideWith((ref) => products),
+      productEarningsReportProvider(now.year).overrideWith((ref) => ProductEarningsReport(products)),
       alertEventsProvider.overrideWith((ref) => Stream.value(<AlertEventRow>[])),
     ];
     await pumpPage(tester, const ProductEarningsCalendarPage(), const Size(360, 640), overrides: overrides);

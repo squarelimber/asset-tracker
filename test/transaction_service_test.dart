@@ -1,4 +1,4 @@
-import 'package:drift/drift.dart';
+import 'package:drift/drift.dart' hide isNotNull, isNull;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -7,6 +7,8 @@ import 'package:asset_tracker/core/history_sync.dart';
 import 'package:asset_tracker/data/asset_dao.dart';
 import 'package:asset_tracker/data/database.dart';
 import 'package:asset_tracker/domain/rate_series.dart';
+import 'package:asset_tracker/domain/holding_valuation.dart';
+import 'package:asset_tracker/services/history_backfill_service.dart';
 import 'package:asset_tracker/domain/transaction_service.dart';
 
 void main() {
@@ -103,6 +105,101 @@ void main() {
     expect((await dao.getHolding(target))!.quantity, 5);
     expect(await dao.getSetting(historyFullRebuildKey), '1');
     expect(await dao.getSetting(historySyncDirtyKey), historyDirtySet);
+  });
+
+  test('deleting one of two identical timestamp redemptions preserves the other', () async {
+    final account = await addAccount('账户');
+    final source = await addHolding(
+      accountId: account, name: '现金', type: AssetType.cash,
+      quantity: 1000, costPrice: 1000, latestPrice: 1,
+    );
+    final otherSource = await addHolding(
+      accountId: account, name: '现金2', type: AssetType.cash,
+      quantity: 1000, costPrice: 1000, latestPrice: 1,
+    );
+    final target = await addHolding(accountId: account, name: '基金', type: AssetType.etf);
+    final other = await addHolding(accountId: account, name: '基金2', type: AssetType.etf);
+    for (final (from, to) in [(source, target), (otherSource, other)]) {
+      final result = await service.recordBuyFundedByHolding(
+        sourceHoldingId: from, targetHoldingId: to, targetQuantity: 10,
+        amount: 120, occurredAt: DateTime(2026, 9, 1, 12),
+      );
+      expect(result.ok, isTrue, reason: result.message);
+    }
+    await dao.deleteHolding(target);
+    expect((await dao.getTransactions()).map((row) => row.holdingId),
+        [otherSource, other]);
+    expect((await dao.getHolding(otherSource))!.quantity, 880);
+    expect((await dao.getHolding(other))!.quantity, 10);
+  });
+
+  test('ambiguous legacy redemption rows are preserved atomically', () async {
+    final account = await addAccount('账户');
+    final when = DateTime(2026, 9, 1, 12);
+    final ids = <int>[];
+    for (final (id, type) in [(1, 'sell'), (2, 'buy'), (3, 'sell'), (4, 'buy')]) {
+      final holding = await addHolding(
+        accountId: account, name: '产品 $id', type: AssetType.etf,
+      );
+      ids.add(holding);
+      await dao.createTransaction(TransactionsCompanion.insert(
+        id: Value(id), accountId: account, holdingId: Value(holding),
+        type: type, amount: 120, occurredAt: when, quantity: const Value(10),
+        internalMove: const Value(true), costMovedAmount: const Value(100),
+      ));
+    }
+    await expectLater(dao.deleteHolding(ids[1]), throwsArgumentError);
+    expect((await service.remove(2)).ok, isFalse);
+    expect((await service.reschedule(2, DateTime(2026, 9, 3))).ok, isFalse);
+    expect(await dao.getTransactions(), hasLength(4));
+    expect(await dao.getHoldings(), hasLength(4));
+  });
+
+  test('deleting a funding account with a live cross-account buy is blocked atomically', () async {
+    final bank = await addAccount('银行');
+    final broker = await addAccount('券商');
+    final cash = await addHolding(
+      accountId: bank, name: '现金', type: AssetType.cash, quantity: 1000,
+    );
+    final fund = await addHolding(accountId: broker, name: '基金', type: AssetType.etf);
+    final written = await service.record(
+      accountId: broker, holdingId: fund, cashSourceId: cash,
+      type: TransactionType.buy, amount: 120, quantity: 10,
+    );
+    expect(written.ok, isTrue);
+    await expectLater(dao.deleteAccount(bank), throwsArgumentError);
+    expect(await dao.getAccount(bank), isNotNull);
+    expect((await dao.getHolding(cash))!.quantity, 880);
+    final row = (await dao.getTransactions()).single;
+    expect((await service.remove(row.id)).ok, isTrue);
+    await dao.deleteAccount(bank);
+    expect(await dao.getAccount(bank), isNull);
+    expect(await dao.getTransactions(), isEmpty);
+  });
+
+  test('changing an opening date moves the holding in rebuilt snapshots', () async {
+    final account = await addAccount('账户');
+    final firstDay = DateTime(2026, 9, 3);
+    final initialDay = DateTime(2026, 9, 10);
+    final id = await service.createHolding(
+      HoldingsCompanion.insert(
+        accountId: account, name: '银行理财',
+        assetType: AssetType.bankWealth.storageName,
+        quantity: const Value(10), costPrice: const Value(10),
+        latestPrice: const Value(12), purchaseDate: Value(initialDay),
+      ),
+    );
+    final opening = (await dao.getTransactions()).single;
+    expect((await service.reschedule(opening.id, firstDay)).ok, isTrue);
+    expect((await dao.getHolding(id))!.purchaseDate, firstDay);
+
+    final result = await HistoryBackfillService(dao, sources: const {}).backfill(
+      now: DateTime(2026, 9, 13), forceRebuild: true,
+    );
+    expect(result.ok, isTrue, reason: result.message);
+    final first = (await dao.getSnapshots()).first;
+    expect(first.date, '2026-09-03');
+    expect(snapshotHoldingValues(first)!.single.holdingId, id);
   });
 
   group('buy', () {
@@ -1077,7 +1174,7 @@ void main() {
       expect(r.message, contains('负债'));
     });
 
-    test('removing the buy row rolls back the target only', () async {
+    test('removing the buy row reverses the whole redemption', () async {
       final acc = await addAccount('A');
       final mmf = await addHolding(
         accountId: acc, name: '天天宝', type: AssetType.mutualFund,
@@ -1097,11 +1194,11 @@ void main() {
       final fundAfter = (await dao.getHolding(fund))!;
       expect(fundAfter.quantity, 0);
       expect(fundAfter.costPrice, 5); // full reversal keeps the unit cost
-      // The source stays redeemed: its sell row is untouched.
-      expect((await dao.getHolding(mmf))!.quantity, 500);
+      expect((await dao.getHolding(mmf))!.quantity, 1000);
+      expect(await dao.getTransactions(), isEmpty);
     });
 
-    test('removing the sell row restores the source quantity', () async {
+    test('removing the sell row reverses the whole redemption', () async {
       final acc = await addAccount('A');
       final mmf = await addHolding(
         accountId: acc, name: '天天宝', type: AssetType.mutualFund,
@@ -1121,8 +1218,8 @@ void main() {
       final mmfAfter = (await dao.getHolding(mmf))!;
       expect(mmfAfter.quantity, 1000);
       expect(mmfAfter.costPrice, 1);
-      // The target keeps its purchase.
-      expect((await dao.getHolding(fund))!.quantity, 100);
+      expect((await dao.getHolding(fund))!.quantity, 0);
+      expect(await dao.getTransactions(), isEmpty);
     });
   });
 
@@ -1696,12 +1793,11 @@ void main() {
       final transactions = await dao.getTransactions();
       expect(transactions, hasLength(2));
       final buy = transactions.singleWhere((t) => t.holdingId == id);
-      final sell = transactions.singleWhere((t) => t.holdingId == source);
       expect((await service.remove(buy.id)).ok, isTrue);
       final reversedTarget = (await dao.getHolding(id))!;
       expect(reversedTarget.quantity, 0);
       expect(reversedTarget.costPrice, 0);
-      expect((await service.remove(sell.id)).ok, isTrue);
+      expect(await dao.getTransactions(), isEmpty);
       final restoredSource = (await dao.getHolding(source))!;
       expect(restoredSource.quantity, 100);
       expect(restoredSource.costPrice, 80);

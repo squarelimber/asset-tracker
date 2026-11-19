@@ -3,6 +3,7 @@ import '../core/formats.dart';
 import '../core/market_session.dart';
 import '../core/symbols.dart';
 import '../data/database.dart';
+import 'transaction_identity.dart';
 import '../services/market/kline_source.dart';
 import 'holding_kline.dart';
 
@@ -74,7 +75,7 @@ PortfolioIntradayHistory rebuildPortfolioIntraday({
             if (row.holdingId == holding.id) row,
         ]..sort((a, b) {
           final order = a.occurredAt.compareTo(b.occurredAt);
-          return order == 0 ? a.id.compareTo(b.id) : order;
+          return order == 0 ? compareTransactionEntryOrder(a, b) : order;
         });
     final moves = <({DateTime time, double shares, double cash})>[];
     var openingShares = holding.quantity;

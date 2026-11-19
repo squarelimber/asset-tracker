@@ -6,7 +6,6 @@ import 'package:go_router/go_router.dart';
 import '../../../app/providers.dart';
 import '../../../core/enums.dart';
 import '../../../core/formats.dart';
-import '../../../core/history_sync.dart';
 import '../../../core/responsive.dart';
 import '../../../core/symbols.dart';
 import '../../../data/database.dart';
@@ -303,9 +302,15 @@ class _AccountCard extends ConsumerWidget {
         ],
       ),
     );
-    if (ok == true) {
+    if (ok != true || !context.mounted) return;
+    try {
       await ref.read(daoProvider).deleteAccount(account.id);
-      ref.read(daoProvider).setSetting(historySyncDirtyKey, historyDirtySet);
+    } on ArgumentError catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e.message.toString())),
+        );
+      }
     }
   }
 }

@@ -24,6 +24,7 @@ import '../../components/session_chip.dart';
 import '../../tokens.dart';
 import 'day_detail_sheet.dart';
 import 'portfolio_intraday.dart';
+import 'portfolio_intraday_card.dart';
 import 'portfolio_widgets.dart';
 import 'portfolio_welcome.dart';
 
@@ -339,6 +340,7 @@ class _PortfolioPageState extends ConsumerState<PortfolioPage> {
           const SizedBox(height: T.s2),
           _KpiRow(summary: s),
           const SizedBox(height: T.s3),
+          const PortfolioIntradayCard(),
           // 轮动焦点卡：今日最佳 / 今日最差 / 本月最佳（自动切换）。
           const RotatingSpotlightCard(),
           const SizedBox(height: T.s3),
@@ -379,20 +381,16 @@ class _KpiRow extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final hidden = ref.watch(hideAmountsProvider);
     final todayEarning = ref.watch(todayEarningProvider);
-    // Prefer today's snapshot difference: it is the same figure the
-    // earnings calendar shows on today's cell, and after a successful
-    // refresh it is derived from the very prices behind the totals above.
-    //
-    // When today's snapshot does not exist yet there is no snapshot-based
-    // "today", so fall back to the live summary rather than leaving the
-    // cell at zero: that value comes from the same holdings the totals are
-    // computed from, so the whole card still describes one moment.
     return AssetOverviewCard(
       totalAssets: summary.totalAssets,
       totalLiabilities: summary.totalLiabilities,
       netWorth: summary.netWorth,
       todayProfit: todayEarning?.profit,
       todayPct: todayEarning?.pct,
+      todayLabel: '今日快照收益',
+      todaySource: todayEarning == null
+          ? '暂无今日快照'
+          : '快照更新 ${Formats.dateTime(todayEarning.updatedAt.toLocal())}',
       onOpenEarnings: () => context.push(
         '/earnings-calendar?date=${Formats.date(DateTime.now())}',
       ),
@@ -400,7 +398,13 @@ class _KpiRow extends ConsumerWidget {
         context: context,
         showDragHandle: true,
         isScrollControlled: true,
-        builder: (context) => DayDetailSheet(date: DateTime.now()),
+        builder: (context) {
+          final now = DateTime.now();
+          return DayDetailSheet(
+            date: now,
+            intradayKey: todayKey(chinaMarketTime(now)),
+          );
+        },
       ),
       hidden: hidden,
       onToggleHidden: () {

@@ -1420,8 +1420,9 @@ Future<void> showEditHoldingDialog(
 Future<void> confirmDeleteHolding(
   BuildContext context,
   WidgetRef ref,
-  HoldingRow holding,
-) async {
+  HoldingRow holding, {
+  bool closeDetails = true,
+}) async {
   final route = ModalRoute.of(context);
   final navigator = Navigator.of(context);
   final messenger = ScaffoldMessenger.maybeOf(context);
@@ -1456,10 +1457,16 @@ Future<void> confirmDeleteHolding(
       ],
     ),
   );
-  if (ok == true) {
-    await ref.read(daoProvider).deleteHolding(holding.id);
-    ref.read(daoProvider).setSetting(historySyncDirtyKey, historyDirtySet);
-    if (navigator.mounted && route?.isCurrent == true) {
+  if (ok == true && context.mounted) {
+    try {
+      await ref.read(daoProvider).deleteHolding(holding.id);
+    } on ArgumentError catch (e) {
+      if (messenger?.mounted == true) {
+        messenger!.showSnackBar(SnackBar(content: Text(e.message.toString())));
+      }
+      return;
+    }
+    if (closeDetails && navigator.mounted && route?.isCurrent == true) {
       await navigator.maybePop();
     }
     if (messenger?.mounted == true) {

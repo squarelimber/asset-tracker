@@ -1,3 +1,4 @@
+import 'package:asset_tracker/domain/earnings_breakdown.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -41,6 +42,7 @@ Future<void> _pump(
   WidgetTester tester,
   List<ProductEarnings> products, {
   int year = 2025,
+  List<EarningsAttributionIssue> issues = const [],
 }) async {
   tester.view.physicalSize = const Size(390, 844);
   tester.view.devicePixelRatio = 1.0;
@@ -54,8 +56,10 @@ Future<void> _pump(
       // provider (and its DB access) is never evaluated. Sync overrides skip
       // the loading state (no infinite spinner for pumpAndSettle).
       if (nowYear != year)
-        productEarningsProvider(nowYear).overrideWith((ref) => const []),
-      productEarningsProvider(year).overrideWith((ref) => products),
+        productEarningsReportProvider(nowYear).overrideWith((ref) => const ProductEarningsReport([])),
+      productEarningsReportProvider(year).overrideWith(
+        (ref) => ProductEarningsReport(products, issues: issues),
+      ),
     ],
     child: const MaterialApp(home: ProductEarningsCalendarPage()),
   ));
@@ -63,6 +67,27 @@ Future<void> _pump(
 }
 
 void main() {
+  testWidgets('affected months keep the verified annual table and show repair actions', (tester) async {
+    final year = DateTime.now().year;
+    final date = '$year-01-15';
+    await _pump(
+      tester,
+      [_product('用例产品', List.filled(12, 100), year)],
+      year: year,
+      issues: [
+        EarningsAttributionIssue(date: date, message: '缺少快照详细数据', canRebuild: true),
+      ],
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('用例产品'), findsOneWidget);
+    final banner = find.text('1 个月待核对 · 汇总仅计已核对月份');
+    expect(banner, findsOneWidget);
+    await tester.tap(banner);
+    await tester.pumpAndSettle();
+    expect(find.text('受影响：$date'), findsOneWidget);
+    expect(find.text('重建快照'), findsOneWidget);
+  });
+
   testWidgets('privacy masks earnings in year and month views', (tester) async {
     final year = DateTime.now().year;
     await _pump(tester, [
@@ -241,8 +266,8 @@ void main() {
           for (final id in ids)
             transactionsByHoldingProvider(id).overrideWith((ref) => Stream.value([])),
         hideAmountsProvider.overrideWith((ref) => false),
-        productEarningsProvider(year).overrideWith(
-          (ref) => [
+        productEarningsReportProvider(year).overrideWith(
+          (ref) => ProductEarningsReport([
             ProductEarnings(
               name: product.name,
               type: product.type,
@@ -250,7 +275,7 @@ void main() {
               daily: product.daily,
               holdingIds: ids.take(2).toList(),
             ),
-          ],
+          ]),
         ),
       ],
     );

@@ -1,7 +1,12 @@
 import 'package:asset_tracker/app/providers.dart';
 import 'package:asset_tracker/data/database.dart';
+import 'package:asset_tracker/core/formats.dart';
+import 'package:asset_tracker/domain/earnings_breakdown.dart';
 import 'package:asset_tracker/ui/pages/portfolio/portfolio_intraday.dart';
+import 'package:asset_tracker/ui/pages/portfolio/portfolio_intraday_card.dart';
 import 'package:asset_tracker/ui/pages/portfolio/portfolio_widgets.dart';
+import 'package:asset_tracker/ui/components/terminal_choice.dart';
+import 'package:asset_tracker/ui/pages/portfolio/day_detail_sheet.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -76,6 +81,10 @@ void main() {
       ProviderScope(
         overrides: [
           snapshotsProvider.overrideWith((ref) => Stream.value(rows)),
+          earningsBreakdownProvider.overrideWith(
+            (ref, day) async =>
+                EarningsBreakdown(date: todayKey(day), rows: const []),
+          ),
         ],
         child: MaterialApp(
           home: Scaffold(body: NetWorthChart(clock: () => now)),
@@ -117,9 +126,15 @@ void main() {
     await touch.cancel();
     await tester.pump();
     expect(overlay().hoverIndex, isNull);
+    await tester.tapAt(center);
+    await tester.pumpAndSettle();
+    expect(find.byType(DayDetailSheet), findsNothing);
+    await tester.tap(find.text('查看当日明细'));
+    await tester.pumpAndSettle();
+    expect(find.byType(DayDetailSheet), findsOneWidget);
   });
 
-  testWidgets('auto range changes at the close and keeps a manual choice', (
+  testWidgets('live card closes independently of the historical chart range', (
     tester,
   ) async {
     var now = DateTime.utc(2026, 11, 18, 6, 59);
@@ -127,34 +142,50 @@ void main() {
       ProviderScope(
         overrides: [
           snapshotsProvider.overrideWith((ref) => Stream.value([])),
+          hideAmountsProvider.overrideWith((ref) => false),
           portfolioIntradayProvider.overrideWith(
             (ref, day) => Stream.value([]),
           ),
           portfolioIntradayHistoryProvider.overrideWith(
             (ref, day) async => (
-              points: [(minute: 570, profit: 15.0), (minute: 571, profit: 10.0)],
+              points: [
+                (minute: 570, profit: 15.0),
+                (minute: 571, profit: 10.0),
+              ],
               covered: 1,
               eligible: 2,
             ),
           ),
         ],
         child: MaterialApp(
-          home: Scaffold(body: NetWorthChart(clock: () => now)),
+          home: Scaffold(
+            body: ListView(
+              children: [
+                PortfolioIntradayCard(clock: () => now),
+                NetWorthChart(clock: () => now),
+              ],
+            ),
+          ),
         ),
       ),
     );
     await tester.pumpAndSettle();
     expect(find.text('今日盈亏走势'), findsOneWidget);
+    expect(find.text('净值趋势'), findsOneWidget);
+    expect(find.text('今日'), findsNothing);
     expect(find.textContaining('截至 09:31'), findsOneWidget);
     expect(find.textContaining('1/2'), findsOneWidget);
+    bool selected(String label) => tester
+        .widget<TerminalChoice>(find.widgetWithText(TerminalChoice, label))
+        .selected;
+    expect(selected('今年以来'), isTrue);
+    await tester.tap(find.text('全部'));
+    await tester.pumpAndSettle();
 
     now = DateTime.utc(2026, 11, 18, 7);
     await tester.pump(const Duration(seconds: 15));
     expect(find.text('净值趋势'), findsOneWidget);
-
-    await tester.tap(find.text('今日'));
-    await tester.pumpAndSettle();
-    await tester.pump(const Duration(seconds: 15));
-    expect(find.text('今日盈亏走势'), findsOneWidget);
+    expect(find.text('今日盈亏走势'), findsNothing);
+    expect(selected('全部'), isTrue);
   });
 }

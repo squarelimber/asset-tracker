@@ -57,6 +57,7 @@ void main() {
     await tester.tap(find.text('打开'));
     await tester.pumpAndSettle();
 
+    expect(find.text('发生日期'), findsOneWidget);
     final source = tester.widget<MoneyDropdown>(
       find.byType(MoneyDropdown).first,
     );

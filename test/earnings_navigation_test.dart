@@ -7,9 +7,11 @@ import 'package:asset_tracker/data/database.dart';
 import 'package:asset_tracker/domain/holding_valuation.dart';
 import 'package:asset_tracker/services/market/market_service.dart';
 import 'package:asset_tracker/ui/components/asset_overview_card.dart';
+import 'package:asset_tracker/ui/components/intraday_line_chart.dart';
 import 'package:asset_tracker/ui/pages/calendar/earnings_calendar_page.dart';
 import 'package:asset_tracker/ui/pages/holdings/holding_kline_page.dart';
 import 'package:asset_tracker/ui/pages/portfolio/day_detail_sheet.dart';
+import 'package:asset_tracker/ui/pages/portfolio/portfolio_intraday.dart';
 import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
@@ -77,6 +79,19 @@ void main() {
               databaseProvider.overrideWithValue(db),
               historySyncProvider.overrideWith((ref) async => null),
               marketServiceProvider.overrideWithValue(_NoMarket(dao)),
+              portfolioIntradayProvider.overrideWith(
+                (ref, day) => Stream.value([]),
+              ),
+              portfolioIntradayHistoryProvider.overrideWith(
+                (ref, day) async => (
+                  points: [
+                    (minute: 575, profit: -12.0),
+                    (minute: 576, profit: 8.0),
+                  ],
+                  covered: 1,
+                  eligible: 1,
+                ),
+              ),
               hideAmountsProvider.overrideWith((ref) => false),
             ],
             child: const AssetTrackerApp(),
@@ -92,13 +107,36 @@ void main() {
           ),
           findsOneWidget,
         );
-        await tester.tap(find.text('今日盈亏'));
+        await tester.tap(find.text('今日快照收益'));
         for (var i = 0; i < 3; i++) {
           await tester.pump(const Duration(milliseconds: 300));
         }
         expect(find.byType(DayDetailSheet), findsOneWidget);
         expect(find.text('${Formats.date(now)} 当日收益明细'), findsOneWidget);
         expect(find.text('日历收益 +¥10.00'), findsOneWidget);
+        await tester.tap(find.text('分时走势'));
+        await tester.pumpAndSettle();
+        final sheet = find.byType(DayDetailSheet);
+        final liveChart = find.descendant(
+          of: sheet,
+          matching: find.byType(IntradayLineChart),
+        );
+        expect(liveChart, findsOneWidget);
+        expect(
+          find.descendant(of: sheet, matching: find.text('¥0')),
+          findsOneWidget,
+        );
+        final container = ProviderScope.containerOf(tester.element(sheet));
+        container.read(hideAmountsProvider.notifier).state = true;
+        await tester.pump();
+        expect(liveChart, findsNothing);
+        expect(
+          find.descendant(of: sheet, matching: find.text('金额已隐藏')),
+          findsOneWidget,
+        );
+        container.read(hideAmountsProvider.notifier).state = false;
+        await tester.tap(find.text('收益明细'));
+        await tester.pumpAndSettle();
         await tester.tap(
           find.descendant(
             of: find.byType(DayDetailSheet),

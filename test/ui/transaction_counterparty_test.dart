@@ -90,6 +90,12 @@ void main() {
       await tester.pump();
       await tester.tap(find.text('打开'));
       await tester.pumpAndSettle();
+      expect(tester.widget<DropdownButtonFormField<int>>(
+        find.byType(DropdownButtonFormField<int>),
+      ).initialValue, isNull);
+      await tester.tap(find.text('保存'));
+      await tester.pumpAndSettle();
+      expect(find.text('请选择扣款来源'), findsOneWidget);
       await tester.tap(find.byType(DropdownButtonFormField<int>));
       await tester.pumpAndSettle();
       await tester.tap(find.textContaining('来源基金').last);
@@ -107,12 +113,12 @@ void main() {
       expect(dropdown.initialValue, isNull);
       await tester.tap(find.byType(DropdownButtonFormField<int>));
       await tester.pumpAndSettle();
-      expect(find.text('不关联持仓'), findsWidgets);
+      expect(find.text('回款不入账'), findsWidgets);
       await tester.tap(find.textContaining('现金').last);
       await tester.pumpAndSettle();
       await tester.tap(find.byType(DropdownButtonFormField<int>));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('不关联持仓').last);
+      await tester.tap(find.text('回款不入账').last);
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
       expect(
@@ -121,7 +127,7 @@ void main() {
               find.byType(DropdownButtonFormField<int>),
             )
             .initialValue,
-        isNull,
+        isNotNull,
       );
     },
   );

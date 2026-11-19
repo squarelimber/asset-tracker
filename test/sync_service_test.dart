@@ -10,6 +10,7 @@ import 'package:asset_tracker/core/enums.dart';
 import 'package:asset_tracker/core/history_sync.dart';
 import 'package:asset_tracker/data/asset_dao.dart';
 import 'package:asset_tracker/data/database.dart';
+import 'package:asset_tracker/domain/transaction_service.dart';
 import 'package:asset_tracker/sync/sync_api.dart';
 import 'package:asset_tracker/sync/sync_service.dart';
 
@@ -111,6 +112,109 @@ void main() {
     final holdings = server.snapshot['holdings'] as List;
     expect(holdings, hasLength(1));
     expect(await dao.getSetting(SyncSettingsKeys.lastRev), '1');
+  });
+
+  test('an explicit sync uses the selected server instead of the saved address', () async {
+    String? usedUrl;
+    String? usedToken;
+    final selected = SyncService(dao, apiFactory: (url, token) {
+      usedUrl = url;
+      usedToken = token;
+      return SyncApi(url, token: token, client: server.client);
+    });
+    final result = await selected.sync(
+      target: (url: 'https://new.example.test', token: 'demo-token'),
+    );
+    expect(result.ok, isTrue);
+    expect(usedUrl, 'https://new.example.test');
+    expect(usedToken, 'demo-token');
+    expect(await dao.getSetting(SyncSettingsKeys.lastServerUrl), 'https://new.example.test');
+    expect(await dao.getSetting(SyncSettingsKeys.serverUrl), 'http://fake:8787');
+  });
+
+  test('two devices can independently add holdings and opening flows', () async {
+    final secondDb = AppDatabase(NativeDatabase.memory());
+    addTearDown(secondDb.close);
+    final secondDao = AssetDao(secondDb);
+    await secondDao.setSetting(SyncSettingsKeys.serverUrl, 'http://fake:8787');
+    final second = SyncService(
+      secondDao,
+      apiFactory: (url, token) => SyncApi(url, token: token, client: server.client),
+    );
+    final account = await dao.createAccount(
+      AccountsCompanion.insert(name: 'Shared', type: 'general'),
+    );
+    expect((await service.sync()).ok, isTrue);
+    expect((await second.sync()).ok, isTrue);
+
+    Future<int> add(AssetDao device, String name) =>
+        TransactionService(device).createHolding(
+          HoldingsCompanion.insert(
+            accountId: account, name: name, assetType: 'cash',
+            quantity: const Value(120),
+          ),
+        );
+    final localId = await add(dao, 'Local cash');
+    final remoteId = await add(secondDao, 'Other cash');
+    expect(localId, isNot(remoteId));
+
+    expect((await second.sync()).ok, isTrue);
+    expect((await service.sync()).ok, isTrue);
+    expect((await second.sync()).ok, isTrue);
+    for (final device in [dao, secondDao]) {
+      expect((await device.getHoldings()).map((row) => row.name).toSet(),
+          {'Local cash', 'Other cash'});
+      final rows = await device.getTransactions();
+      expect(rows.map((row) => row.holdingId).toSet(), {localId, remoteId});
+      expect(rows.every((row) => row.opensHolding == true), isTrue);
+    }
+  });
+
+  test('sync repairs identifiable legacy ID collisions and keeps their links', () async {
+    final secondDb = AppDatabase(NativeDatabase.memory());
+    addTearDown(secondDb.close);
+    final secondDao = AssetDao(secondDb);
+    await secondDao.setSetting(SyncSettingsKeys.serverUrl, 'http://fake:8787');
+    final second = SyncService(
+      secondDao,
+      apiFactory: (url, token) => SyncApi(url, token: token, client: server.client),
+    );
+    Future<void> seed(AssetDao device, String label, int day) async {
+      final date = DateTime(2026, 1, day);
+      await device.createAccount(AccountsCompanion.insert(
+        id: const Value(1), name: label, type: 'general', createdAt: Value(date),
+      ));
+      await device.createHolding(HoldingsCompanion.insert(
+        id: const Value(1), accountId: 1, name: label, assetType: 'cash',
+        quantity: Value(day * 100.0), createdAt: Value(date),
+      ));
+      await device.createTransaction(TransactionsCompanion.insert(
+        id: const Value(1), accountId: 1, holdingId: const Value(1),
+        cashTargetId: const Value(1), type: 'income',
+        amount: day * 100.0, occurredAt: date,
+      ));
+    }
+    await seed(dao, 'First device', 2);
+    await seed(secondDao, 'Second device', 3);
+    expect((await second.sync()).ok, isTrue);
+    expect((await service.sync()).ok, isTrue);
+    expect((await second.sync()).ok, isTrue);
+    for (final device in [dao, secondDao]) {
+      final accounts = {for (final row in await device.getAccounts()) row.id: row};
+      final holdings = {for (final row in await device.getHoldings()) row.id: row};
+      expect(accounts.values.map((row) => row.name).toSet(),
+          {'First device', 'Second device'});
+      expect(holdings, hasLength(2));
+      final rows = await device.getTransactions();
+      expect(rows, hasLength(2));
+      for (final row in rows) {
+        final holding = holdings[row.holdingId]!;
+        expect(row.cashTargetId, holding.id);
+        expect(row.accountId, holding.accountId);
+        expect(accounts[row.accountId]!.name, holding.name);
+        expect(row.amount, holding.quantity);
+      }
+    }
   });
 
   test('downloaded changes still schedule a rebuild when the upload fails', () async {

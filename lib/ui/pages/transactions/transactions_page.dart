@@ -26,7 +26,14 @@ import '../../tokens.dart';
 /// type / account / date / keyword filters, a cash-flow summary and CSV
 /// export of the filtered list.
 class TransactionsPage extends ConsumerStatefulWidget {
-  const TransactionsPage({super.key});
+  const TransactionsPage({
+    super.key,
+    this.initialDate,
+    this.initialTransactionId,
+  });
+
+  final String? initialDate;
+  final int? initialTransactionId;
 
   @override
   ConsumerState<TransactionsPage> createState() => _TransactionsPageState();
@@ -34,6 +41,9 @@ class TransactionsPage extends ConsumerStatefulWidget {
 
 class _TransactionsPageState extends ConsumerState<TransactionsPage> {
   TransactionType? _typeFilter;
+  bool _repaymentsOnly = false;
+  String? _relatedDate;
+  int? _relatedId;
   int? _accountFilter;
   String _datePreset = 'all'; // all | month | 3m | year
   final _keywordCtrl = TextEditingController();
@@ -41,9 +51,19 @@ class _TransactionsPageState extends ConsumerState<TransactionsPage> {
 
   bool get _hasFilters =>
       _typeFilter != null ||
+      _repaymentsOnly ||
+      _relatedDate != null ||
+      _relatedId != null ||
       _accountFilter != null ||
       _datePreset != 'all' ||
       _keywordCtrl.text.trim().isNotEmpty;
+
+  @override
+  void initState() {
+    super.initState();
+    _relatedDate = widget.initialDate;
+    _relatedId = widget.initialTransactionId;
+  }
 
   @override
   void dispose() {
@@ -67,23 +87,52 @@ class _TransactionsPageState extends ConsumerState<TransactionsPage> {
     Map<int, String> accountName,
   ) {
     final kw = _keywordCtrl.text.trim().toLowerCase();
+    final redemptionGroups = <String, List<TransactionRow>>{};
+    for (final txn in txns) {
+      if (txn.redemptionGroup case final group?) {
+        (redemptionGroups[group] ??= []).add(txn);
+      }
+    }
     return txns.where((t) {
-      if (_typeFilter != null &&
-          TransactionType.fromStorage(t.type) != _typeFilter) {
+      final type = TransactionType.fromStorage(t.type);
+      if (_typeFilter != null && type != _typeFilter) return false;
+      final repayment = repaymentOf(
+        t,
+        holdingsById[t.cashSourceId],
+        holdingsById[t.cashTargetId],
+      );
+      if (_repaymentsOnly && repayment == null) return false;
+      final related = [
+        holdingsById[t.holdingId],
+        holdingsById[t.cashSourceId],
+        holdingsById[t.cashTargetId],
+        for (final leg
+            in redemptionGroups[t.redemptionGroup] ?? const <TransactionRow>[])
+          holdingsById[leg.holdingId],
+      ].whereType<HoldingRow>();
+      final accountIds = {t.accountId, ...related.map((h) => h.accountId)};
+      if (_accountFilter != null && !accountIds.contains(_accountFilter)) {
         return false;
       }
-      if (_accountFilter != null && t.accountId != _accountFilter) {
+      final day = t.occurredAt.toLocal();
+      if (!_inDateRange(day) ||
+          (_relatedId != null && t.id != _relatedId) ||
+          (_relatedId == null &&
+              _relatedDate != null &&
+              todayKey(day) != _relatedDate)) {
         return false;
       }
-      if (!_inDateRange(t.occurredAt.toLocal())) return false;
       if (kw.isNotEmpty) {
-        final holding = t.holdingId == null ? null : holdingsById[t.holdingId];
-        final haystack = [
-          holding?.name ?? '',
+        final terms = [
+          for (final holding in related) ...[
+            holding.name,
+            holding.symbol ?? '',
+          ],
+          for (final id in accountIds) accountName[id] ?? '',
           t.note ?? '',
-          accountName[t.accountId] ?? '',
+          repayment?.label ?? type.label,
         ].join(' ').toLowerCase();
-        if (!haystack.contains(kw)) return false;
+        if (!terms.contains(kw)) return false;
       }
       return true;
     }).toList();
@@ -111,33 +160,6 @@ class _TransactionsPageState extends ConsumerState<TransactionsPage> {
         t.cashTargetId == null ? null : '去向：${name(t.cashTargetId)}',
       _ => null,
     };
-  }
-
-  double _rateOf(String currency, Map<String, double> rates) {
-    final rate = rates[currency.toUpperCase()];
-    return (rate == null || rate <= 0) ? 1 : rate;
-  }
-
-  /// Net cash effect of the rows shown for one day. Mirrors the stats
-  /// page: only rows that actually move cash count (buys funded from a
-  /// cash holding, sells credited to one, income, expense, dividends).
-  /// Redemptions funding another holding and transfers are internal
-  /// movements with no net cash effect.
-  double _dayNet(List<TransactionRow> rows, Map<String, double> rates) {
-    var net = 0.0;
-    for (final t in rows) {
-      final sign = switch (TransactionType.fromStorage(t.type)) {
-        TransactionType.buy => t.cashSourceId == null ? null : -1.0,
-        TransactionType.sell => t.cashTargetId == null ? null : 1.0,
-        TransactionType.income => 1.0,
-        TransactionType.expense => -1.0,
-        TransactionType.dividend => 1.0,
-        _ => null, // transfer / consume / split: no net cash effect
-      };
-      if (sign == null) continue;
-      net += sign * t.amount * _rateOf(t.currency, rates);
-    }
-    return net;
   }
 
   /// Unit cost for the tile's per-row realized line. Amount-based holdings
@@ -199,6 +221,9 @@ class _TransactionsPageState extends ConsumerState<TransactionsPage> {
   void _resetFilters() {
     setState(() {
       _typeFilter = null;
+      _repaymentsOnly = false;
+      _relatedDate = null;
+      _relatedId = null;
       _accountFilter = null;
       _datePreset = 'all';
       _keywordCtrl.clear();
@@ -212,9 +237,7 @@ class _TransactionsPageState extends ConsumerState<TransactionsPage> {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('修改流水日期'),
-        content: const Text(
-          '保存后会重算历史净值。若这笔流水属于同一笔赎回出资，关联的赎回和买入会一起调整日期。',
-        ),
+        content: const Text('保存后会重算历史净值。若这笔流水属于同一笔赎回出资，关联的赎回和买入会一起调整日期。'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
@@ -238,7 +261,9 @@ class _TransactionsPageState extends ConsumerState<TransactionsPage> {
       lastDate: today,
     );
     if (picked == null || picked == local || !mounted) return;
-    final result = await ref.read(transactionServiceProvider).reschedule(t.id, picked);
+    final result = await ref
+        .read(transactionServiceProvider)
+        .reschedule(t.id, picked);
     if (mounted) {
       ScaffoldMessenger.of(
         context,
@@ -251,7 +276,10 @@ class _TransactionsPageState extends ConsumerState<TransactionsPage> {
     final txns = ref.watch(transactionsProvider);
     final holdings = ref.watch(holdingsProvider).value ?? const <HoldingRow>[];
     final accounts = ref.watch(accountsProvider).value ?? const <AccountRow>[];
-    final rates = ref.watch(cnyRatesProvider).value ?? const <String, double>{};
+    final rates =
+        ref.watch(transactionCnyRatesProvider).value ??
+        ref.watch(cnyRatesProvider).value ??
+        const <String, double>{};
     final holdingsById = {for (final h in holdings) h.id: h};
     final accountName = {for (final a in accounts) a.id: a.name};
     final filtered = _filter(
@@ -298,10 +326,12 @@ class _TransactionsPageState extends ConsumerState<TransactionsPage> {
           onRetry: () => ref.invalidate(transactionsProvider),
         ),
         data: (all) {
-          final stats = const TradeStatsCalculator().compute(
+          const calculator = TradeStatsCalculator();
+          final stats = calculator.compute(
             filtered,
-            holdings,
+            const [],
             cnyRates: rates,
+            requireFxRates: true,
           );
           return SingleChildScrollView(
             child: ResponsiveShell(
@@ -315,28 +345,27 @@ class _TransactionsPageState extends ConsumerState<TransactionsPage> {
                       children: [
                         for (final opt in <(TransactionType?, String)>[
                           (null, '全部'),
+                          (null, '还款'),
                           for (final t in TransactionType.values) (t, t.label),
                         ])
                           Padding(
                             padding: const EdgeInsets.only(right: 8),
                             child: ChoiceChip(
                               label: Text(opt.$2),
-                              selected: _typeFilter == opt.$1,
-                              onSelected: (_) =>
-                                  setState(() => _typeFilter = opt.$1),
+                              selected: _typeSelected(opt),
+                              onSelected: (_) => setState(() {
+                                _repaymentsOnly = opt.$2 == '还款';
+                                _typeFilter = opt.$1;
+                              }),
                               showCheckmark: false,
                               selectedColor: T.surface2,
                               backgroundColor: T.surface,
                               side: BorderSide(
-                                color: _typeFilter == opt.$1
-                                    ? T.accent
-                                    : T.border,
+                                color: _typeSelected(opt) ? T.accent : T.border,
                               ),
                               labelStyle: TextStyle(
                                 fontSize: 12,
-                                color: _typeFilter == opt.$1
-                                    ? T.text1
-                                    : T.text2,
+                                color: _typeSelected(opt) ? T.text1 : T.text2,
                               ),
                               padding: const EdgeInsets.symmetric(
                                 horizontal: 8,
@@ -398,6 +427,14 @@ class _TransactionsPageState extends ConsumerState<TransactionsPage> {
                       ],
                     ],
                   ),
+                  if (_relatedDate case final date?)
+                    Padding(
+                      padding: const EdgeInsets.only(top: T.s2),
+                      child: Text(
+                        _relatedId == null ? '关联日期 $date' : '$date 的关联流水',
+                        style: T.label(),
+                      ),
+                    ),
                   if (_hasFilters)
                     Align(
                       alignment: Alignment.centerRight,
@@ -421,7 +458,15 @@ class _TransactionsPageState extends ConsumerState<TransactionsPage> {
                     )
                   else
                     for (final (day, rows) in _groupByDay(filtered)) ...[
-                      _DayHeader(day: day, net: _dayNet(rows, rates)),
+                      _DayHeader(
+                        day: day,
+                        stats: calculator.compute(
+                          rows,
+                          const [],
+                          cnyRates: rates,
+                          requireFxRates: true,
+                        ),
+                      ),
                       for (final t in rows)
                         _transactionRow(t, holdingsById, accountName),
                     ],
@@ -459,6 +504,10 @@ class _TransactionsPageState extends ConsumerState<TransactionsPage> {
       ),
     );
   }
+
+  bool _typeSelected((TransactionType?, String) option) => _repaymentsOnly
+      ? option.$2 == '还款'
+      : option.$2 != '还款' && _typeFilter == option.$1;
 
   Widget _searchField() => TextField(
     controller: _keywordCtrl,
@@ -498,6 +547,9 @@ class _SummaryCard extends ConsumerWidget {
               Text(
                 hide
                     ? '****'
+                    : stats.missingCurrencies.isNotEmpty &&
+                          stats.monthlyCashflow.isEmpty
+                    ? '--'
                     : '${stats.cashflow >= 0 ? '+' : ''}${Formats.money(stats.cashflow)}',
                 style: T.mono(
                   size: 13,
@@ -507,6 +559,13 @@ class _SummaryCard extends ConsumerWidget {
               ),
             ],
           ),
+          if (stats.missingCurrencies.isNotEmpty) ...[
+            const SizedBox(height: T.s2),
+            Text(
+              '缺少 ${(stats.missingCurrencies.toList()..sort()).join('、')} 汇率，相关流水暂未计入人民币汇总。',
+              style: T.label(color: T.warning),
+            ),
+          ],
           const SizedBox(height: T.s3),
           Wrap(
             spacing: T.s4,
@@ -552,15 +611,21 @@ class _StatItem extends ConsumerWidget {
 }
 
 class _DayHeader extends ConsumerWidget {
-  const _DayHeader({required this.day, required this.net});
+  const _DayHeader({required this.day, required this.stats});
 
   final DateTime day;
-  final double net;
+  final TradeStats stats;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final hide = ref.watch(hideAmountsProvider);
     final now = DateTime.now();
+    final net = stats.cashflow;
+    final hasMissingRates = stats.missingCurrencies.isNotEmpty;
+    final label = hasMissingRates ? '当日已折算' : '当日';
+    final amount = hasMissingRates && stats.monthlyCashflow.isEmpty
+        ? '--'
+        : '${net >= 0 ? '+' : ''}${Formats.money(net)}';
     final isToday =
         day.year == now.year && day.month == now.month && day.day == now.day;
     return Padding(
@@ -573,7 +638,7 @@ class _DayHeader extends ConsumerWidget {
           ),
           const Spacer(),
           Text(
-            hide ? '当日 ****' : '当日 ${net >= 0 ? '+' : ''}${Formats.money(net)}',
+            hide ? '当日 ****' : '$label $amount',
             style: T.mono(
               size: 12,
               weight: FontWeight.w600,

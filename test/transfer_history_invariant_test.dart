@@ -277,10 +277,8 @@ void main() {
 
       final sell = (await dao.getTransactions())
           .firstWhere((t) => t.type == TransactionType.sell.storageName);
-      final buy = (await dao.getTransactions())
-          .firstWhere((t) => t.type == TransactionType.buy.storageName);
       expect((await service.remove(sell.id)).ok, isTrue);
-      expect((await service.remove(buy.id)).ok, isTrue);
+      expect(await dao.getTransactions(), isEmpty);
       expect(await liveValue(), closeTo(v0, 1e-6));
       expect(await liveCost(), closeTo(c0, 1e-6));
       expect(await liveProfit(), closeTo(p0, 1e-6));

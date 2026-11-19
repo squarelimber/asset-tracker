@@ -104,7 +104,10 @@ final routerProvider = Provider<GoRouter>((ref) {
           ),
           GoRoute(
             path: '/transactions',
-            builder: (context, state) => const TransactionsPage(),
+            builder: (context, state) => TransactionsPage(
+              initialDate: state.uri.queryParameters['date'],
+              initialTransactionId: int.tryParse(state.uri.queryParameters['id'] ?? ''),
+            ),
           ),
           GoRoute(
             path: '/alerts',

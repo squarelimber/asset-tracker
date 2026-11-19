@@ -1,6 +1,7 @@
 import '../core/enums.dart';
 import '../core/formats.dart';
 import '../data/database.dart';
+import 'transaction_identity.dart';
 
 /// One month's earnings for one product (all accounts merged by name).
 class ProductMonthEarning {
@@ -282,7 +283,7 @@ class HoldingReplay {
     final orderedFlows = flows.where((t) => t.holdingId == h.id).toList()
       ..sort((a, b) {
         final time = a.occurredAt.compareTo(b.occurredAt);
-        return time == 0 ? a.id.compareTo(b.id) : time;
+        return time == 0 ? compareTransactionEntryOrder(a, b) : time;
       });
     final events = <_ReplayEvent>[];
     for (final t in orderedFlows) {

@@ -19,6 +19,8 @@ class RiskMetricsEstimate {
     required this.startDate,
     required this.endDate,
     required this.unavailableReason,
+    this.interruptedDate,
+    this.interruptionReason,
   });
 
   final double? sharpe;
@@ -27,6 +29,8 @@ class RiskMetricsEstimate {
   final String? startDate;
   final String? endDate;
   final String? unavailableReason;
+  final String? interruptedDate;
+  final String? interruptionReason;
 }
 
 /// [annualRiskFreeRate] is a fraction, so 1% is 0.01. Uses at most 365
@@ -84,6 +88,8 @@ RiskMetricsEstimate estimateRiskMetrics(
   final returns = <double>[];
   String? startDate;
   String? endDate;
+  String? interruptedDate;
+  String? interruptionReason;
   for (var i = 1; i < ordered.length; i++) {
     final previous = ordered[i - 1];
     final current = ordered[i];
@@ -99,19 +105,30 @@ RiskMetricsEstimate estimateRiskMetrics(
       1e-6,
       math.max(previous.totalCost.abs(), current.totalCost.abs()) * 1e-10,
     );
-    if (before == null ||
-        after == null ||
-        after.difference(before).inDays != 1 ||
-        stale[i - 1] ||
-        stale[i] ||
-        flows.contains(current.date) ||
-        !previousAssets.isFinite ||
+    String? interruption;
+    var interruptionDay = current.date;
+    if (before == null || after == null) {
+      interruption = '快照日期无效';
+    } else if (after.difference(before).inDays != 1) {
+      interruption = '缺少每日快照';
+      interruptionDay = todayKey(after.subtract(const Duration(days: 1)));
+    } else if (flows.contains(current.date)) {
+      interruption = '当天存在交易流水';
+    } else if (stale[i - 1] || stale[i]) {
+      interruption = '流水更新后尚未重建快照';
+    } else if (!previousAssets.isFinite ||
         previousAssets <= 0 ||
         !currentAssets.isFinite ||
-        currentAssets <= 0 ||
-        !previous.totalCost.isFinite ||
+        currentAssets <= 0) {
+      interruption = '资产估值无效';
+    } else if (!previous.totalCost.isFinite ||
         !current.totalCost.isFinite ||
         (current.totalCost - previous.totalCost).abs() > costTolerance) {
+      interruption = '本金变化缺少可核对的流水';
+    }
+    if (interruption != null) {
+      interruptedDate = interruptionDay;
+      interruptionReason = interruption;
       returns.clear();
       startDate = null;
       endDate = null;
@@ -122,6 +139,8 @@ RiskMetricsEstimate estimateRiskMetrics(
             (previousAssets - previous.totalCost)) /
         previousAssets;
     if (!r.isFinite) {
+      interruptedDate = current.date;
+      interruptionReason = '日收益无法计算';
       returns.clear();
       startDate = null;
       endDate = null;
@@ -144,7 +163,13 @@ RiskMetricsEstimate estimateRiskMetrics(
         startDate: startDate,
         endDate: endDate,
         unavailableReason: reason,
+        interruptedDate: interruptedDate,
+        interruptionReason: interruptionReason,
       );
+  if (ordered.length < 2) {
+    interruptedDate = ordered.lastOrNull?.date;
+    interruptionReason = '至少需要两天可比较的快照';
+  }
   if (!annualRiskFreeRate.isFinite || annualRiskFreeRate <= -1) {
     return unavailable('无风险年利率无效');
   }
@@ -174,5 +199,7 @@ RiskMetricsEstimate estimateRiskMetrics(
     startDate: startDate,
     endDate: endDate,
     unavailableReason: null,
+    interruptedDate: interruptedDate,
+    interruptionReason: interruptionReason,
   );
 }

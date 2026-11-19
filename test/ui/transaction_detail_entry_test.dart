@@ -15,7 +15,7 @@ Future<(AppDatabase, TransactionRow)> _fixture() async {
   final db = AppDatabase(NativeDatabase.memory());
   final dao = AssetDao(db);
   final accountId = await dao.createAccount(
-    AccountsCompanion.insert(name: '测试账户', type: 'general'),
+    AccountsCompanion.insert(id: const Value(1), name: '测试账户', type: 'general'),
   );
   final holdingId = await dao.createHolding(
     HoldingsCompanion.insert(
@@ -75,6 +75,7 @@ void main() {
             1,
           ).overrideWith((ref) => Stream.value(transactions)),
           cnyRatesProvider.overrideWith((ref) async => {}),
+          transactionCnyRatesProvider.overrideWith((ref) async => {}),
         ],
         child: MaterialApp(home: page),
       ),
@@ -142,6 +143,24 @@ void main() {
     await tester.pump(const Duration(milliseconds: 1));
   });
 
+  testWidgets('流水页在汇率缺失时跳过外币金额并显示提示', (tester) async {
+    final (db, transaction) = await _fixture();
+    final dao = AssetDao(db);
+    await dao.createTransaction(
+      TransactionsCompanion.insert(
+        accountId: transaction.accountId,
+        type: 'income',
+        amount: 100,
+        currency: const Value('USD'),
+        occurredAt: transaction.occurredAt,
+      ),
+    );
+    await pumpFixture(tester, db, const TransactionsPage());
+    expect(find.textContaining('缺少 USD 汇率'), findsOneWidget);
+    expect(find.text('当日已折算 --'), findsOneWidget);
+    expect(find.text('+¥100.00'), findsNothing);
+  });
+
   testWidgets('全局流水先显示详情并保留修改日期入口', (tester) async {
     final (db, _) = await _fixture();
     await pumpFixture(tester, db, const TransactionsPage());
@@ -194,6 +213,13 @@ void main() {
 
     await pumpFixture(tester, db, const TransactionsPage());
     expect(find.text('信用卡还款'), findsNWidgets(2));
+    await tester.enterText(find.byType(TextField), '天天宝');
+    await tester.pumpAndSettle();
+    expect(find.text('信用卡还款'), findsNWidgets(2));
+    expect(find.text('测试备注'), findsNothing);
+    await tester.tap(find.text('还款'));
+    await tester.pumpAndSettle();
+    expect(find.text('¥200.00'), findsNothing);
     expect(find.text('¥500.00'), findsOneWidget);
     final payment = find.text('信用卡还款').first;
     await tester.ensureVisible(payment);

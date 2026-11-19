@@ -52,6 +52,21 @@ SnapshotRow _snapshot(String date, List<DayHoldingValue> values) {
 }
 
 void main() {
+  test('a missing detail marks both dependent dates and preserves later months', () {
+    final issues = <EarningsAttributionIssue>[];
+    final holdings = productsFromSnapshots([
+      _snapshot('2026-07-31', [_holding(1, 1000, 1000)]),
+      _snapshot('2026-08-01', [_holding(1, 1050, 1000)])
+          .copyWith(holdingValues: const Value(null)),
+      _snapshot('2026-08-02', [_holding(1, 1070, 1000)]),
+      _snapshot('2026-08-31', [_holding(1, 1100, 1000)]),
+      _snapshot('2026-09-01', [_holding(1, 1125, 1000)]),
+    ], attributionRequiredFrom: '2026-01-01', onIssue: issues.add);
+    expect(issues.map((issue) => issue.date), ['2026-08-01', '2026-08-02']);
+    expect(issues.every((issue) => issue.canRebuild), isTrue);
+    expect(const ProductEarningsCalculator().monthOf(holdings.single, 2026, 9).profit, 25);
+  });
+
   test('internal gain attribution is balanced and conservative', () {
     TransactionRow row({
       required int id,
@@ -644,6 +659,8 @@ void main() {
             'CREATE TABLE holdings (id INTEGER PRIMARY KEY, latest_price REAL NOT NULL)',
           );
           sqlite.execute('INSERT INTO holdings VALUES (1, 1.2345)');
+          sqlite.execute('CREATE TABLE transactions (id INTEGER PRIMARY KEY, amount REAL NOT NULL)');
+          sqlite.execute('INSERT INTO transactions VALUES (1, 120)');
           sqlite.execute('PRAGMA user_version = 12');
         },
       ),
@@ -657,12 +674,19 @@ void main() {
         .getSingle();
     expect(holding.read<double>('latest_price'), 1.2345);
     expect(holding.readNullable<String>('manual_nav_history'), isNull);
+    final transaction = await db.customSelect(
+      'SELECT amount, redemption_group, opens_holding, recorded_at_micros FROM transactions WHERE id = 1',
+    ).getSingle();
+    expect(transaction.read<double>('amount'), 120);
+    expect(transaction.readNullable<String>('redemption_group'), isNull);
+    expect(transaction.readNullable<int>('opens_holding'), isNull);
+    expect(transaction.readNullable<int>('recorded_at_micros'), isNull);
     expect(
       (await db.customSelect('PRAGMA user_version').getSingle())
           .data
           .values
           .single,
-      14,
+      db.schemaVersion,
     );
   });
 }

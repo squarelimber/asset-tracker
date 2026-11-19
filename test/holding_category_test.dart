@@ -225,11 +225,11 @@ void main() {
     });
 
     Future<void> seed() async {
-      await dao.createAccount(
+      final accountId = await dao.createAccount(
         AccountsCompanion.insert(name: '券商', type: 'general'),
       );
       await dao.createHolding(HoldingsCompanion.insert(
-        accountId: 1,
+        accountId: accountId,
         name: '豆粕ETF',
         assetType: 'etf',
         marketSource: const Value('sina'),

@@ -3,6 +3,7 @@ import 'package:drift/drift.dart';
 import '../core/history_sync.dart';
 import '../data/asset_dao.dart';
 import '../data/database.dart';
+import '../domain/holding_valuation.dart';
 import 'sync_api.dart';
 import 'sync_format.dart';
 import 'sync_merge.dart';
@@ -44,6 +45,7 @@ abstract final class SyncSettingsKeys {
   static const autoSync = 'sync.autoSync';
   static const lastRev = 'sync.lastRev';
   static const lastSyncAt = 'sync.lastSyncAt';
+  static const lastServerUrl = 'sync.lastServerUrl';
 }
 
 /// Pulls the remote snapshot, merges it into the local database with
@@ -60,16 +62,21 @@ class SyncService {
 
   static const _formatter = SyncFormatter();
 
-  Future<SyncResult> sync() async {
+  Future<SyncResult> sync({({String url, String? token})? target}) async {
     try {
-      final url = await _dao.getSetting(SyncSettingsKeys.serverUrl);
-      if (url == null || url.trim().isEmpty) {
+      final config = target ?? await _dao.transaction<({String url, String? token})>(
+        () async => (
+          url: await _dao.getSetting(SyncSettingsKeys.serverUrl) ?? '',
+          token: await _dao.getSetting(SyncSettingsKeys.token),
+        ),
+      );
+      final url = config.url.trim();
+      if (url.isEmpty) {
         return SyncResult.fail('未配置同步服务器地址');
       }
-      final token = await _dao.getSetting(SyncSettingsKeys.token);
-      final api = _apiFactory(url.trim(), token);
+      final api = _apiFactory(url, config.token);
       try {
-        return await _syncWith(api);
+        return await _syncWith(api, url);
       } finally {
         api.close();
       }
@@ -80,14 +87,16 @@ class SyncService {
     }
   }
 
-  Future<SyncResult> _syncWith(SyncApi api) async {
+  Future<SyncResult> _syncWith(SyncApi api, String url) async {
     const maxAttempts = 3;
     var localDataChanged = false;
     for (var attempt = 1; attempt <= maxAttempts; attempt++) {
       final remote = await api.fetch();
       final outcome = await _dao.transaction(() async {
+        final local = await _exportLocal();
+        final repaired = await _repairLegacyIdCollisions(local, remote.snapshot);
         final outcome = const SyncMerger().merge(
-          local: await _exportLocal(),
+          local: repaired ? await _exportLocal() : local,
           remote: remote.snapshot,
           remoteTombstones: _parseTombstones(remote.tombstones),
           localTombstones: _parseTombstones(
@@ -116,11 +125,14 @@ class SyncService {
         continue;
       }
 
-      await _dao.setSetting(SyncSettingsKeys.lastRev, '${push.rev}');
-      await _dao.setSetting(
-        SyncSettingsKeys.lastSyncAt,
-        DateTime.now().toIso8601String(),
-      );
+      await _dao.transaction(() async {
+        await _dao.setSetting(SyncSettingsKeys.lastRev, '${push.rev}');
+        await _dao.setSetting(
+          SyncSettingsKeys.lastSyncAt,
+          DateTime.now().toIso8601String(),
+        );
+        await _dao.setSetting(SyncSettingsKeys.lastServerUrl, url);
+      });
       return SyncResult(
         ok: true,
         rev: push.rev,
@@ -142,25 +154,137 @@ class SyncService {
     );
   }
 
-  Future<void> _apply(MergeOutcome outcome) async {
-    // Delete first so a merged re-creation can re-insert freely. Tombstones
-    // written by the deletes must be visible to the upsert guard below, so
-    // the tombstone snapshot is taken AFTER the delete phase — a stale
-    // pre-delete snapshot let re-inserted rows (e.g. flows of a deduplicated
-    // holding) resurrect through a guard that did not know they had just
-    // been deleted. Holdings dropped by dedup are deleted WITHOUT cascading
-    // their flows: the merge already re-pointed those flows to the surviving
-    // holding (their re-insertion must not hit a fresh flow tombstone).
-    for (final table in SyncTables.all) {
-      for (final key in outcome.deletedKeys[table] ?? const <String>[]) {
-        if (table == SyncTables.holdings &&
-            outcome.dedupeHoldingKeys.contains(key)) {
-          final id = int.tryParse(key);
-          if (id == null) continue;
-          await _dao.deleteHoldingRowOnly(id);
-        } else {
-          await _deleteLocalRow(table, key);
+  /// Older clients allocated every ID from a local SQLite sequence. A
+  /// different immutable creation time or different transaction contents
+  /// distinguishes those collisions from edits to the same synced row.
+  Future<bool> _repairLegacyIdCollisions(
+    Map<String, dynamic> local,
+    Map<String, dynamic> remote,
+  ) async {
+    final accountIds = <int, int>{};
+    final holdingIds = <int, int>{};
+    var repaired = false;
+    bool differentCreation(Map<String, dynamic> a, Map<String, dynamic> b) {
+      final aDate = parseIso(a['createdAt']);
+      final bDate = parseIso(b['createdAt']);
+      return aDate != null && bDate != null && !aDate.isAtSameMomentAs(bDate);
+    }
+
+    bool remappedReference(Map<String, dynamic> row, String key, Map<int, int> ids) {
+      return ids.containsKey((row[key] as num?)?.toInt());
+    }
+
+    for (final table in [
+      SyncTables.accounts, SyncTables.holdings, SyncTables.transactions,
+      SyncTables.alertRules,
+    ]) {
+      Map<int, Map<String, dynamic>> index(Map<String, dynamic> snapshot) => {
+        for (final row in (snapshot[table] as List? ?? const [])
+            .whereType<Map<String, dynamic>>())
+          if (row['id'] is int) row['id'] as int: row,
+      };
+      final localRows = index(local);
+      final remoteRows = index(remote);
+      final used = {...localRows.keys, ...remoteRows.keys};
+      for (final entry in localRows.entries) {
+        final id = entry.key;
+        final row = entry.value;
+        final other = remoteRows[id];
+        if (other == null) continue;
+        if (table == SyncTables.transactions) {
+          const immutable = [
+            'accountId', 'holdingId', 'cashSourceId', 'cashTargetId',
+            'type', 'quantity', 'price', 'amount', 'currency',
+          ];
+          final order = row['recordedAtMicros'];
+          final otherOrder = other['recordedAtMicros'];
+          // A holding may legitimately be repointed by sync dedup. Only
+          // compare the existing numeric links on legacy transactions.
+          final incompatible = order != null && otherOrder != null
+              ? order != otherOrder
+              : immutable.any((field) => row[field] != other[field]);
+          if (!incompatible &&
+              !remappedReference(row, 'accountId', accountIds) &&
+              !['holdingId', 'cashSourceId', 'cashTargetId'].any(
+                (field) => remappedReference(row, field, holdingIds),
+              )) {
+            continue;
+          }
+        } else if (!differentCreation(row, other) &&
+            !(table == SyncTables.holdings &&
+                remappedReference(row, 'accountId', accountIds))) {
+          continue;
         }
+        var replacement = AssetDao.newSyncId();
+        while (!used.add(replacement)) {
+          replacement = AssetDao.newSyncId();
+        }
+        switch (table) {
+          case SyncTables.accounts:
+            await _dao.rekeySyncAccount(id, replacement);
+            accountIds[id] = replacement;
+          case SyncTables.holdings:
+            await _dao.rekeySyncHolding(id, replacement);
+            holdingIds[id] = replacement;
+          case SyncTables.transactions:
+            await _dao.rekeySyncTransaction(id, replacement);
+          case SyncTables.alertRules:
+            await _dao.rekeySyncAlertRule(id, replacement);
+        }
+        repaired = true;
+      }
+    }
+    if (!repaired) return false;
+    if (holdingIds.isNotEmpty) {
+      for (final snapshot in await _dao.getSnapshots()) {
+        final values = snapshotHoldingValues(snapshot);
+        if (values == null ||
+            !values.any((value) => holdingIds.containsKey(value.holdingId))) {
+          continue;
+        }
+        final rewritten = encodeHoldingValues([
+          for (final value in values)
+            DayHoldingValue(
+              holdingId: holdingIds[value.holdingId] ?? value.holdingId,
+              name: value.name,
+              type: value.type,
+              value: value.value,
+              cost: value.cost,
+              liability: value.liability,
+            ),
+        ]);
+        await _dao.upsertSnapshot(
+          snapshot.copyWith(holdingValues: Value(rewritten)).toCompanion(true),
+        );
+      }
+    }
+    await _dao.setSetting(historySyncDirtyKey, historyDirtySet);
+    return true;
+  }
+
+  Future<void> _apply(MergeOutcome outcome) async {
+    final deletedAccounts = {
+      for (final t in outcome.tombstones)
+        if (t.table == SyncTables.accounts) t.rowKey,
+    };
+    final deletedHoldings = {
+      for (final t in outcome.tombstones)
+        if (t.table == SyncTables.holdings) t.rowKey,
+    };
+    for (final row in outcome.tables[SyncTables.transactions] ?? const []) {
+      if (deletedAccounts.contains('${row['accountId']}') ||
+          ['holdingId', 'cashSourceId', 'cashTargetId'].any(
+            (field) => deletedHoldings.contains('${row[field]}'),
+          )) {
+        throw SyncException('同步发现仍在使用的账户或持仓已被另一台设备删除，请先核对关联流水');
+      }
+    }
+
+    // The merged tombstones decide exactly which rows to delete. Do not
+    // cascade here: holding dedup may have retargeted currently linked flows.
+    for (final table in SyncTables.all.reversed) {
+      for (final key in outcome.deletedKeys[table] ?? const <String>[]) {
+        await _deleteLocalRow(table, key);
       }
     }
     // Mid-sync guard: the merge decided on a snapshot taken before this
@@ -189,13 +313,13 @@ class SyncService {
         {
           final id = int.tryParse(key);
           if (id == null) return;
-          await _dao.deleteAccount(id);
+          await _dao.deleteAccountRowOnly(id);
         }
       case SyncTables.holdings:
         {
           final id = int.tryParse(key);
           if (id == null) return;
-          await _dao.deleteHolding(id);
+          await _dao.deleteHoldingRowOnly(id);
         }
       case SyncTables.transactions:
         {
@@ -349,6 +473,9 @@ class SyncService {
                 internalMove: row['internalMove'] == null
                     ? const Value.absent()
                     : Value(row['internalMove'] == true),
+                redemptionGroup: Value(row['redemptionGroup'] as String?),
+                opensHolding: Value(row['opensHolding'] as bool?),
+                recordedAtMicros: Value((row['recordedAtMicros'] as num?)?.toInt()),
                 updatedAt: Value(updatedAt),
               ),
             );
@@ -479,6 +606,9 @@ class SyncService {
         costMoved: row['costMoved'] == null ? true : row['costMoved'] == true,
         costMovedAmount: (row['costMovedAmount'] as num?)?.toDouble(),
         internalMove: row['internalMove'] == true,
+        redemptionGroup: row['redemptionGroup'] as String?,
+        opensHolding: row['opensHolding'] as bool?,
+        recordedAtMicros: (row['recordedAtMicros'] as num?)?.toInt(),
         updatedAt: parseIso(row['updatedAt']) ?? DateTime.now(),
       );
 

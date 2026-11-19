@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -40,6 +42,7 @@ Future<void> showHoldingTransactionDialog(
   // types added in v0.9.x, leaving them no working transaction path.)
   final isShare = !type.isAmountBased && type != AssetType.liability;
   final isLiability = type == AssetType.liability;
+  const externalFunding = -1;
 
   // Money holdings usable as the counterparty for transfers. Same-currency
   // only: a cross-currency transfer would move the same number on both
@@ -47,7 +50,7 @@ Future<void> showHoldingTransactionDialog(
   final moneyHoldings = holdings
       .where((h) {
         final t = AssetType.fromStorage(h.assetType);
-        return (t.isAmountBased || t == AssetType.liability) &&
+        return !h.archived && (t.isAmountBased || t == AssetType.liability) &&
             h.currency == holding.currency &&
             h.id != holding.id;
       })
@@ -59,7 +62,7 @@ Future<void> showHoldingTransactionDialog(
   final cashHoldings = holdings
       .where((h) {
         final t = AssetType.fromStorage(h.assetType);
-        return t.isAmountBased &&
+        return !h.archived && t.isAmountBased &&
             h.currency == holding.currency &&
             h.id != holding.id;
       })
@@ -72,7 +75,7 @@ Future<void> showHoldingTransactionDialog(
   final fundSources = holdings
       .where((h) {
         final t = AssetType.fromStorage(h.assetType);
-        return h.id != holding.id &&
+        return !h.archived && h.id != holding.id &&
             t != AssetType.liability &&
             h.currency == holding.currency &&
             (t.isAmountBased || h.quantity > 0);
@@ -104,11 +107,8 @@ Future<void> showHoldingTransactionDialog(
   final qtyCtrl = TextEditingController();
   final priceCtrl = TextEditingController();
   final amountCtrl = TextEditingController();
-  final cashId = ValueNotifier<int?>(
-    isShare
-        ? (cashHoldings.isEmpty ? null : cashHoldings.first.id)
-        : (moneyHoldings.isEmpty ? null : moneyHoldings.first.id),
-  );
+  final cashId = ValueNotifier<int?>(null);
+  int? linkedCashId() => cashId.value == externalFunding ? null : cashId.value;
   final noteCtrl = TextEditingController();
   // 发生日期：默认今天。补录历史操作（如 9 月初买入、今天才记账）时必须能
   // 改成真实发生日期，否则历史回放会把今天才发生的流水放在错误的日子，
@@ -117,6 +117,11 @@ Future<void> showHoldingTransactionDialog(
 
   String? validate() {
     final t = txnType.value;
+    if (isShare &&
+        (t == TransactionType.buy || t == TransactionType.sell) &&
+        cashId.value == null) {
+      return t == TransactionType.buy ? '请选择扣款来源' : '请选择回款去向';
+    }
     if (isShare && t == TransactionType.dividend) {
       if (amountCtrl.text.trim().isEmpty) return '请填写分红金额';
       if (cashId.value == null) return '请选择入账现金持仓';
@@ -140,7 +145,7 @@ Future<void> showHoldingTransactionDialog(
       return '请填写数量和单价';
     }
     if (t == TransactionType.buy) {
-      final id = cashId.value;
+      final id = linkedCashId();
       if (id != null) {
         for (final h in holdings) {
           if (h.id != id) continue;
@@ -198,14 +203,8 @@ Future<void> showHoldingTransactionDialog(
                       ],
                       selected: {value},
                       onSelectionChanged: (s) => setState(() {
-                        final next = s.first;
-                        if (isShare && next != TransactionType.buy &&
-                            !cashHoldings.any((h) => h.id == cashId.value)) {
-                          // A share-based funding source is valid for a purchase,
-                          // but cannot receive a sale or dividend.
-                          cashId.value = null;
-                        }
-                        txnType.value = next;
+                        if (txnType.value != s.first) cashId.value = null;
+                        txnType.value = s.first;
                       }),
                     ),
                   ),
@@ -309,10 +308,14 @@ Future<void> showHoldingTransactionDialog(
                                   t == TransactionType.transferOut
                               ? moneyHoldings
                               : <HoldingRow>[]);
-                      if (dropdownHoldings.isEmpty ||
-                          t == TransactionType.consume ||
-                          t == TransactionType.split) {
-                        return const SizedBox.shrink();
+                      final canUseExternal = isShare &&
+                          (t == TransactionType.buy || t == TransactionType.sell);
+                      final needsCounterparty = isShare
+                          ? t != TransactionType.split
+                          : t == TransactionType.transferIn || t == TransactionType.transferOut;
+                      if (!needsCounterparty) return const SizedBox.shrink();
+                      if (dropdownHoldings.isEmpty && !canUseExternal) {
+                        return Text('暂无可用的同币种持仓', style: T.label(color: T.warning));
                       }
                       return Column(
                         mainAxisSize: MainAxisSize.min,
@@ -325,11 +328,12 @@ Future<void> showHoldingTransactionDialog(
                               initialValue: value,
                               decoration: terminalDecoration(counterpartyLabel(t, isShare)),
                               items: [
-                                if (isShare &&
-                                    (t == TransactionType.buy || t == TransactionType.sell))
-                                  const DropdownMenuItem<int>(
-                                    value: null,
-                                    child: Text('不关联持仓'),
+                                if (canUseExternal)
+                                  DropdownMenuItem<int>(
+                                    value: externalFunding,
+                                    child: Text(t == TransactionType.buy
+                                        ? '不扣应用内余额'
+                                        : '回款不入账'),
                                   ),
                                 for (final c in dropdownHoldings)
                                   DropdownMenuItem(
@@ -353,8 +357,13 @@ Future<void> showHoldingTransactionDialog(
                                   child: Text(
                                     t == TransactionType.buy
                                         ? _buySourceHint(
-                                            cashId.value, holdings, amountCtrl.text)
-                                        : '不选则卖出回款不入账',
+                                            linkedCashId(), holdings, amountCtrl.text,
+                                            external: cashId.value == externalFunding,
+                                            hidden: hidden,
+                                          )
+                                        : t == TransactionType.sell && cashId.value == externalFunding
+                                        ? '本次卖出仅减少产品份额，钱款不会进入应用内持仓。'
+                                        : '',
                                     style: T.label(size: 12, color: T.text2),
                                   ),
                                 ),
@@ -385,7 +394,7 @@ Future<void> showHoldingTransactionDialog(
               onPressed: saving ? null : () async {
                 final error = validate();
                 if (error != null) {
-                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error)));
+                  setState(() => saveError = error);
                   return;
                 }
                 final amount = double.tryParse(amountCtrl.text.trim()) ?? 0;
@@ -399,7 +408,7 @@ Future<void> showHoldingTransactionDialog(
                   return;
                 }
                 final service = ref.read(transactionServiceProvider);
-                final sourceId = cashId.value;
+                final sourceId = linkedCashId();
                 HoldingRow? source;
                 if (sourceId != null) {
                   for (final h in holdings) {
@@ -456,20 +465,20 @@ Future<void> showHoldingTransactionDialog(
                               : null,
                           amount: amount,
                           cashSourceId: switch (t) {
-                            TransactionType.buy => cashId.value,
-                            TransactionType.transferIn => cashId.value,
+                            TransactionType.buy => linkedCashId(),
+                            TransactionType.transferIn => linkedCashId(),
                             TransactionType.transferOut => holding.id,
                             _ => null,
                           },
                           cashTargetId: switch (t) {
                             TransactionType.sell ||
                             TransactionType.dividend =>
-                              cashId.value,
+                              linkedCashId(),
                             TransactionType.income ||
                             TransactionType.expense =>
                               holding.id,
                             TransactionType.transferIn => holding.id,
-                            TransactionType.transferOut => cashId.value,
+                            TransactionType.transferOut => linkedCashId(),
                             _ => null,
                           },
                           note: noteCtrl.text.trim(),
@@ -487,19 +496,7 @@ Future<void> showHoldingTransactionDialog(
                   final messenger = ScaffoldMessenger.of(context);
                   setState(() => saving = false);
                   Navigator.pop(context);
-                  if (result.ok) {
-                    ref.read(daoProvider).setSetting(historySyncDirtyKey, historyDirtySet);
-                    // 补录历史日期的流水会同时改变过去每一天的历史本金/收益
-                    // （金额型回放、产品收益日历都按流水日期重算），light 窗口
-                    // 覆盖不到更早的日子 —— 必须全量重建。
-                    if (backdated) {
-                      // Fire-and-forget, mirroring the dirty flag: keeps the save
-                      // callback free of post-await BuildContext uses.
-                      ref
-                          .read(daoProvider)
-                          .setSetting(historyFullRebuildKey, '1');
-                    }
-                  }
+                  _markTransactionHistory(ref, backdated);
                   messenger.showSnackBar(const SnackBar(content: Text('已记录')));
                 } catch (_) {
                   if (!context.mounted) return;
@@ -530,6 +527,14 @@ Future<void> showHoldingTransactionDialog(
 String _transactionError(String? message, bool hidden) {
   final text = message ?? '记录失败';
   return hidden ? text.replaceAll(RegExp(r'（可用 [^）]*）'), '（可用 ****）') : text;
+}
+
+void _markTransactionHistory(WidgetRef ref, bool backdated) {
+  final dao = ref.read(daoProvider);
+  unawaited(dao.transaction(() async {
+    if (backdated) await dao.setSetting(historyFullRebuildKey, '1');
+    await dao.setSetting(historySyncDirtyKey, historyDirtySet);
+  }));
 }
 
 /// Date picker for the transaction's 发生日期 (defaults to today; change it
@@ -587,8 +592,8 @@ String sellProfitText(
 String counterpartyLabel(TransactionType t, bool isShare) {
   if (isShare) {
     return switch (t) {
-      TransactionType.buy => '扣款来源（可选）',
-      TransactionType.sell => '入账目标（可选）',
+      TransactionType.buy => '扣款来源',
+      TransactionType.sell => '回款去向',
       _ => '入账现金持仓',
     };
   }
@@ -618,30 +623,26 @@ String _sourceItemLabel(HoldingRow h, bool hidden) {
 String _buySourceHint(
   int? sourceId,
   List<HoldingRow> holdings,
-  String amountText,
-) {
-  if (sourceId == null) return '不选则不联动扣款';
-  HoldingRow? source;
-  for (final h in holdings) {
-    if (h.id == sourceId) {
-      source = h;
-      break;
-    }
+  String amountText, {
+  required bool external,
+  required bool hidden,
+}) {
+  if (external) return '本次买入只增加目标持仓。';
+  final source = holdings.where((holding) => holding.id == sourceId).firstOrNull;
+  if (source == null) return '请选择一项持仓扣款，或选择应用外资金。';
+  final type = AssetType.fromStorage(source.assetType);
+  final entered = double.tryParse(amountText.trim());
+  final amount = entered != null && entered.isFinite ? entered : 0.0;
+  if (type.isAmountBased) {
+    if (amount <= 0 || hidden) return '保存时从 ${source.name} 扣款';
+    return '从 ${source.name} 扣款 · 预计余额 ${Formats.money(source.quantity - amount, source.currency)}';
   }
-  if (source == null) return '不选则不联动扣款';
-  final t = AssetType.fromStorage(source.assetType);
-  if (t.isAmountBased) return '保存时从 ${source.name} 扣减该金额';
-  // Per-unit price fallback (1.0) — a DIFFERENT rule from effectiveCostOf();
-  // mirrors transaction_service.dart.
   final unit = source.latestPrice > 0
       ? source.latestPrice
       : (source.costPrice > 0 ? source.costPrice : 1.0);
-  final amount = double.tryParse(amountText.trim()) ?? 0;
-  if (amount <= 0 || unit <= 0) {
-    return '保存时赎回 ${source.name} 对应份额用于本笔买入';
-  }
-  return '将赎回 ${source.name} 约 ${Formats.num(amount / unit)} 份'
-      '（单价 ${Formats.smartNum(unit)}）用于本笔买入';
+  if (amount <= 0 || hidden) return '保存时赎回 ${source.name} 用于本笔买入';
+  final quantity = amount / unit;
+  return '将赎回 ${source.name} 约 ${Formats.num(quantity)} 份 · 预计剩余 ${Formats.num(source.quantity - quantity)} 份';
 }
 
 void syncAmount(
@@ -680,7 +681,7 @@ Future<void> showAccountTransactionDialog(
   final moneyHoldings = holdings
       .where((h) {
         final t = AssetType.fromStorage(h.assetType);
-        return t.isAmountBased || t == AssetType.liability;
+        return !h.archived && (t.isAmountBased || t == AssetType.liability);
       })
       .toList();
   final accountHoldings =
@@ -699,6 +700,7 @@ Future<void> showAccountTransactionDialog(
   final targetId = ValueNotifier<int?>(null);
   final amountCtrl = TextEditingController();
   final noteCtrl = TextEditingController();
+  final occurredAt = ValueNotifier<DateTime>(DateTime.now());
 
   var saving = false;
   String? saveError;
@@ -773,6 +775,8 @@ Future<void> showAccountTransactionDialog(
                     label: '金额',
                     keyboardType: const TextInputType.numberWithOptions(decimal: true),
                   ),
+                  const SizedBox(height: 12),
+                  _TransactionDateField(value: occurredAt),
                   const SizedBox(height: 12),
                   TerminalTextField(
                     controller: noteCtrl,
@@ -859,8 +863,13 @@ Future<void> showAccountTransactionDialog(
                   saveError = null;
                 });
                 try {
-                  final result = await ref.read(transactionServiceProvider).record(
+                  final when = occurredAt.value;
+                  final backdated = todayKey(when) != todayKey();
+                  final service = ref.read(transactionServiceProvider);
+                  final record = backdated ? service.recordHistorical : service.record;
+                  final result = await record(
                     accountId: accountId,
+                    occurredAt: when,
                     type: txnTypeValue,
                     amount: amount,
                     cashSourceId:
@@ -882,9 +891,7 @@ Future<void> showAccountTransactionDialog(
                   final messenger = ScaffoldMessenger.of(context);
                   setState(() => saving = false);
                   Navigator.pop(context);
-                  if (result.ok) {
-                    ref.read(daoProvider).setSetting(historySyncDirtyKey, historyDirtySet);
-                  }
+                  _markTransactionHistory(ref, backdated);
                   messenger.showSnackBar(const SnackBar(content: Text('已记录')));
                 } catch (_) {
                   if (!context.mounted) return;
@@ -908,6 +915,7 @@ Future<void> showAccountTransactionDialog(
   txnType.dispose();
   sourceId.dispose();
   targetId.dispose();
+  occurredAt.dispose();
 }
 
 class MoneyDropdown extends StatelessWidget {

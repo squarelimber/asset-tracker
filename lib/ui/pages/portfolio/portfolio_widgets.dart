@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
@@ -13,7 +11,6 @@ import '../../../data/database.dart';
 import '../../../domain/chart_downsample.dart';
 import '../../../domain/nice_ticks.dart';
 import '../../../domain/portfolio_calculator.dart';
-import '../../../domain/portfolio_intraday.dart';
 import '../../../domain/range_stats.dart';
 import '../../../domain/rate_series.dart';
 import '../../../domain/target_allocation.dart';
@@ -21,12 +18,10 @@ import '../../../services/market/history_lookup.dart';
 import '../../../services/market/history_source.dart';
 import '../../../services/market/tencent_history_source.dart';
 import '../../components/section_header.dart';
-import '../../components/intraday_line_chart.dart';
 import '../../components/terminal_card.dart';
 import '../../components/terminal_choice.dart';
 import '../../tokens.dart';
 import 'day_detail_sheet.dart';
-import 'portfolio_intraday.dart';
 import 'target_allocation_dialog.dart';
 
 /// Asset allocation: donut + table (实际/目标/偏离), reference-mock layout.
@@ -338,109 +333,8 @@ class NetWorthChart extends ConsumerStatefulWidget {
   ConsumerState<NetWorthChart> createState() => _NetWorthChartState();
 }
 
-class _PortfolioIntradayTrend extends ConsumerWidget {
-  const _PortfolioIntradayTrend({required this.day});
-
-  final String day;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final history = ref.watch(portfolioIntradayHistoryProvider(day));
-    final samples = ref.watch(portfolioIntradayProvider(day));
-    final rebuilt = history.valueOrNull;
-    final hasHistory = rebuilt?.points.isNotEmpty ?? false;
-    final points = hasHistory
-        ? rebuilt!.points
-        : samples.valueOrNull ?? const [];
-    final hidden = ref.watch(hideAmountsProvider);
-    if (points.isEmpty) {
-      if (history.isLoading || samples.isLoading) {
-        return const Center(child: CircularProgressIndicator());
-      }
-      return Padding(
-        padding: const EdgeInsets.symmetric(vertical: 20),
-        child: Text(
-          history.hasError || samples.hasError
-              ? '今日分时加载失败，可刷新重试。'
-              : '暂无可用的今日分时行情。',
-          style: T.label(),
-        ),
-      );
-    }
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          hidden
-              ? Formats.masked()
-              : '${points.last.profit >= 0 ? '+' : ''}${Formats.money(points.last.profit)}',
-          style: T.mono(size: 22, weight: FontWeight.w700),
-        ),
-        Text('截至 ${minuteLabel(points.last.minute)} · $day', style: T.label()),
-        if (!hidden) ...[
-          IntradayLineChart(
-            points: [
-              for (final p in points) (minute: p.minute, value: p.profit),
-            ],
-            formatValue: Formats.money,
-          ),
-        ],
-        const SizedBox(height: T.s2),
-        Text(
-          hasHistory
-              ? '按 A 股时段重算，分时行情覆盖 ${rebuilt!.covered}/${rebuilt.eligible} 项份额类持仓。其余资产及汇率按固定值估算。'
-              : '当前显示本机已记录的净值点，扣除已记录的外部资金进出。',
-          style: T.label(),
-        ),
-      ],
-    );
-  }
-}
-
 class _NetWorthChartState extends ConsumerState<NetWorthChart> {
-  RangeOption? _manualRange;
-  late bool _autoToday;
-  late String _marketDay;
-  Timer? _sessionTimer;
-  late final AppLifecycleListener _lifecycle;
-
-  RangeOption get _range =>
-      _manualRange ?? (_autoToday ? RangeOption.today : RangeOption.ytd);
-
-  @override
-  void initState() {
-    super.initState();
-    final now = widget.clock();
-    _autoToday = prefersTodayTrend(now);
-    _marketDay = todayKey(chinaMarketTime(now));
-    _lifecycle = AppLifecycleListener(
-      onResume: () {
-        ref.invalidate(
-          portfolioIntradayHistoryProvider(
-            todayKey(chinaMarketTime(widget.clock())),
-          ),
-        );
-      },
-    );
-    _sessionTimer = Timer.periodic(const Duration(seconds: 15), (_) {
-      final now = widget.clock();
-      final today = prefersTodayTrend(now);
-      final day = todayKey(chinaMarketTime(now));
-      if (day != _marketDay || (_manualRange == null && today != _autoToday)) {
-        setState(() {
-          _autoToday = today;
-          _marketDay = day;
-        });
-      }
-    });
-  }
-
-  @override
-  void dispose() {
-    _lifecycle.dispose();
-    _sessionTimer?.cancel();
-    super.dispose();
-  }
+  RangeOption _range = RangeOption.ytd;
 
   DateTime? _customFrom;
   DateTime? _customTo;
@@ -615,14 +509,16 @@ class _NetWorthChartState extends ConsumerState<NetWorthChart> {
     setState(() {
       _customFrom = from;
       _customTo = to;
-      _manualRange = RangeOption.custom;
+      _range = RangeOption.custom;
     });
   }
 
   @override
   Widget build(BuildContext context) {
     final snapshots = ref.watch(snapshotsProvider);
-    return _InsetPanel(
+    return TerminalCard(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+      margin: EdgeInsets.zero,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -631,35 +527,31 @@ class _NetWorthChartState extends ConsumerState<NetWorthChart> {
             overflowAlignment: OverflowBarAlignment.start,
             spacing: T.s2,
             children: [
-              Text(
-                _range == RangeOption.today ? '今日盈亏走势' : '净值趋势',
-                style: const TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                ),
+              const Text(
+                '净值趋势',
+                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
               ),
-              if (_range != RangeOption.today)
-                Wrap(
-                  spacing: T.s1,
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  children: [
-                    TextButton.icon(
-                      onPressed: _showBenchmarkPanel,
-                      icon: const Icon(Icons.compare_arrows, size: 16),
-                      label: Text(
-                        _benchSelected.isEmpty
-                            ? '指数对比'
-                            : '指数对比 (${_benchSelected.length})',
-                      ),
+              Wrap(
+                spacing: T.s1,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  TextButton.icon(
+                    onPressed: _showBenchmarkPanel,
+                    icon: const Icon(Icons.compare_arrows, size: 16),
+                    label: Text(
+                      _benchSelected.isEmpty
+                          ? '指数对比'
+                          : '指数对比 (${_benchSelected.length})',
                     ),
-                    for (final view in _TrendView.values)
-                      TerminalChoice(
-                        label: view == _TrendView.returnRate ? '收益率' : '净值',
-                        selected: _view == view,
-                        onPressed: () => setState(() => _view = view),
-                      ),
-                  ],
-                ),
+                  ),
+                  for (final view in _TrendView.values)
+                    TerminalChoice(
+                      label: view == _TrendView.returnRate ? '收益率' : '净值',
+                      selected: _view == view,
+                      onPressed: () => setState(() => _view = view),
+                    ),
+                ],
+              ),
             ],
           ),
           const SizedBox(height: T.s2),
@@ -673,7 +565,7 @@ class _NetWorthChartState extends ConsumerState<NetWorthChart> {
                   selected: _range == option,
                   onPressed: option == RangeOption.custom
                       ? _pickCustomRange
-                      : () => setState(() => _manualRange = option),
+                      : () => setState(() => _range = option),
                 ),
             ],
           ),
@@ -686,232 +578,227 @@ class _NetWorthChartState extends ConsumerState<NetWorthChart> {
                 style: T.mono(size: 11, color: T.text2),
               ),
             ),
-          if (_range == RangeOption.today)
-            _PortfolioIntradayTrend(day: _marketDay)
-          else
-            snapshots.when(
-              data: (all) {
-                final now = widget.clock();
-                final startDate = _range == RangeOption.custom
-                    ? _customFrom
-                    : _range.startDate(now);
-                final endDate = _range == RangeOption.custom
-                    ? _customTo
-                    : (_range == RangeOption.all ? null : now);
-                final list = const RangeStatsCalculator().filter(
-                  all,
-                  from: startDate == null ? null : Formats.date(startDate),
-                  to: endDate == null ? null : Formats.date(endDate),
-                );
-                if (list.isEmpty) {
-                  return Padding(
-                    padding: const EdgeInsets.all(24),
-                    child: Center(
-                      child: Text(
-                        all.isEmpty ? '暂无净值记录' : '所选区间没有净值记录',
-                        style: const TextStyle(color: T.text3),
-                      ),
+          snapshots.when(
+            data: (all) {
+              final now = widget.clock();
+              final startDate = _range == RangeOption.custom
+                  ? _customFrom
+                  : _range.startDate(now);
+              final endDate = _range == RangeOption.custom
+                  ? _customTo
+                  : (_range == RangeOption.all ? null : now);
+              final list = const RangeStatsCalculator().filter(
+                all,
+                from: startDate == null ? null : Formats.date(startDate),
+                to: endDate == null ? null : Formats.date(endDate),
+              );
+              if (list.isEmpty) {
+                return Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Center(
+                    child: Text(
+                      all.isEmpty ? '暂无净值记录' : '所选区间没有净值记录',
+                      style: const TextStyle(color: T.text3),
                     ),
-                  );
-                }
-                final stats = const RangeStatsCalculator().compute(list);
-                final isRate = _view == _TrendView.returnRate;
-                final showBenchmarks =
-                    isRate && _benchSelected.any(_benchData.containsKey);
-                final rates = const RateSeriesCalculator().ratesOf(list);
-                final rateDelta = const RateSeriesCalculator().rangeRatePct(
-                  list,
+                  ),
                 );
-                final rateAnnualized = const RateSeriesCalculator()
-                    .annualizedFromRange(list);
-                final mainValue = isRate
-                    ? (rateDelta ?? 0)
-                    : (stats?.profit ?? 0);
-                final mainPct = isRate
-                    ? (rateDelta ?? 0) / 100
-                    : (stats?.profitPct ?? 0);
-                final color = T.changeColor(mainValue);
-                final hideAmounts = ref.watch(hideAmountsProvider);
-                String moneyText(double v) =>
-                    hideAmounts ? Formats.masked() : Formats.money(v);
-                return Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    if (stats != null) ...[
-                      // 布局：左侧纵向说明（区间收益 → 年化/天数），右侧主金额
-                      // 右对齐，与趋势图右缘对齐；ⓘ 挂在收益率旁。
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.end,
-                        children: [
-                          // 左列：区间收益说明（纵向）
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Text(
-                                      isRate ? '区间收益' : '区间年化',
-                                      style: T.mono(size: 11, color: T.text3),
-                                    ),
-                                    const SizedBox(width: 4),
-                                    Tooltip(
-                                      message:
-                                          '收益率自区间首日归零，与指数同起点对比；'
-                                          '已剔除转入资金影响（成本口径近似）',
-                                      child: InkWell(
-                                        borderRadius: BorderRadius.circular(
-                                          T.rPill,
-                                        ),
-                                        onTap: () => showDialog<void>(
-                                          context: context,
-                                          builder: (context) => AlertDialog(
-                                            title: const Text('收益率口径'),
-                                            content: const Text(
-                                              '收益率自区间首日归零，与指数同起点对比；'
-                                              '已剔除转入资金影响（成本口径近似）',
+              }
+              final stats = const RangeStatsCalculator().compute(list);
+              final isRate = _view == _TrendView.returnRate;
+              final showBenchmarks =
+                  isRate && _benchSelected.any(_benchData.containsKey);
+              final rates = const RateSeriesCalculator().ratesOf(list);
+              final rateDelta = const RateSeriesCalculator().rangeRatePct(list);
+              final rateAnnualized = const RateSeriesCalculator()
+                  .annualizedFromRange(list);
+              final mainValue = isRate
+                  ? (rateDelta ?? 0)
+                  : (stats?.profit ?? 0);
+              final mainPct = isRate
+                  ? (rateDelta ?? 0) / 100
+                  : (stats?.profitPct ?? 0);
+              final color = T.changeColor(mainValue);
+              final hideAmounts = ref.watch(hideAmountsProvider);
+              String moneyText(double v) =>
+                  hideAmounts ? Formats.masked() : Formats.money(v);
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (stats != null) ...[
+                    // 布局：左侧纵向说明（区间收益 → 年化/天数），右侧主金额
+                    // 右对齐，与趋势图右缘对齐；ⓘ 挂在收益率旁。
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        // 左列：区间收益说明（纵向）
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(
+                                    isRate ? '区间收益' : '区间年化',
+                                    style: T.mono(size: 11, color: T.text3),
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Tooltip(
+                                    message:
+                                        '收益率自区间首日归零，与指数同起点对比；'
+                                        '已剔除转入资金影响（成本口径近似）',
+                                    child: InkWell(
+                                      borderRadius: BorderRadius.circular(
+                                        T.rPill,
+                                      ),
+                                      onTap: () => showDialog<void>(
+                                        context: context,
+                                        builder: (context) => AlertDialog(
+                                          title: const Text('收益率口径'),
+                                          content: const Text(
+                                            '收益率自区间首日归零，与指数同起点对比；'
+                                            '已剔除转入资金影响（成本口径近似）',
+                                          ),
+                                          actions: [
+                                            TextButton(
+                                              onPressed: () =>
+                                                  Navigator.pop(context),
+                                              child: const Text('知道了'),
                                             ),
-                                            actions: [
-                                              TextButton(
-                                                onPressed: () =>
-                                                    Navigator.pop(context),
-                                                child: const Text('知道了'),
-                                              ),
-                                            ],
-                                          ),
+                                          ],
                                         ),
-                                        child: const Padding(
-                                          padding: EdgeInsets.all(2),
-                                          child: Icon(
-                                            Icons.info_outline,
-                                            size: 13,
-                                            color: T.text3,
-                                          ),
+                                      ),
+                                      child: const Padding(
+                                        padding: EdgeInsets.all(2),
+                                        child: Icon(
+                                          Icons.info_outline,
+                                          size: 13,
+                                          color: T.text3,
                                         ),
                                       ),
                                     ),
-                                  ],
-                                ),
-                                const SizedBox(height: 2),
-                                Text(
-                                  isRate
-                                      ? '年化 ${rateAnnualized == null ? '--' : Formats.pct(rateAnnualized)}'
-                                            ' · ${stats.days} 天'
-                                      : '${stats.days} 天',
-                                  style: T.mono(size: 11, color: T.text3),
-                                ),
-                                // 方案①：已选指数的区间收益率（与资产同区间、
-                                // 同起点），一眼对比「我的收益率 vs 指数」。
-                                if (showBenchmarks)
-                                  Padding(
-                                    padding: const EdgeInsets.only(top: 3),
-                                    child: Wrap(
-                                      spacing: 10,
-                                      runSpacing: 2,
-                                      children: [
-                                        for (final code in _benchSelected)
-                                          if (_benchData.containsKey(code))
-                                            _benchRangePct(code, list),
-                                      ],
-                                    ),
                                   ),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          // 右列：主数值 + 次级小字，右对齐趋势图右缘
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.end,
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Text(
-                                isRate
-                                    ? '${mainValue >= 0 ? '+' : ''}${Formats.pct(mainPct)}'
-                                    : '${mainValue >= 0 ? '+' : ''}${moneyText(mainValue)}',
-                                style: T.mono(
-                                  size: 22,
-                                  weight: FontWeight.w700,
-                                  color: color,
-                                ),
+                                ],
                               ),
                               const SizedBox(height: 2),
                               Text(
                                 isRate
-                                    ? '${stats.profit >= 0 ? '+' : ''}${moneyText(stats.profit)}'
-                                    : '${stats.profitPct >= 0 ? '+' : ''}${Formats.pct(stats.profitPct)}',
-                                style: T.mono(
-                                  size: 12,
-                                  color: isRate ? T.text2 : color,
-                                ),
+                                    ? '年化 ${rateAnnualized == null ? '--' : Formats.pct(rateAnnualized)}'
+                                          ' · ${stats.days} 天'
+                                    : '${stats.days} 天',
+                                style: T.mono(size: 11, color: T.text3),
                               ),
+                              // 方案①：已选指数的区间收益率（与资产同区间、
+                              // 同起点），一眼对比「我的收益率 vs 指数」。
+                              if (showBenchmarks)
+                                Padding(
+                                  padding: const EdgeInsets.only(top: 3),
+                                  child: Wrap(
+                                    spacing: 10,
+                                    runSpacing: 2,
+                                    children: [
+                                      for (final code in _benchSelected)
+                                        if (_benchData.containsKey(code))
+                                          _benchRangePct(code, list),
+                                    ],
+                                  ),
+                                ),
                             ],
                           ),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-                    ],
-                    // Legend above the chart (no overlay).
-                    if (showBenchmarks)
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 8),
-                        child: Wrap(
-                          spacing: 14,
-                          runSpacing: 4,
+                        ),
+                        const SizedBox(width: 8),
+                        // 右列：主数值 + 次级小字，右对齐趋势图右缘
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          mainAxisSize: MainAxisSize.min,
                           children: [
-                            _LegendDot(gradient: T.trendGradient, label: '资产'),
-                            for (final code in _benchSelected)
-                              if (_benchData.containsKey(code))
-                                _LegendDot(
-                                  color: _benchColor(code),
-                                  label: _benchIndexes
-                                      .firstWhere((b) => b.code == code)
-                                      .label,
-                                ),
+                            Text(
+                              isRate
+                                  ? '${mainValue >= 0 ? '+' : ''}${Formats.pct(mainPct)}'
+                                  : '${mainValue >= 0 ? '+' : ''}${moneyText(mainValue)}',
+                              style: T.mono(
+                                size: 22,
+                                weight: FontWeight.w700,
+                                color: color,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              isRate
+                                  ? '${stats.profit >= 0 ? '+' : ''}${moneyText(stats.profit)}'
+                                  : '${stats.profitPct >= 0 ? '+' : ''}${Formats.pct(stats.profitPct)}',
+                              style: T.mono(
+                                size: 12,
+                                color: isRate ? T.text2 : color,
+                              ),
+                            ),
                           ],
                         ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                  ],
+                  // Legend above the chart (no overlay).
+                  if (showBenchmarks)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: Wrap(
+                        spacing: 14,
+                        runSpacing: 4,
+                        children: [
+                          _LegendDot(gradient: T.trendGradient, label: '资产'),
+                          for (final code in _benchSelected)
+                            if (_benchData.containsKey(code))
+                              _LegendDot(
+                                color: _benchColor(code),
+                                label: _benchIndexes
+                                    .firstWhere((b) => b.code == code)
+                                    .label,
+                              ),
+                        ],
                       ),
-                    _TrendChart(
-                      list: list,
-                      view: _view,
-                      rates: rates,
-                      hideAmounts: hideAmounts,
-                      benchmarks: {
-                        for (final code in _benchSelected)
-                          if (_benchData.containsKey(code))
-                            code: _BenchSeries(
-                              name: _benchIndexes
-                                  .firstWhere((b) => b.code == code)
-                                  .label,
-                              color: _benchColor(code),
-                              lookup: _benchData[code]!,
-                            ),
-                      },
-                      onDayTap: (date) => _showDayDetail(context, date),
                     ),
-                  ],
-                );
-              },
-              loading: () => const SizedBox(
-                height: 220,
-                child: Center(child: CircularProgressIndicator()),
-              ),
-              error: (e, _) => Padding(
-                padding: const EdgeInsets.all(24),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Text('净值数据加载失败', style: T.mono(size: 12, color: T.text2)),
-                    const SizedBox(width: 8),
-                    TextButton(
-                      onPressed: () => ref.invalidate(snapshotsProvider),
-                      child: const Text('重试'),
-                    ),
-                  ],
-                ),
+                  _TrendChart(
+                    list: list,
+                    view: _view,
+                    rates: rates,
+                    hideAmounts: hideAmounts,
+                    benchmarks: {
+                      for (final code in _benchSelected)
+                        if (_benchData.containsKey(code))
+                          code: _BenchSeries(
+                            name: _benchIndexes
+                                .firstWhere((b) => b.code == code)
+                                .label,
+                            color: _benchColor(code),
+                            lookup: _benchData[code]!,
+                          ),
+                    },
+                    onDayTap: (date) => _showDayDetail(context, date),
+                  ),
+                ],
+              );
+            },
+            loading: () => const SizedBox(
+              height: 220,
+              child: Center(child: CircularProgressIndicator()),
+            ),
+            error: (e, _) => Padding(
+              padding: const EdgeInsets.all(24),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text('净值数据加载失败', style: T.mono(size: 12, color: T.text2)),
+                  const SizedBox(width: 8),
+                  TextButton(
+                    onPressed: () => ref.invalidate(snapshotsProvider),
+                    child: const Text('重试'),
+                  ),
+                ],
               ),
             ),
+          ),
         ],
       ),
     );
@@ -978,6 +865,7 @@ class _TrendChart extends StatefulWidget {
 
 class _TrendChartState extends State<_TrendChart> {
   final _hoverIndex = ValueNotifier<int?>(null);
+  String? _selectedDate;
 
   @override
   void dispose() {
@@ -1119,189 +1007,211 @@ class _TrendChartState extends State<_TrendChart> {
             ? (rates.isEmpty ? 0.0 : rates.last - rateBase)
             : list.last.totalValue;
 
+        final selected = list.indexWhere((row) => row.date == _selectedDate);
         // 区间/视图切换时图表渐显（克制：250ms 淡入）。
-        return AnimatedSwitcher(
-          key: ValueKey(
-            '${widget.view.name}-${widget.list.length}-'
-            '${widget.list.isEmpty ? 0 : widget.list.last.date}',
-          ),
-          duration: const Duration(milliseconds: 250),
-          switchInCurve: Curves.easeOut,
-          child: SizedBox(
-            height: chartHeight,
-            child: Stack(
-              children: [
-                LineChart(
-                  LineChartData(
-                    minY: axisMin,
-                    maxY: axisMax,
-                    gridData: FlGridData(
-                      show: true,
-                      drawVerticalLine: false,
-                      horizontalInterval: ticks.step,
-                      getDrawingHorizontalLine: (v) => FlLine(
-                        color: T.borderSoft,
-                        strokeWidth: 1,
-                        dashArray: const [4, 4],
-                      ),
-                    ),
-                    borderData: FlBorderData(show: false),
-                    titlesData: FlTitlesData(
-                      leftTitles: AxisTitles(
-                        sideTitles: SideTitles(
-                          showTitles: true,
-                          reservedSize: plotLeft,
-                          interval: ticks.step,
-                          // Right-align labels inside the reserved gutter so
-                          // they sit flush against the plot edge — the first
-                          // data point then starts right at the axis instead of
-                          // floating in a blank gap. The minimum tick gets extra
-                          // bottom padding so it clears the X-axis date label
-                          // (左下角 -4% 与 1月 不再贴紧).
-                          getTitlesWidget: (v, meta) {
-                            final isMin = (v - axisMin).abs() < ticks.step / 2;
-                            return Align(
-                              alignment: Alignment.centerRight,
-                              child: Padding(
-                                padding: EdgeInsets.only(
-                                  bottom: isMin ? 10 : 0,
-                                ),
-                                child: Text(
-                                  valueText(v),
-                                  style: T.mono(
-                                    size: yLabelSize,
-                                    color: T.text3,
-                                  ),
-                                ),
-                              ),
-                            );
-                          },
-                        ),
-                      ),
-                      bottomTitles: AxisTitles(
-                        sideTitles: SideTitles(
-                          showTitles: true,
-                          interval: xInterval,
-                          reservedSize: 24,
-                          getTitlesWidget: (v, meta) {
-                            final i = v.toInt();
-                            if (i < 0 || i >= list.length) {
-                              return const SizedBox.shrink();
-                            }
-                            final d = DateTime.tryParse(list[i].date);
-                            if (d == null) return const SizedBox.shrink();
-                            // 长区间用「M」或「yy/M」压缩标签，避免标签宽度
-                            // 撞到 Y 轴；短区间用「M-d」。
-                            final label = longRange
-                                ? (list.length > 600
-                                      ? '${d.year % 100}/${d.month}'
-                                      : '${d.month}月')
-                                : '${d.month}-${d.day}';
-                            // 首/尾标签缩进，避免贴住 Y 轴刻度和右缘。
-                            final leftPad = i == 0 ? 8.0 : 0.0;
-                            return Padding(
-                              padding: EdgeInsets.only(left: leftPad),
-                              child: Text(
-                                label,
-                                style: T.mono(size: 10, color: T.text3),
-                              ),
-                            );
-                          },
-                        ),
-                      ),
-                      topTitles: const AxisTitles(
-                        sideTitles: SideTitles(showTitles: false),
-                      ),
-                      rightTitles: const AxisTitles(
-                        sideTitles: SideTitles(showTitles: false),
-                      ),
-                    ),
-                    lineTouchData: LineTouchData(
-                      // The custom overlay below owns the crosshair and label.
-                      // Keep the touch callback without drawing a second tooltip.
-                      handleBuiltInTouches: false,
-                      touchCallback: (event, response) {
-                        // Lines can be sampled at different dates and sorted
-                        // by touch distance. The overlay describes the asset,
-                        // so never use a benchmark's point as its date.
-                        final idx = trendAssetSpotIndex(response?.lineBarSpots);
-                        final ended =
-                            event is FlPanEndEvent ||
-                            event is FlPanCancelEvent ||
-                            event is FlPointerExitEvent ||
-                            event is FlTapCancelEvent;
-                        if (!ended &&
-                            idx != null &&
-                            idx >= 0 &&
-                            idx < list.length) {
-                          _hoverIndex.value = idx;
-                        } else {
-                          _hoverIndex.value = null;
-                        }
-
-                        if (event is FlTapUpEvent &&
-                            idx != null &&
-                            idx >= 0 &&
-                            idx < list.length) {
-                          widget.onDayTap?.call(list[idx].date);
-                        }
-                      },
-                    ),
-                    lineBarsData: [
-                      LineChartBarData(
-                        spots: points,
-                        isCurved: false,
-                        color: T.trendFrom,
-                        barWidth: 1.6,
-                        dotData: const FlDotData(show: false),
-                        belowBarData: BarAreaData(
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            AnimatedSwitcher(
+              key: ValueKey(
+                '${widget.view.name}-${widget.list.length}-'
+                '${widget.list.isEmpty ? 0 : widget.list.last.date}',
+              ),
+              duration: const Duration(milliseconds: 250),
+              switchInCurve: Curves.easeOut,
+              child: SizedBox(
+                height: chartHeight,
+                child: Stack(
+                  children: [
+                    LineChart(
+                      LineChartData(
+                        minY: axisMin,
+                        maxY: axisMax,
+                        gridData: FlGridData(
                           show: true,
-                          gradient: T.trendAreaGradient,
+                          drawVerticalLine: false,
+                          horizontalInterval: ticks.step,
+                          getDrawingHorizontalLine: (v) => FlLine(
+                            color: T.borderSoft,
+                            strokeWidth: 1,
+                            dashArray: const [4, 4],
+                          ),
                         ),
+                        borderData: FlBorderData(show: false),
+                        titlesData: FlTitlesData(
+                          leftTitles: AxisTitles(
+                            sideTitles: SideTitles(
+                              showTitles: true,
+                              reservedSize: plotLeft,
+                              interval: ticks.step,
+                              // Right-align labels inside the reserved gutter so
+                              // they sit flush against the plot edge — the first
+                              // data point then starts right at the axis instead of
+                              // floating in a blank gap. The minimum tick gets extra
+                              // bottom padding so it clears the X-axis date label
+                              // (左下角 -4% 与 1月 不再贴紧).
+                              getTitlesWidget: (v, meta) {
+                                final isMin =
+                                    (v - axisMin).abs() < ticks.step / 2;
+                                return Align(
+                                  alignment: Alignment.centerRight,
+                                  child: Padding(
+                                    padding: EdgeInsets.only(
+                                      bottom: isMin ? 10 : 0,
+                                    ),
+                                    child: Text(
+                                      valueText(v),
+                                      style: T.mono(
+                                        size: yLabelSize,
+                                        color: T.text3,
+                                      ),
+                                    ),
+                                  ),
+                                );
+                              },
+                            ),
+                          ),
+                          bottomTitles: AxisTitles(
+                            sideTitles: SideTitles(
+                              showTitles: true,
+                              interval: xInterval,
+                              reservedSize: 24,
+                              getTitlesWidget: (v, meta) {
+                                final i = v.toInt();
+                                if (i < 0 || i >= list.length) {
+                                  return const SizedBox.shrink();
+                                }
+                                final d = DateTime.tryParse(list[i].date);
+                                if (d == null) return const SizedBox.shrink();
+                                // 长区间用「M」或「yy/M」压缩标签，避免标签宽度
+                                // 撞到 Y 轴；短区间用「M-d」。
+                                final label = longRange
+                                    ? (list.length > 600
+                                          ? '${d.year % 100}/${d.month}'
+                                          : '${d.month}月')
+                                    : '${d.month}-${d.day}';
+                                // 首/尾标签缩进，避免贴住 Y 轴刻度和右缘。
+                                final leftPad = i == 0 ? 8.0 : 0.0;
+                                return Padding(
+                                  padding: EdgeInsets.only(left: leftPad),
+                                  child: Text(
+                                    label,
+                                    style: T.mono(size: 10, color: T.text3),
+                                  ),
+                                );
+                              },
+                            ),
+                          ),
+                          topTitles: const AxisTitles(
+                            sideTitles: SideTitles(showTitles: false),
+                          ),
+                          rightTitles: const AxisTitles(
+                            sideTitles: SideTitles(showTitles: false),
+                          ),
+                        ),
+                        lineTouchData: LineTouchData(
+                          // The custom overlay below owns the crosshair and label.
+                          // Keep the touch callback without drawing a second tooltip.
+                          handleBuiltInTouches: false,
+                          touchCallback: (event, response) {
+                            // Lines can be sampled at different dates and sorted
+                            // by touch distance. The overlay describes the asset,
+                            // so never use a benchmark's point as its date.
+                            final idx = trendAssetSpotIndex(
+                              response?.lineBarSpots,
+                            );
+                            final ended =
+                                event is FlPanEndEvent ||
+                                event is FlPanCancelEvent ||
+                                event is FlPointerExitEvent ||
+                                event is FlTapCancelEvent;
+                            if (!ended &&
+                                idx != null &&
+                                idx >= 0 &&
+                                idx < list.length) {
+                              _hoverIndex.value = idx;
+                            } else {
+                              _hoverIndex.value = null;
+                            }
+
+                            if (event is FlTapUpEvent &&
+                                idx != null &&
+                                idx >= 0 &&
+                                idx < list.length) {
+                              setState(() => _selectedDate = list[idx].date);
+                            }
+                          },
+                        ),
+                        lineBarsData: [
+                          LineChartBarData(
+                            spots: points,
+                            isCurved: false,
+                            color: T.trendFrom,
+                            barWidth: 1.6,
+                            dotData: const FlDotData(show: false),
+                            belowBarData: BarAreaData(
+                              show: true,
+                              gradient: T.trendAreaGradient,
+                            ),
+                          ),
+                          for (final entry in benchSeries.entries)
+                            LineChartBarData(
+                              spots: entry.value,
+                              isCurved: false,
+                              curveSmoothness: 0.25,
+                              color: entry.key.color.withValues(alpha: 0.8),
+                              barWidth: 1.5,
+                              dotData: const FlDotData(show: false),
+                            ),
+                        ],
                       ),
-                      for (final entry in benchSeries.entries)
-                        LineChartBarData(
-                          spots: entry.value,
-                          isCurved: false,
-                          curveSmoothness: 0.25,
-                          color: entry.key.color.withValues(alpha: 0.8),
-                          barWidth: 1.5,
-                          dotData: const FlDotData(show: false),
-                        ),
-                    ],
-                  ),
-                ),
-                if (points.isNotEmpty)
-                  Positioned(
-                    left: plotLeft,
-                    top: 0,
-                    width: plotSize.width,
-                    height: plotSize.height,
-                    child: IgnorePointer(
-                      child: AnimatedBuilder(
-                        animation: _hoverIndex,
-                        builder: (context, _) => CustomPaint(
-                          size: plotSize,
-                          painter: _TrendOverlayPainter(
-                            hoverIndex: _hoverIndex.value,
-                            list: list,
-                            view: view,
-                            rates: rates,
-                            axisMin: axisMin,
-                            axisMax: axisMax,
-                            firstX: points.first.x,
-                            xSpan: points.last.x - points.first.x,
-                            lastX: points.last.x,
-                            lastValue: lastValue,
-                            hideAmounts: hideAmounts,
+                    ),
+                    if (points.isNotEmpty)
+                      Positioned(
+                        left: plotLeft,
+                        top: 0,
+                        width: plotSize.width,
+                        height: plotSize.height,
+                        child: IgnorePointer(
+                          child: AnimatedBuilder(
+                            animation: _hoverIndex,
+                            builder: (context, _) => CustomPaint(
+                              size: plotSize,
+                              painter: _TrendOverlayPainter(
+                                hoverIndex:
+                                    _hoverIndex.value ??
+                                    (selected < 0 ? null : selected),
+                                list: list,
+                                view: view,
+                                rates: rates,
+                                axisMin: axisMin,
+                                axisMax: axisMax,
+                                firstX: points.first.x,
+                                xSpan: points.last.x - points.first.x,
+                                lastX: points.last.x,
+                                lastValue: lastValue,
+                                hideAmounts: hideAmounts,
+                              ),
+                            ),
                           ),
                         ),
                       ),
-                    ),
-                  ),
-              ],
+                  ],
+                ),
+              ),
             ),
-          ),
+
+            if (widget.onDayTap != null)
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton(
+                  onPressed: selected < 0
+                      ? null
+                      : () => widget.onDayTap!.call(list[selected].date),
+                  child: Text(selected < 0 ? '点按曲线选择日期' : '查看当日明细'),
+                ),
+              ),
+          ],
         );
       },
     );
@@ -1569,21 +1479,4 @@ class _LinePainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant _LinePainter oldDelegate) =>
       oldDelegate.color != color || oldDelegate.gradient != gradient;
-}
-
-/// Chart panel shares the same surface and border as the other data panels.
-class _InsetPanel extends StatelessWidget {
-  const _InsetPanel({required this.child});
-  final Widget child;
-
-  @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
-    decoration: BoxDecoration(
-      color: T.surface,
-      borderRadius: BorderRadius.circular(T.rCard),
-      border: Border.all(color: T.border),
-    ),
-    child: child,
-  );
 }

@@ -7,6 +7,7 @@ import '../../core/formats.dart';
 import '../pages/holdings/open_holding_details.dart';
 import '../tokens.dart';
 import 'terminal_card.dart';
+import 'earnings_issue_notice.dart';
 
 /// Shared by calendar and trend drill-down. Its header and rows describe the
 /// same pair of recorded snapshots, not two independent valuation requests.
@@ -62,7 +63,9 @@ class DayEarningsPanel extends ConsumerWidget {
               ),
             ),
             const SizedBox(height: 8),
-            if (!data.verified && data.profit != null)
+            if (data.attributionIssue case final issue?)
+              EarningsIssueNotice(issue: issue)
+            else if (!data.verified && data.profit != null)
               Text(
                 data.issue ??
                     (kIsWeb

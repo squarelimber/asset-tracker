@@ -45,9 +45,12 @@ class RiskMetricsCard extends ConsumerWidget {
         : loading
         ? '正在计算风险指标…'
         : estimate?.unavailableReason;
-    final period = estimate?.startDate == null || estimate?.endDate == null
-        ? '有效样本 ${estimate?.sampleCount ?? 0} 天'
-        : '${estimate!.startDate} 至 ${estimate.endDate} · 有效样本 ${estimate.sampleCount} 天';
+    final sample = estimate;
+    final period = sample == null
+        ? null
+        : sample.startDate == null || sample.endDate == null
+        ? '有效样本 ${sample.sampleCount} 天'
+        : '${sample.startDate} 至 ${sample.endDate} · 有效样本 ${sample.sampleCount} 天';
     return TerminalCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -92,7 +95,14 @@ class RiskMetricsCard extends ConsumerWidget {
             ],
           ),
           const SizedBox(height: T.s3),
-          Text(period, style: T.label()),
+          if (period != null) Text(period, style: T.label()),
+          if (sample?.interruptionReason case final reason?)
+            Text(
+              sample!.interruptedDate == null
+                  ? reason
+                  : '最近中断 ${sample.interruptedDate} · $reason',
+              style: T.label(color: T.text3),
+            ),
           if (reason != null) ...[
             const SizedBox(height: T.s2),
             Text(reason, style: T.label(color: T.warning)),

@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -15,9 +14,9 @@ import '../../../services/alert_notification_service.dart';
 import '../../../services/backup_service.dart';
 import '../../../services/csv_export.dart';
 import '../../../services/file_export.dart';
-import '../../../services/history_backfill_service.dart';
 import '../../components/app_bar_actions.dart';
 import '../../components/data_row.dart';
+import '../../components/rebuild_history_dialog.dart';
 import '../../components/secondary_page_back_button.dart';
 import '../../components/section_header.dart';
 import '../../components/terminal_card.dart';
@@ -45,7 +44,7 @@ class SettingsPage extends ConsumerWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const SectionHeader(label: '数据备份'),
-              Text('所有数据仅保存在本机。建议定期导出备份，可在其他设备导入恢复。', style: T.label()),
+              Text('数据默认保存在本机。配置同步后会与所选服务器交换数据。可定期导出备份用于恢复。', style: T.label()),
               const SizedBox(height: T.s3),
               TerminalCard(
                 child: Column(
@@ -72,7 +71,7 @@ class SettingsPage extends ConsumerWidget {
                         title: '重建历史快照',
                         subtitle: const Text('用收盘价与当日净值重算历史，修正盘中写入的偏差'),
                         trailing: const SizedBox.shrink(),
-                        onTap: () => _rebuildHistory(context, ref),
+                        onTap: () => showRebuildHistoryDialog(context, ref),
                       ),
                   ],
                 ),
@@ -234,80 +233,6 @@ class SettingsPage extends ConsumerWidget {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(result.message),
-        backgroundColor: result.ok ? null : T.up,
-      ),
-    );
-  }
-
-  /// Rebuilds the whole snapshot history from the historical series.
-  ///
-  /// Snapshots are written twice for any given day: the backfill derives them
-  /// from closing prices (and each day's published NAV), while the live path
-  /// rewrites today from intraday quotes. A day whose last write happened
-  /// mid-session stays frozen at that intraday value, which skews its own
-  /// return and — worse — the next day's, since the daily return is the
-  /// difference of two snapshots. This entry point re-derives everything from
-  /// the historical series, which is the only way to repair days that are
-  /// already recorded.
-  Future<void> _rebuildHistory(BuildContext context, WidgetRef ref) async {
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('重建历史快照'),
-        content: const Text(
-          '将联网重新抓取历史收盘价与基金净值，重算全部历史净值快照。\n\n'
-          '盘中刷新时写下的偏差快照会被修正，收益日历与总览的当日收益随之回到正确数值。'
-          '需要数秒，期间请保持网络畅通。',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('取消'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('开始重建'),
-          ),
-        ],
-      ),
-    );
-    if (confirm != true || !context.mounted) return;
-
-    final navigator = Navigator.of(context, rootNavigator: true);
-    unawaited(
-      showDialog<void>(
-        context: context,
-        barrierDismissible: false,
-        builder: (_) => const _RebuildProgressDialog(),
-      ),
-    );
-
-    BackfillResult result;
-    try {
-      // Refresh quotes FIRST so the forced rebuild prices today from fresh
-      // quotes; the rebuild itself covers today with the same replay cost
-      // basis as every earlier day. Overwriting today afterwards with
-      // PortfolioCalculator would give it a different cost basis (the
-      // replay-vs-current cost gaps on traded holdings), surfacing as a fake
-      // daily return.
-      await ref.read(marketServiceProvider).refreshAll();
-      result = await ref
-          .read(historyBackfillServiceProvider)
-          .backfill(forceRebuild: true);
-      ref.invalidate(cnyRatesProvider);
-    } catch (error) {
-      result = BackfillResult(
-        ok: false,
-        days: 0,
-        holdings: 0,
-        message: '重建失败：$error',
-      );
-    }
-    if (navigator.mounted) navigator.pop();
-    if (!context.mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(result.message ?? (result.ok ? '历史快照已重建' : '重建未完成')),
         backgroundColor: result.ok ? null : T.up,
       ),
     );
@@ -496,30 +421,6 @@ class _NotificationsSectionState extends ConsumerState<_NotificationsSection> {
           ),
         ),
       ],
-    );
-  }
-}
-
-/// Blocking progress indicator for the manual history rebuild. Not dismissible:
-/// a rebuild that is interrupted mid-flight is exactly how days end up frozen
-/// on intraday prices.
-class _RebuildProgressDialog extends StatelessWidget {
-  const _RebuildProgressDialog();
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      content: Row(
-        children: [
-          const SizedBox(
-            width: 20,
-            height: 20,
-            child: CircularProgressIndicator(strokeWidth: 2),
-          ),
-          const SizedBox(width: T.s3),
-          Expanded(child: Text('正在重建历史快照…', style: T.label())),
-        ],
-      ),
     );
   }
 }

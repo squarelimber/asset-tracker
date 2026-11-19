@@ -15,7 +15,6 @@ import '../../components/terminal_card.dart';
 import '../../components/transaction_presentation.dart';
 import '../../components/transaction_tile.dart';
 import '../../tokens.dart';
-import '../transaction_dialogs.dart';
 import 'holding_dialogs.dart';
 import 'holdings_page.dart';
 
@@ -23,11 +22,9 @@ class HoldingDetailSheet extends ConsumerWidget {
   const HoldingDetailSheet({
     super.key,
     required this.holding,
-    this.showTransactionButton = false,
   });
 
   final HoldingRow holding;
-  final bool showTransactionButton;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -143,14 +140,6 @@ class HoldingDetailSheet extends ConsumerWidget {
                 const PopupMenuItem(value: 'delete', child: Text('删除')),
               ],
             ),
-            if (showTransactionButton) ...[
-              const SizedBox(width: 8),
-              FilledButton.tonalIcon(
-                onPressed: () => showHoldingTransactionDialog(context, ref, holding),
-                icon: const Icon(Icons.edit_note, size: 18),
-                label: const Text('记一笔'),
-              ),
-            ],
           ],
         ),
         const SizedBox(height: 16),

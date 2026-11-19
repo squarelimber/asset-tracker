@@ -229,6 +229,9 @@ class BackupService {
               internalMove: t['internalMove'] == null
                   ? const Value.absent()
                   : Value(t['internalMove'] == true),
+              redemptionGroup: Value(t['redemptionGroup'] as String?),
+              opensHolding: Value(t['opensHolding'] as bool?),
+              recordedAtMicros: Value((t['recordedAtMicros'] as num?)?.toInt()),
               updatedAt: Value(restoredAt),
             ),
           );
@@ -398,6 +401,9 @@ class BackupService {
     'costMoved': t.costMoved,
     'costMovedAmount': t.costMovedAmount,
     'internalMove': t.internalMove,
+    if (t.redemptionGroup != null) 'redemptionGroup': t.redemptionGroup,
+    if (t.opensHolding != null) 'opensHolding': t.opensHolding,
+    if (t.recordedAtMicros != null) 'recordedAtMicros': t.recordedAtMicros,
     'updatedAt': t.updatedAt.toIso8601String(),
   };
 

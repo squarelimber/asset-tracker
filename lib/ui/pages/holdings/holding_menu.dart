@@ -84,7 +84,7 @@ Future<void> showHoldingMenu(
     case 'unarchive':
       await setHoldingArchived(context, ref, holding, false);
     case 'delete':
-      await _confirmDelete(context, ref, holding);
+      await confirmDeleteHolding(context, ref, holding, closeDetails: false);
   }
 }
 
@@ -144,43 +144,4 @@ PopupMenuItem<String> _item(
       ],
     ),
   );
-}
-
-Future<void> _confirmDelete(
-  BuildContext context,
-  WidgetRef ref,
-  HoldingRow holding,
-) async {
-  final ok = await showDialog<bool>(
-    context: context,
-    builder: (context) => AlertDialog(
-      title: const Text('删除持仓'),
-      content: Text(
-        '删除「${holding.name}」及其全部相关流水？'
-        '收益日历中该产品的历史收益将一并删除，无法恢复。'
-        '如需保留历史，可改用「归档」。',
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(false),
-          child: const Text('取消'),
-        ),
-        FilledButton(
-          style: FilledButton.styleFrom(
-            backgroundColor: Theme.of(context).colorScheme.error,
-            foregroundColor: Theme.of(context).colorScheme.onError,
-          ),
-          onPressed: () => Navigator.of(context).pop(true),
-          child: const Text('删除'),
-        ),
-      ],
-    ),
-  );
-  if (ok != true || !context.mounted) return;
-  await ref.read(daoProvider).deleteHolding(holding.id);
-  if (context.mounted) {
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text('已删除「${holding.name}」')));
-  }
 }

@@ -4,7 +4,6 @@ import '../data/database.dart';
 
 /// Selectable trend ranges for the net worth chart.
 enum RangeOption {
-  today('今日'),
   month1('近1月'),
   month3('近3月'),
   ytd('今年以来'),
@@ -19,14 +18,13 @@ enum RangeOption {
 
   /// Computes the inclusive start date for a preset option, or null for all.
   DateTime? startDate(DateTime now) => switch (this) {
-        today => DateTime(now.year, now.month, now.day),
-        month1 => DateTime(now.year, now.month - 1, now.day),
-        month3 => DateTime(now.year, now.month - 3, now.day),
-        ytd => DateTime(now.year, 1, 1),
-        year1 => DateTime(now.year - 1, now.month, now.day),
-        year3 => DateTime(now.year - 3, now.month, now.day),
-        all || custom => null,
-      };
+    month1 => DateTime(now.year, now.month - 1, now.day),
+    month3 => DateTime(now.year, now.month - 3, now.day),
+    ytd => DateTime(now.year, 1, 1),
+    year1 => DateTime(now.year - 1, now.month, now.day),
+    year3 => DateTime(now.year - 3, now.month, now.day),
+    all || custom => null,
+  };
 }
 
 /// Stats for a selected snapshot range.
@@ -97,7 +95,11 @@ class RangeStatsCalculator {
   }
 
   /// Filters snapshots to [from]..[to] (dates are yyyy-MM-dd strings).
-  List<SnapshotRow> filter(List<SnapshotRow> snapshots, {String? from, String? to}) {
+  List<SnapshotRow> filter(
+    List<SnapshotRow> snapshots, {
+    String? from,
+    String? to,
+  }) {
     return snapshots.where((s) {
       if (from != null && s.date.compareTo(from) < 0) return false;
       if (to != null && s.date.compareTo(to) > 0) return false;

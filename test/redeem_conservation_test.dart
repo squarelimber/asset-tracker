@@ -340,14 +340,13 @@ void main() {
       );
       final rows = await dao.getTransactions();
       final sell = rows.firstWhere((t) => t.type == 'sell');
-      final buy = rows.firstWhere((t) => t.type == 'buy');
 
       expect((await service.remove(sell.id)).ok, isTrue);
       final mmfAfterSell = await holding(mmf);
       expect(mmfAfterSell.quantity, closeTo(1000, 1e-6));
       expect(mmfAfterSell.costPrice, closeTo(1, 1e-9));
 
-      expect((await service.remove(buy.id)).ok, isTrue);
+      expect(await dao.getTransactions(), isEmpty);
       final fundAfterBuy = await holding(fund);
       expect(fundAfterBuy.quantity, closeTo(0, 1e-6));
       expect((await holding(mmf)).costPrice, closeTo(1, 1e-9));

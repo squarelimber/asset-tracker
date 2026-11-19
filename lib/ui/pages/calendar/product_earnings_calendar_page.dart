@@ -7,8 +7,10 @@ import '../../../app/providers.dart';
 import '../../../core/formats.dart';
 import '../../../core/responsive.dart';
 import '../../../domain/product_monthly_earnings.dart';
+import '../../../domain/earnings_breakdown.dart';
 import '../../components/app_bar_actions.dart';
 import '../../components/error_state.dart';
+import '../../components/earnings_issue_notice.dart';
 import '../../components/secondary_page_back_button.dart';
 import '../../components/sparkline.dart';
 import '../../components/terminal_card.dart';
@@ -27,12 +29,15 @@ enum _PEView { year, month }
 
 enum _PEFilter { all, held }
 
+enum _PEOrder { rate, amount }
+
 class _ProductEarningsCalendarPageState
     extends ConsumerState<ProductEarningsCalendarPage> {
   late int _year;
   late int _month;
   _PEView _view = _PEView.year;
   _PEFilter _filter = _PEFilter.all;
+  _PEOrder _order = _PEOrder.rate;
   int _mobileMonths = 6;
 
   @override
@@ -60,7 +65,7 @@ class _ProductEarningsCalendarPageState
 
   @override
   Widget build(BuildContext context) {
-    final products = ref.watch(productEarningsProvider(_year));
+    final products = ref.watch(productEarningsReportProvider(_year));
     return Scaffold(
       appBar: AppBar(
         leading: const SecondaryPageBackButton(),
@@ -68,14 +73,17 @@ class _ProductEarningsCalendarPageState
         actions: const [TerminalAppBarActions()],
       ),
       body: products.when(
-        data: (list) => _PEBody(
-          products: list,
+        data: (report) => _PEBody(
+          products: report.products,
+          issues: report.issues,
+          order: _order,
+          onOrderChanged: (order) => setState(() => _order = order),
           year: _year,
           month: _month,
           view: _view,
           filter: _filter,
           mobileMonths: _mobileMonths,
-          onRefresh: () => ref.invalidate(productEarningsProvider(_year)),
+          onRefresh: () => ref.invalidate(productEarningsReportProvider(_year)),
           onShiftYear: _shiftYear,
           onShiftMonth: _shiftMonth,
           onOpenMonth: _openMonth,
@@ -88,7 +96,7 @@ class _ProductEarningsCalendarPageState
           message: e is StateError ? e.message.toString() : '产品收益数据加载失败，请重试',
           onRetry: () {
             ref.invalidate(historySyncProvider);
-            ref.invalidate(productEarningsProvider(_year));
+            ref.invalidate(productEarningsReportProvider(_year));
           },
         ),
       ),
@@ -99,6 +107,9 @@ class _ProductEarningsCalendarPageState
 class _PEBody extends StatelessWidget {
   const _PEBody({
     required this.products,
+    required this.issues,
+    required this.order,
+    required this.onOrderChanged,
     required this.year,
     required this.month,
     required this.view,
@@ -114,6 +125,9 @@ class _PEBody extends StatelessWidget {
   });
 
   final List<ProductEarnings> products;
+  final List<EarningsAttributionIssue> issues;
+  final _PEOrder order;
+  final ValueChanged<_PEOrder> onOrderChanged;
   final int year;
   final int month;
   final _PEView view;
@@ -136,13 +150,35 @@ class _PEBody extends StatelessWidget {
     final isPhone = Responsive.isPhone(context);
     final isYearView = view == _PEView.year;
     final calc = const ProductEarningsCalculator();
+    final affected = {
+      for (final issue in issues)
+        if (DateTime.tryParse(issue.date) case final date?) date.month,
+    };
+    final visibleIssues = isYearView
+        ? issues
+        : issues
+              .where((issue) => DateTime.tryParse(issue.date)?.month == month)
+              .toList();
 
     final rows =
         _filtered
-            .map((p) => (p: p, months: calc.yearOf(p, year)))
+            .map(
+              (p) => (
+                p: p,
+                months: calc
+                    .yearOf(p, year)
+                    .where((m) => !affected.contains(m.month))
+                    .toList(),
+              ),
+            )
             .where((row) => row.months.isNotEmpty)
             .toList()
           ..sort((a, b) {
+            if (affected.isNotEmpty || order == _PEOrder.amount) {
+              return calc
+                  .yearlyProfit(b.months)
+                  .compareTo(calc.yearlyProfit(a.months));
+            }
             final ra = calc.yearlyRate(a.months, a.p, year);
             final rb = calc.yearlyRate(b.months, b.p, year);
             if (ra == null && rb == null) {
@@ -156,12 +192,13 @@ class _PEBody extends StatelessWidget {
           });
 
     final monthRows =
-        _filtered
+        (affected.contains(month) ? const <ProductEarnings>[] : _filtered)
             .map((p) => (p: p, m: calc.monthOf(p, year, month)))
             .where((r) => r.m.days > 0)
             .toList()
           ..sort((a, b) {
-            if (a.m.rate == null && b.m.rate == null) {
+            if (order == _PEOrder.amount ||
+                (a.m.rate == null && b.m.rate == null)) {
               return b.m.profit.compareTo(a.m.profit);
             }
             if (a.m.rate == null) return 1;
@@ -251,6 +288,53 @@ class _PEBody extends StatelessWidget {
             ],
           ),
           const SizedBox(height: T.s3),
+          if (!isYearView || affected.isEmpty)
+            Wrap(
+              alignment: WrapAlignment.center,
+              spacing: T.s1,
+              children: [
+                for (final value in _PEOrder.values)
+                  TextButton(
+                    onPressed: () => onOrderChanged(value),
+                    style: TextButton.styleFrom(
+                      foregroundColor: order == value ? T.accent : T.text2,
+                    ),
+                    child: Text(value == _PEOrder.rate ? '按收益率' : '按收益金额'),
+                  ),
+              ],
+            ),
+          if (visibleIssues.isNotEmpty)
+            ListTile(
+              dense: true,
+              contentPadding: const EdgeInsets.symmetric(horizontal: T.s2),
+              leading: const Icon(Icons.info_outline, color: T.warning),
+              title: Text(
+                isYearView
+                    ? '${affected.length} 个月待核对 · 汇总仅计已核对月份'
+                    : '本月待核对 · 涉及 ${visibleIssues.length} 个日期',
+              ),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => showModalBottomSheet<void>(
+                context: context,
+                showDragHandle: true,
+                isScrollControlled: true,
+                builder: (context) => SafeArea(
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(
+                      maxHeight: MediaQuery.sizeOf(context).height * .7,
+                    ),
+                    child: ListView.separated(
+                      shrinkWrap: true,
+                      padding: const EdgeInsets.all(T.s4),
+                      itemCount: visibleIssues.length,
+                      separatorBuilder: (_, _) => const Divider(),
+                      itemBuilder: (_, index) =>
+                          EarningsIssueNotice(issue: visibleIssues[index]),
+                    ),
+                  ),
+                ),
+              ),
+            ),
           Expanded(
             child: isYearView
                 ? RefreshIndicator(
@@ -259,9 +343,12 @@ class _PEBody extends StatelessWidget {
                       rows: rows,
                       year: year,
                       requestedMonths: mobileMonths,
+                      affected: affected,
                       onTapMonth: onOpenMonth,
                     ),
                   )
+                : affected.contains(month)
+                ? Center(child: Text('核对后可查看本月产品收益', style: T.label()))
                 : RefreshIndicator(
                     onRefresh: () async => onRefresh(),
                     child: SingleChildScrollView(
@@ -287,12 +374,14 @@ class _YearMatrix extends StatefulWidget {
     required this.rows,
     required this.year,
     required this.requestedMonths,
+    required this.affected,
     required this.onTapMonth,
   });
 
   final List<({ProductEarnings p, List<ProductMonthEarning> months})> rows;
   final int year;
   final int requestedMonths;
+  final Set<int> affected;
   final ValueChanged<int> onTapMonth;
 
   @override
@@ -454,14 +543,24 @@ class _YearMatrixState extends State<_YearMatrix> {
             cells.add(
               SizedBox(
                 width: colWidth,
-                child: _MatrixCell(
-                  agg: agg,
-                  isBest: agg != null && bestByMonth[m] == row.p.name,
-                  showText: showText,
-                  onTap: agg != null && agg.days > 0
-                      ? () => widget.onTapMonth(m)
-                      : null,
-                ),
+                child: widget.affected.contains(m)
+                    ? InkWell(
+                        onTap: () => widget.onTapMonth(m),
+                        child: Center(
+                          child: Text(
+                            '待核对',
+                            style: T.label(size: 9, color: T.warning),
+                          ),
+                        ),
+                      )
+                    : _MatrixCell(
+                        agg: agg,
+                        isBest: agg != null && bestByMonth[m] == row.p.name,
+                        showText: showText,
+                        onTap: agg != null && agg.days > 0
+                            ? () => widget.onTapMonth(m)
+                            : null,
+                      ),
               ),
             );
           }
@@ -470,7 +569,9 @@ class _YearMatrixState extends State<_YearMatrix> {
               width: colWidth,
               child: _YearlyCell(
                 profit: calc.yearlyProfit(row.months),
-                rate: calc.yearlyRate(row.months, row.p, widget.year),
+                rate: widget.affected.isEmpty
+                    ? calc.yearlyRate(row.months, row.p, widget.year)
+                    : null,
               ),
             ),
           );

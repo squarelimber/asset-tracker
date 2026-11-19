@@ -1765,6 +1765,42 @@ class $TransactionsTable extends Transactions
     ),
     defaultValue: const Constant(false),
   );
+  static const VerificationMeta _redemptionGroupMeta = const VerificationMeta(
+    'redemptionGroup',
+  );
+  @override
+  late final GeneratedColumn<String> redemptionGroup = GeneratedColumn<String>(
+    'redemption_group',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _opensHoldingMeta = const VerificationMeta(
+    'opensHolding',
+  );
+  @override
+  late final GeneratedColumn<bool> opensHolding = GeneratedColumn<bool>(
+    'opens_holding',
+    aliasedName,
+    true,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("opens_holding" IN (0, 1))',
+    ),
+  );
+  static const VerificationMeta _recordedAtMicrosMeta = const VerificationMeta(
+    'recordedAtMicros',
+  );
+  @override
+  late final GeneratedColumn<int> recordedAtMicros = GeneratedColumn<int>(
+    'recorded_at_micros',
+    aliasedName,
+    true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+  );
   static const VerificationMeta _updatedAtMeta = const VerificationMeta(
     'updatedAt',
   );
@@ -1794,6 +1830,9 @@ class $TransactionsTable extends Transactions
     costMoved,
     costMovedAmount,
     internalMove,
+    redemptionGroup,
+    opensHolding,
+    recordedAtMicros,
     updatedAt,
   ];
   @override
@@ -1915,6 +1954,33 @@ class $TransactionsTable extends Transactions
         ),
       );
     }
+    if (data.containsKey('redemption_group')) {
+      context.handle(
+        _redemptionGroupMeta,
+        redemptionGroup.isAcceptableOrUnknown(
+          data['redemption_group']!,
+          _redemptionGroupMeta,
+        ),
+      );
+    }
+    if (data.containsKey('opens_holding')) {
+      context.handle(
+        _opensHoldingMeta,
+        opensHolding.isAcceptableOrUnknown(
+          data['opens_holding']!,
+          _opensHoldingMeta,
+        ),
+      );
+    }
+    if (data.containsKey('recorded_at_micros')) {
+      context.handle(
+        _recordedAtMicrosMeta,
+        recordedAtMicros.isAcceptableOrUnknown(
+          data['recorded_at_micros']!,
+          _recordedAtMicrosMeta,
+        ),
+      );
+    }
     if (data.containsKey('updated_at')) {
       context.handle(
         _updatedAtMeta,
@@ -1994,6 +2060,18 @@ class $TransactionsTable extends Transactions
         DriftSqlType.bool,
         data['${effectivePrefix}internal_move'],
       )!,
+      redemptionGroup: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}redemption_group'],
+      ),
+      opensHolding: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}opens_holding'],
+      ),
+      recordedAtMicros: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}recorded_at_micros'],
+      ),
       updatedAt: attachedDatabase.typeMapping.read(
         DriftSqlType.dateTime,
         data['${effectivePrefix}updated_at'],
@@ -2053,6 +2131,9 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
   /// False (the default) for ordinary sells, including "回款不入账" ones,
   /// whose proceeds genuinely leave the tracker and do realize.
   final bool internalMove;
+  final String? redemptionGroup;
+  final bool? opensHolding;
+  final int? recordedAtMicros;
   final DateTime updatedAt;
   const TransactionRow({
     required this.id,
@@ -2070,6 +2151,9 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
     required this.costMoved,
     this.costMovedAmount,
     required this.internalMove,
+    this.redemptionGroup,
+    this.opensHolding,
+    this.recordedAtMicros,
     required this.updatedAt,
   });
   @override
@@ -2104,6 +2188,15 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
       map['cost_moved_amount'] = Variable<double>(costMovedAmount);
     }
     map['internal_move'] = Variable<bool>(internalMove);
+    if (!nullToAbsent || redemptionGroup != null) {
+      map['redemption_group'] = Variable<String>(redemptionGroup);
+    }
+    if (!nullToAbsent || opensHolding != null) {
+      map['opens_holding'] = Variable<bool>(opensHolding);
+    }
+    if (!nullToAbsent || recordedAtMicros != null) {
+      map['recorded_at_micros'] = Variable<int>(recordedAtMicros);
+    }
     map['updated_at'] = Variable<DateTime>(updatedAt);
     return map;
   }
@@ -2137,6 +2230,15 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
           ? const Value.absent()
           : Value(costMovedAmount),
       internalMove: Value(internalMove),
+      redemptionGroup: redemptionGroup == null && nullToAbsent
+          ? const Value.absent()
+          : Value(redemptionGroup),
+      opensHolding: opensHolding == null && nullToAbsent
+          ? const Value.absent()
+          : Value(opensHolding),
+      recordedAtMicros: recordedAtMicros == null && nullToAbsent
+          ? const Value.absent()
+          : Value(recordedAtMicros),
       updatedAt: Value(updatedAt),
     );
   }
@@ -2162,6 +2264,9 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
       costMoved: serializer.fromJson<bool>(json['costMoved']),
       costMovedAmount: serializer.fromJson<double?>(json['costMovedAmount']),
       internalMove: serializer.fromJson<bool>(json['internalMove']),
+      redemptionGroup: serializer.fromJson<String?>(json['redemptionGroup']),
+      opensHolding: serializer.fromJson<bool?>(json['opensHolding']),
+      recordedAtMicros: serializer.fromJson<int?>(json['recordedAtMicros']),
       updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
     );
   }
@@ -2184,6 +2289,9 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
       'costMoved': serializer.toJson<bool>(costMoved),
       'costMovedAmount': serializer.toJson<double?>(costMovedAmount),
       'internalMove': serializer.toJson<bool>(internalMove),
+      'redemptionGroup': serializer.toJson<String?>(redemptionGroup),
+      'opensHolding': serializer.toJson<bool?>(opensHolding),
+      'recordedAtMicros': serializer.toJson<int?>(recordedAtMicros),
       'updatedAt': serializer.toJson<DateTime>(updatedAt),
     };
   }
@@ -2204,6 +2312,9 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
     bool? costMoved,
     Value<double?> costMovedAmount = const Value.absent(),
     bool? internalMove,
+    Value<String?> redemptionGroup = const Value.absent(),
+    Value<bool?> opensHolding = const Value.absent(),
+    Value<int?> recordedAtMicros = const Value.absent(),
     DateTime? updatedAt,
   }) => TransactionRow(
     id: id ?? this.id,
@@ -2223,6 +2334,13 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
         ? costMovedAmount.value
         : this.costMovedAmount,
     internalMove: internalMove ?? this.internalMove,
+    redemptionGroup: redemptionGroup.present
+        ? redemptionGroup.value
+        : this.redemptionGroup,
+    opensHolding: opensHolding.present ? opensHolding.value : this.opensHolding,
+    recordedAtMicros: recordedAtMicros.present
+        ? recordedAtMicros.value
+        : this.recordedAtMicros,
     updatedAt: updatedAt ?? this.updatedAt,
   );
   TransactionRow copyWithCompanion(TransactionsCompanion data) {
@@ -2252,6 +2370,15 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
       internalMove: data.internalMove.present
           ? data.internalMove.value
           : this.internalMove,
+      redemptionGroup: data.redemptionGroup.present
+          ? data.redemptionGroup.value
+          : this.redemptionGroup,
+      opensHolding: data.opensHolding.present
+          ? data.opensHolding.value
+          : this.opensHolding,
+      recordedAtMicros: data.recordedAtMicros.present
+          ? data.recordedAtMicros.value
+          : this.recordedAtMicros,
       updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
     );
   }
@@ -2274,6 +2401,9 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
           ..write('costMoved: $costMoved, ')
           ..write('costMovedAmount: $costMovedAmount, ')
           ..write('internalMove: $internalMove, ')
+          ..write('redemptionGroup: $redemptionGroup, ')
+          ..write('opensHolding: $opensHolding, ')
+          ..write('recordedAtMicros: $recordedAtMicros, ')
           ..write('updatedAt: $updatedAt')
           ..write(')'))
         .toString();
@@ -2296,6 +2426,9 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
     costMoved,
     costMovedAmount,
     internalMove,
+    redemptionGroup,
+    opensHolding,
+    recordedAtMicros,
     updatedAt,
   );
   @override
@@ -2317,6 +2450,9 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
           other.costMoved == this.costMoved &&
           other.costMovedAmount == this.costMovedAmount &&
           other.internalMove == this.internalMove &&
+          other.redemptionGroup == this.redemptionGroup &&
+          other.opensHolding == this.opensHolding &&
+          other.recordedAtMicros == this.recordedAtMicros &&
           other.updatedAt == this.updatedAt);
 }
 
@@ -2336,6 +2472,9 @@ class TransactionsCompanion extends UpdateCompanion<TransactionRow> {
   final Value<bool> costMoved;
   final Value<double?> costMovedAmount;
   final Value<bool> internalMove;
+  final Value<String?> redemptionGroup;
+  final Value<bool?> opensHolding;
+  final Value<int?> recordedAtMicros;
   final Value<DateTime> updatedAt;
   const TransactionsCompanion({
     this.id = const Value.absent(),
@@ -2353,6 +2492,9 @@ class TransactionsCompanion extends UpdateCompanion<TransactionRow> {
     this.costMoved = const Value.absent(),
     this.costMovedAmount = const Value.absent(),
     this.internalMove = const Value.absent(),
+    this.redemptionGroup = const Value.absent(),
+    this.opensHolding = const Value.absent(),
+    this.recordedAtMicros = const Value.absent(),
     this.updatedAt = const Value.absent(),
   });
   TransactionsCompanion.insert({
@@ -2371,6 +2513,9 @@ class TransactionsCompanion extends UpdateCompanion<TransactionRow> {
     this.costMoved = const Value.absent(),
     this.costMovedAmount = const Value.absent(),
     this.internalMove = const Value.absent(),
+    this.redemptionGroup = const Value.absent(),
+    this.opensHolding = const Value.absent(),
+    this.recordedAtMicros = const Value.absent(),
     this.updatedAt = const Value.absent(),
   }) : accountId = Value(accountId),
        type = Value(type),
@@ -2392,6 +2537,9 @@ class TransactionsCompanion extends UpdateCompanion<TransactionRow> {
     Expression<bool>? costMoved,
     Expression<double>? costMovedAmount,
     Expression<bool>? internalMove,
+    Expression<String>? redemptionGroup,
+    Expression<bool>? opensHolding,
+    Expression<int>? recordedAtMicros,
     Expression<DateTime>? updatedAt,
   }) {
     return RawValuesInsertable({
@@ -2410,6 +2558,9 @@ class TransactionsCompanion extends UpdateCompanion<TransactionRow> {
       if (costMoved != null) 'cost_moved': costMoved,
       if (costMovedAmount != null) 'cost_moved_amount': costMovedAmount,
       if (internalMove != null) 'internal_move': internalMove,
+      if (redemptionGroup != null) 'redemption_group': redemptionGroup,
+      if (opensHolding != null) 'opens_holding': opensHolding,
+      if (recordedAtMicros != null) 'recorded_at_micros': recordedAtMicros,
       if (updatedAt != null) 'updated_at': updatedAt,
     });
   }
@@ -2430,6 +2581,9 @@ class TransactionsCompanion extends UpdateCompanion<TransactionRow> {
     Value<bool>? costMoved,
     Value<double?>? costMovedAmount,
     Value<bool>? internalMove,
+    Value<String?>? redemptionGroup,
+    Value<bool?>? opensHolding,
+    Value<int?>? recordedAtMicros,
     Value<DateTime>? updatedAt,
   }) {
     return TransactionsCompanion(
@@ -2448,6 +2602,9 @@ class TransactionsCompanion extends UpdateCompanion<TransactionRow> {
       costMoved: costMoved ?? this.costMoved,
       costMovedAmount: costMovedAmount ?? this.costMovedAmount,
       internalMove: internalMove ?? this.internalMove,
+      redemptionGroup: redemptionGroup ?? this.redemptionGroup,
+      opensHolding: opensHolding ?? this.opensHolding,
+      recordedAtMicros: recordedAtMicros ?? this.recordedAtMicros,
       updatedAt: updatedAt ?? this.updatedAt,
     );
   }
@@ -2500,6 +2657,15 @@ class TransactionsCompanion extends UpdateCompanion<TransactionRow> {
     if (internalMove.present) {
       map['internal_move'] = Variable<bool>(internalMove.value);
     }
+    if (redemptionGroup.present) {
+      map['redemption_group'] = Variable<String>(redemptionGroup.value);
+    }
+    if (opensHolding.present) {
+      map['opens_holding'] = Variable<bool>(opensHolding.value);
+    }
+    if (recordedAtMicros.present) {
+      map['recorded_at_micros'] = Variable<int>(recordedAtMicros.value);
+    }
     if (updatedAt.present) {
       map['updated_at'] = Variable<DateTime>(updatedAt.value);
     }
@@ -2524,6 +2690,9 @@ class TransactionsCompanion extends UpdateCompanion<TransactionRow> {
           ..write('costMoved: $costMoved, ')
           ..write('costMovedAmount: $costMovedAmount, ')
           ..write('internalMove: $internalMove, ')
+          ..write('redemptionGroup: $redemptionGroup, ')
+          ..write('opensHolding: $opensHolding, ')
+          ..write('recordedAtMicros: $recordedAtMicros, ')
           ..write('updatedAt: $updatedAt')
           ..write(')'))
         .toString();
@@ -5921,6 +6090,9 @@ typedef $$TransactionsTableCreateCompanionBuilder =
       Value<bool> costMoved,
       Value<double?> costMovedAmount,
       Value<bool> internalMove,
+      Value<String?> redemptionGroup,
+      Value<bool?> opensHolding,
+      Value<int?> recordedAtMicros,
       Value<DateTime> updatedAt,
     });
 typedef $$TransactionsTableUpdateCompanionBuilder =
@@ -5940,6 +6112,9 @@ typedef $$TransactionsTableUpdateCompanionBuilder =
       Value<bool> costMoved,
       Value<double?> costMovedAmount,
       Value<bool> internalMove,
+      Value<String?> redemptionGroup,
+      Value<bool?> opensHolding,
+      Value<int?> recordedAtMicros,
       Value<DateTime> updatedAt,
     });
 
@@ -6077,6 +6252,21 @@ class $$TransactionsTableFilterComposer
 
   ColumnFilters<bool> get internalMove => $composableBuilder(
     column: $table.internalMove,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get redemptionGroup => $composableBuilder(
+    column: $table.redemptionGroup,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get opensHolding => $composableBuilder(
+    column: $table.opensHolding,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get recordedAtMicros => $composableBuilder(
+    column: $table.recordedAtMicros,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -6242,6 +6432,21 @@ class $$TransactionsTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<String> get redemptionGroup => $composableBuilder(
+    column: $table.redemptionGroup,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get opensHolding => $composableBuilder(
+    column: $table.opensHolding,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get recordedAtMicros => $composableBuilder(
+    column: $table.recordedAtMicros,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<DateTime> get updatedAt => $composableBuilder(
     column: $table.updatedAt,
     builder: (column) => ColumnOrderings(column),
@@ -6385,6 +6590,21 @@ class $$TransactionsTableAnnotationComposer
 
   GeneratedColumn<bool> get internalMove => $composableBuilder(
     column: $table.internalMove,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get redemptionGroup => $composableBuilder(
+    column: $table.redemptionGroup,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<bool> get opensHolding => $composableBuilder(
+    column: $table.opensHolding,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get recordedAtMicros => $composableBuilder(
+    column: $table.recordedAtMicros,
     builder: (column) => column,
   );
 
@@ -6532,6 +6752,9 @@ class $$TransactionsTableTableManager
                 Value<bool> costMoved = const Value.absent(),
                 Value<double?> costMovedAmount = const Value.absent(),
                 Value<bool> internalMove = const Value.absent(),
+                Value<String?> redemptionGroup = const Value.absent(),
+                Value<bool?> opensHolding = const Value.absent(),
+                Value<int?> recordedAtMicros = const Value.absent(),
                 Value<DateTime> updatedAt = const Value.absent(),
               }) => TransactionsCompanion(
                 id: id,
@@ -6549,6 +6772,9 @@ class $$TransactionsTableTableManager
                 costMoved: costMoved,
                 costMovedAmount: costMovedAmount,
                 internalMove: internalMove,
+                redemptionGroup: redemptionGroup,
+                opensHolding: opensHolding,
+                recordedAtMicros: recordedAtMicros,
                 updatedAt: updatedAt,
               ),
           createCompanionCallback:
@@ -6568,6 +6794,9 @@ class $$TransactionsTableTableManager
                 Value<bool> costMoved = const Value.absent(),
                 Value<double?> costMovedAmount = const Value.absent(),
                 Value<bool> internalMove = const Value.absent(),
+                Value<String?> redemptionGroup = const Value.absent(),
+                Value<bool?> opensHolding = const Value.absent(),
+                Value<int?> recordedAtMicros = const Value.absent(),
                 Value<DateTime> updatedAt = const Value.absent(),
               }) => TransactionsCompanion.insert(
                 id: id,
@@ -6585,6 +6814,9 @@ class $$TransactionsTableTableManager
                 costMoved: costMoved,
                 costMovedAmount: costMovedAmount,
                 internalMove: internalMove,
+                redemptionGroup: redemptionGroup,
+                opensHolding: opensHolding,
+                recordedAtMicros: recordedAtMicros,
                 updatedAt: updatedAt,
               ),
           withReferenceMapper: (p0) => p0

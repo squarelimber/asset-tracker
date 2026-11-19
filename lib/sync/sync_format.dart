@@ -91,6 +91,9 @@ class SyncFormatter {
     'costMoved': t.costMoved,
     'costMovedAmount': t.costMovedAmount,
     'internalMove': t.internalMove,
+    if (t.redemptionGroup != null) 'redemptionGroup': t.redemptionGroup,
+    if (t.opensHolding != null) 'opensHolding': t.opensHolding,
+    if (t.recordedAtMicros != null) 'recordedAtMicros': t.recordedAtMicros,
     'updatedAt': t.updatedAt.toIso8601String(),
   };
 

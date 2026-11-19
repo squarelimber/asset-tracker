@@ -24,8 +24,9 @@ Middleware rateLimit({
         }
         final times = hits.putIfAbsent(key, () => <int>[])
           ..removeWhere((t) => nowMs - t > window.inMilliseconds);
-        if (times.length >= limit)
+        if (times.length >= limit) {
           return Response(429, body: 'too many requests');
+        }
         times.add(nowMs);
         return inner(req);
       };
