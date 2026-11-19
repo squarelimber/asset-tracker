@@ -59,6 +59,9 @@ class EarningsBreakdown {
   final bool verified;
   final String? issue;
   final EarningsAttributionIssue? attributionIssue;
+  bool get spansMultipleDays =>
+      baselineDate != null && nextSnapshotDate(baselineDate!) != date;
+
   double get detailTotal => rows.fold(0.0, (sum, row) => sum + row.profit);
 }
 
@@ -71,7 +74,12 @@ EarningsBreakdown earningsBreakdownOf(
 }) {
   final ordered =
       snapshots
-          .where((s) => s.currency == 'CNY' && s.date.compareTo(date) <= 0)
+          .where(
+            (s) =>
+                s.currency == 'CNY' &&
+                s.date.compareTo(date) <= 0 &&
+                snapshotCalendarDate(s.date) != null,
+          )
           .toList()
         ..sort((a, b) => a.date.compareTo(b.date));
   if (ordered.isEmpty || ordered.last.date != date) {
@@ -79,7 +87,9 @@ EarningsBreakdown earningsBreakdownOf(
   }
   final current = ordered.last;
   final previous = ordered.length > 1 ? ordered[ordered.length - 2] : null;
-  final expected = const DailyEarningsCalculator().compute(ordered).last.profit;
+  final expected = previous == null
+      ? 0.0
+      : snapshotAssetProfit(current) - snapshotAssetProfit(previous);
   final currentValues = snapshotHoldingValues(current);
   final previousValues = previous == null
       ? <DayHoldingValue>[]
@@ -134,7 +144,8 @@ EarningsBreakdown earningsBreakdownOf(
     if ((a?.value ?? 0) == 0 &&
         (a?.cost ?? 0) == 0 &&
         (b?.value ?? 0) == 0 &&
-        (b?.cost ?? 0) == 0) {
+        (b?.cost ?? 0) == 0 &&
+        (a?.realizedProfit ?? 0) == (b?.realizedProfit ?? 0)) {
       continue;
     }
     final identity = a ?? b!;
@@ -142,6 +153,7 @@ EarningsBreakdown earningsBreakdownOf(
         ? 0.0
         : ((a?.value ?? 0) - (a?.cost ?? 0)) -
               ((b?.value ?? 0) - (b?.cost ?? 0)) +
+              (a?.realizedProfit ?? 0) - (b?.realizedProfit ?? 0) +
               (adjustments[id] ?? 0);
     rows.add(
       HoldingDayEarning(
@@ -205,7 +217,7 @@ Map<int, double> internalTransferProfitAdjustments(
     if (day.compareTo(previousDate) <= 0 ||
         day.compareTo(currentDate) > 0 ||
         t.currency.toUpperCase() != 'CNY' ||
-        (snapshotCreatedAt != null && t.updatedAt.isAfter(snapshotCreatedAt))) {
+        (snapshotCreatedAt != null && t.historyUpdatedAt.isAfter(snapshotCreatedAt))) {
       continue;
     }
     final type = TransactionType.fromStorage(t.type);
@@ -322,7 +334,7 @@ EarningsAttributionIssue? _incompleteAttribution(
         !ids.contains(t.cashTargetId)) {
       continue;
     }
-    if (t.updatedAt.isAfter(snapshotCreatedAt)) {
+    if (t.historyUpdatedAt.isAfter(snapshotCreatedAt)) {
       return issue('晚于收益快照更新，请重建历史快照。', canRebuild: true);
     }
     // Debt is not a product in the asset-side return. A known cash/debt
@@ -365,7 +377,7 @@ EarningsAttributionIssue? _incompleteAttribution(
           )
           .toList();
       if (opposite.length != 1) return issue('无法唯一匹配对应的赎回或买入记录。');
-      if (opposite.single.updatedAt.isAfter(snapshotCreatedAt)) {
+      if (opposite.single.historyUpdatedAt.isAfter(snapshotCreatedAt)) {
         return issue('的配对记录晚于收益快照更新，请重建历史快照。', canRebuild: true);
       }
       if (!ids.contains(t.holdingId) ||
@@ -472,6 +484,25 @@ List<ProductEarnings> productsFromSnapshots(
       ids,
       snapshotCreatedAt: current.createdAt,
     );
+  }
+  // A realized gain is cumulative in a snapshot. Add only its interval
+  // change while keeping the visible product value and cost unchanged.
+  final realizedByHolding = <int, double>{};
+  for (final entry in decoded.entries) {
+    final adjustments = adjustmentsByDate.putIfAbsent(entry.key, () => {});
+    final current = {
+      for (final value in entry.value)
+        if (!value.liability) value.holdingId: value.realizedProfit,
+    };
+    if (entry.key != decoded.keys.first) {
+      for (final id in {...realizedByHolding.keys, ...current.keys}) {
+        final delta = (current[id] ?? 0) - (realizedByHolding[id] ?? 0);
+        if (delta != 0) adjustments.update(id, (value) => value + delta, ifAbsent: () => delta);
+      }
+    }
+    realizedByHolding
+      ..clear()
+      ..addAll(current);
   }
   final latestValues = ordered.isEmpty ? null : decoded[ordered.last.date];
   return const ProductEarningsCalculator().compute([

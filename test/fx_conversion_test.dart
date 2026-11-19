@@ -82,6 +82,28 @@ HoldingRow usdStock() => HoldingRow(costRecorded: false,
     );
 
 void main() {
+  test('missing or invalid FX is omitted from CNY totals and CSV fields', () {
+    final usd = usdStock();
+    final domestic = usd.copyWith(currency: 'CNY', quantity: 1);
+    final rates = {'USD': double.infinity};
+    final summary = const PortfolioCalculator().compute([
+      domestic,
+      usd,
+    ], cnyRates: rates);
+    expect(summary.totalAssets, 210);
+    expect(summary.totalCost, 200);
+    expect(summary.missingCurrencies, {'USD'});
+    expect(assetTotalOf([domestic, usd], rates), 210);
+
+    final csv = const CsvExport().holdings([usd, huiLi()], {}, cnyRates: rates);
+    final lines = csv.trimRight().split('\n');
+    expect(lines[1].split(',').sublist(7), ['USD', '', '', '', '']);
+    final historicalCost = lines[2].split(',').sublist(9);
+    expect(historicalCost[0], isEmpty);
+    expect(historicalCost[1], isNotEmpty);
+    expect(historicalCost[2], isEmpty);
+  });
+
   group('rate-linked detection', () {
     test('only a currency code makes a holding rate-linked', () {
       expect(isFxCurrencyCode('USD'), isTrue);

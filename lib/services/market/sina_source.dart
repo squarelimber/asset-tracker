@@ -67,6 +67,7 @@ class SinaSource extends MarketDataSource {
         change: prevClose == null ? null : price - prevClose,
         changePct: (prevClose == null || prevClose == 0) ? null : (price - prevClose) / prevClose,
         fetchedAt: DateTime.now(),
+        quoteDate: fields.skip(30).map(parseMarketQuoteDate).whereType<String>().firstOrNull,
       );
     }
     return map;

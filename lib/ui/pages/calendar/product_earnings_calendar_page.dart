@@ -18,7 +18,9 @@ import '../../tokens.dart';
 import '../holdings/open_holding_details.dart';
 
 class ProductEarningsCalendarPage extends ConsumerStatefulWidget {
-  const ProductEarningsCalendarPage({super.key});
+  const ProductEarningsCalendarPage({super.key, this.initialMonth});
+
+  final DateTime? initialMonth;
 
   @override
   ConsumerState<ProductEarningsCalendarPage> createState() =>
@@ -43,9 +45,10 @@ class _ProductEarningsCalendarPageState
   @override
   void initState() {
     super.initState();
-    final now = DateTime.now();
+    final now = widget.initialMonth ?? DateTime.now();
     _year = now.year;
     _month = now.month;
+    if (widget.initialMonth != null) _view = _PEView.month;
   }
 
   void _shiftYear(int delta) => setState(() => _year += delta);

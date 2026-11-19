@@ -43,6 +43,8 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
   bool get _busy => !_loaded || _saving || _syncing;
   bool _saving = false;
   bool _syncing = false;
+  String? _localMergeStatus;
+  String? _uploadStatus;
   String? _lastSyncAt;
   int? _lastRev;
   String? _error;
@@ -101,6 +103,8 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
       _syncing = sync;
       _error = null;
       _result = null;
+      _localMergeStatus = null;
+      _uploadStatus = null;
     });
     final dao = ref.read(daoProvider);
     try {
@@ -121,16 +125,27 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
             .read(syncServiceProvider)
             .sync(target: (url: url, token: config.token));
         if (!mounted) return;
-        if (result.ok && result.dataChanged) {
+        if (result.dataChanged) {
           ref.invalidate(historySyncProvider);
         }
         setState(() {
+          _localMergeStatus = result.localMerged
+              ? (result.changed > 0
+                    ? '本机已合并 ${result.changed} 条变更'
+                    : result.dataChanged
+                    ? '本机数据已更新'
+                    : '本机合并完成 · 无变更')
+              : '本机合并未完成';
+          _uploadStatus = result.uploaded
+              ? '服务器已接收 · 版本 ${result.rev}'
+              : result.localMerged
+              ? '服务器上传未完成'
+              : '服务器上传未开始';
           if (result.ok) {
             _lastSyncAt = DateTime.now().toIso8601String();
             _lastRev = result.rev;
             _lastServerUrl = url;
-            _result =
-                '已与 ${_serverLabel(url)} 同步 · 更新 ${result.changed} 条 · 冲突 ${result.conflicts} 处';
+            _result = '已与 ${_serverLabel(url)} 同步 · 冲突 ${result.conflicts} 处';
           } else {
             _error = '${_serverLabel(url)} 同步失败：${result.message ?? '请重试'}';
           }
@@ -238,6 +253,10 @@ class _SyncSettingsPageState extends ConsumerState<SyncSettingsPage> {
             const SizedBox(height: T.s3),
             Text(_result!, style: T.label()),
           ],
+          if (_localMergeStatus case final status?)
+            Text(status, style: T.label()),
+          if (_uploadStatus case final status?)
+            Text(status, style: T.label()),
           const SizedBox(height: T.s4),
           const SectionHeader(label: '同步状态'),
           TerminalCard(

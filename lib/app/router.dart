@@ -96,11 +96,18 @@ final routerProvider = Provider<GoRouter>((ref) {
               initialDate: DateTime.tryParse(
                 state.uri.queryParameters['date'] ?? '',
               ),
+              initialMonth: DateTime.tryParse(
+                '${state.uri.queryParameters['month'] ?? ''}-01',
+              ),
             ),
           ),
           GoRoute(
             path: '/product-earnings',
-            builder: (context, state) => const ProductEarningsCalendarPage(),
+            builder: (context, state) => ProductEarningsCalendarPage(
+              initialMonth: DateTime.tryParse(
+                '${state.uri.queryParameters['month'] ?? ''}-01',
+              ),
+            ),
           ),
           GoRoute(
             path: '/transactions',

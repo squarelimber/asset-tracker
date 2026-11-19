@@ -28,12 +28,16 @@ void main() {
     tester.view.physicalSize = const Size(320, 720);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
+    String? calendarMonth;
+    String? productMonth;
     await tester.pumpWidget(
-      const MaterialApp(
+      MaterialApp(
         home: Scaffold(
           body: MonthlyProfitChart(
-            months: {'2026-01': 1234.5, '2026-03': 0, '2026-04': -44},
+            months: const {'2026-01': 1234.5, '2026-03': 0, '2026-04': -44},
             hideAmounts: false,
+            onOpenCalendar: (month) => calendarMonth = month,
+            onOpenProducts: (month) => productMonth = month,
           ),
         ),
       ),
@@ -52,6 +56,10 @@ void main() {
     await tester.tap(find.text('2026年03月').last);
     await tester.pumpAndSettle();
     expect(find.text('+¥0.00'), findsOneWidget);
+    await tester.tap(find.text('查看每日明细'));
+    await tester.tap(find.text('查看产品收益'));
+    expect(calendarMonth, '2026-03');
+    expect(productMonth, '2026-03');
     expect(tester.takeException(), isNull);
   });
 

@@ -1,10 +1,12 @@
 import 'package:drift/drift.dart';
+import 'package:flutter/foundation.dart' show listEquals;
 
 import '../core/formats.dart';
 import '../core/enums.dart';
 import '../core/symbols.dart';
 import '../data/asset_dao.dart';
 import '../data/database.dart';
+import '../domain/external_sale_gains.dart';
 import '../domain/portfolio_calculator.dart';
 import '../domain/holding_cost.dart';
 import '../domain/holding_valuation.dart';
@@ -40,7 +42,9 @@ class SnapshotService {
     final existing = await _dao.getSnapshot(dateKey, 'CNY');
     if (existing != null && !force) return;
 
-    final holdings = await _dao.getHoldings();
+    final (holdings, transactions) = await _dao.transaction(
+      () async => (await _dao.getHoldings(), await _dao.getTransactions()),
+    );
     // A fresh install (or a device that hasn't received its first sync yet)
     // has no holdings. Recording a zero-valued snapshot here would corrupt
     // the net-worth trend and — because snapshots sync with last-write-wins —
@@ -71,43 +75,52 @@ class SnapshotService {
       cnyRates: rates,
     );
 
-    await _dao.upsertSnapshot(
-      SnapshotsCompanion.insert(
-        date: dateKey,
-        currency: const Value('CNY'),
-        totalValue: summary.netWorth,
-        totalCost: summary.totalCost,
-        liabilities: Value(summary.totalLiabilities),
-        holdingValues: Value(
-          encodeHoldingValues([
-            for (final h in holdings)
-              DayHoldingValue(
-                holdingId: h.id,
-                name: h.name,
-                type: AssetType.fromStorage(h.assetType),
-                value:
-                    (AssetType.fromStorage(h.assetType).isAmountBased
-                        ? h.quantity
-                        : h.quantity * h.latestPrice) *
-                    valueRateOf(h, rates),
-                cost: h.assetType == 'liability'
-                    ? 0
-                    : (AssetType.fromStorage(h.assetType).isAmountBased
-                              ? effectiveCostOf(h)
-                              : h.quantity * h.costPrice) *
-                          costRateOf(h, rates),
-                liability: h.assetType == 'liability',
-              ),
-          ]),
-        ),
-        // Written explicitly, even though the column has a DB default: the
-        // column doubles as the cross-device last-write-wins version (see
-        // SyncFormatter.snapshotToRow) and `insertOnConflictUpdate` only
-        // updates the columns a companion actually carries. Leaving it
-        // implicit froze the version at the day's first write, so a corrected
-        // rewrite could never win the merge on another device.
-        createdAt: Value(now),
+    final realized = ExternalSaleGains(holdings, transactions, rates)
+      ..advanceTo(dateKey);
+    final snapshot = SnapshotsCompanion.insert(
+      date: dateKey,
+      currency: const Value('CNY'),
+      totalValue: summary.netWorth,
+      totalCost: summary.totalCost,
+      liabilities: Value(summary.totalLiabilities),
+      realizedProfit: Value(realized.total),
+      holdingValues: Value(
+        encodeHoldingValues([
+          for (final h in holdings)
+            DayHoldingValue(
+              holdingId: h.id,
+              name: h.name,
+              type: AssetType.fromStorage(h.assetType),
+              value:
+                  (AssetType.fromStorage(h.assetType).isAmountBased
+                      ? h.quantity
+                      : h.quantity * h.latestPrice) *
+                  valueRateOf(h, rates),
+              cost: h.assetType == 'liability'
+                  ? 0
+                  : (AssetType.fromStorage(h.assetType).isAmountBased
+                            ? effectiveCostOf(h)
+                            : h.quantity * h.costPrice) *
+                        costRateOf(h, rates),
+              liability: h.assetType == 'liability',
+              realizedProfit: realized.forHolding(h.id),
+            ),
+        ]),
       ),
+      // Written explicitly, even though the column has a DB default: the
+      // column doubles as the cross-device last-write-wins version (see
+      // SyncFormatter.snapshotToRow) and `insertOnConflictUpdate` only
+      // updates the columns a companion actually carries. Leaving it
+      // implicit froze the version at the day's first write, so a corrected
+      // rewrite could never win the merge on another device.
+      createdAt: Value(now),
     );
+    await _dao.transaction(() async {
+      if (listEquals(holdings, await _dao.getHoldings()) &&
+          listEquals(transactions, await _dao.getTransactions()) &&
+          existing == await _dao.getSnapshot(dateKey, 'CNY')) {
+        await _dao.upsertSnapshot(snapshot);
+      }
+    });
   }
 }

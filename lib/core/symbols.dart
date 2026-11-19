@@ -122,30 +122,38 @@ List<String> missingCnyRates(
   final missing = <String>[];
   for (final raw in currencies) {
     final code = raw.toUpperCase();
-    if (code == 'CNY') continue;
-    if (!((cnyRates[code] ?? 0) > 0)) missing.add(code);
+    if (cnyRateOf(code, cnyRates) == null) missing.add(code);
   }
   return missing;
 }
 
+double? cnyRateOf(String currency, Map<String, double> rates) {
+  final code = currency.toUpperCase();
+  if (code == 'CNY') return 1;
+  final rate = rates[code];
+  return rate != null && rate.isFinite && rate > 0 ? rate : null;
+}
+
+double? valueRateOfOrNull(HoldingRow h, Map<String, double> rates) =>
+    isFxLinked(h) ? 1 : cnyRateOf(h.currency, rates);
+
+double? costRateOfOrNull(HoldingRow h, Map<String, double> rates) {
+  if (h.currency.toUpperCase() == 'CNY' || isFxLinked(h)) return 1;
+  final fx = h.costFxRate;
+  if (fx != null && fx.isFinite && fx > 0) return fx;
+  return cnyRateOf(h.currency, rates);
+}
+
 /// CNY conversion rate for a holding's market value: the current FX rate
 /// (1 for CNY holdings and rate-linked holdings, see [isFxLinked]).
-double valueRateOf(HoldingRow h, Map<String, double> cnyRates) {
-  if (h.currency == 'CNY') return 1;
-  if (isFxLinked(h)) return 1;
-  return cnyRates[h.currency.toUpperCase()] ?? 1;
-}
+double valueRateOf(HoldingRow h, Map<String, double> cnyRates) =>
+    valueRateOfOrNull(h, cnyRates) ?? 1;
 
 /// CNY conversion rate for a holding's cost basis: the exchange rate
 /// recorded at purchase time (costFxRate), falling back to the current
 /// rate. 1 for CNY holdings and rate-linked holdings (see [isFxLinked]).
-double costRateOf(HoldingRow h, Map<String, double> cnyRates) {
-  if (h.currency == 'CNY') return 1;
-  if (isFxLinked(h)) return 1;
-  final fx = h.costFxRate;
-  if (fx != null && fx > 0) return fx;
-  return cnyRates[h.currency.toUpperCase()] ?? 1;
-}
+double costRateOf(HoldingRow h, Map<String, double> cnyRates) =>
+    costRateOfOrNull(h, cnyRates) ?? 1;
 
 /// Whether the holding has no usable price HISTORY source and its history
 /// should be smoothed by interpolation: manual-NAV assets (bank wealth,

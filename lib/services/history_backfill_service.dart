@@ -1,4 +1,4 @@
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart' show kIsWeb, listEquals;
 
 import '../core/enums.dart';
 import '../core/formats.dart';
@@ -6,6 +6,7 @@ import '../core/history_sync.dart';
 import '../core/symbols.dart';
 import '../data/asset_dao.dart';
 import '../data/database.dart';
+import '../domain/external_sale_gains.dart';
 import '../domain/holding_cost.dart';
 import '../domain/holding_valuation.dart';
 import '../domain/product_monthly_earnings.dart';
@@ -26,6 +27,7 @@ class BackfillResult {
     this.message,
     this.historyUnavailable = false,
     this.wroteToday = false,
+    this.inputsChanged = false,
   });
 
   final bool ok;
@@ -47,6 +49,7 @@ class BackfillResult {
   /// documents that it must only be forced once those quotes are known to
   /// be fresh — which this code path cannot promise (no refresh has run).
   final bool wroteToday;
+  final bool inputsChanged;
 }
 
 /// Backfills historical daily net-worth snapshots from each holding's
@@ -160,6 +163,7 @@ class HistoryBackfillService {
   static const _tencentGatewayMarker = 'backfill_v11_tencent_history_gateway';
   static const _valuationMarker = 'backfill_v12_recorded_holding_values';
   static const _transactionReplayMarker = 'backfill_v13_transaction_replay';
+  static const _manualNavAndRealizedMarker = 'backfill_v14_manual_nav_and_realized';
 
   /// Date (yyyy-MM-dd) of the previous successful run. A light run re-derives
   /// every day from this date through today, because any of them may have
@@ -210,7 +214,14 @@ class HistoryBackfillService {
     final current = (now ?? DateTime.now());
     final todayDate = DateTime(current.year, current.month, current.day);
 
-    final holdings = await _dao.getHoldings();
+    final inputs = await _dao.transaction(() async => (
+      holdings: await _dao.getHoldings(),
+      transactions: await _dao.getTransactions(),
+      dirty: await _dao.getSetting(historySyncDirtyKey),
+      full: await _dao.getSetting(historyFullRebuildKey),
+      latestSnapshot: await _dao.getLatestSnapshot('CNY'),
+    ));
+    final holdings = inputs.holdings;
     if (holdings.isEmpty) {
       return const BackfillResult(
         ok: false,
@@ -266,6 +277,17 @@ class HistoryBackfillService {
     // source (bank wealth, cash management) get a smooth interpolated
     // history instead of a fetched price series.
     final smoothCalc = const SmoothHistoryCalculator();
+    final flowsByHolding = <int, List<TransactionRow>>{};
+    for (final row in inputs.transactions) {
+      for (final id in {?row.holdingId, ?row.cashSourceId, ?row.cashTargetId}) {
+        (flowsByHolding[id] ??= []).add(row);
+      }
+    }
+    final smoothSharePrices = <int, double Function(DateTime)>{
+      for (final h in holdings)
+        if (isSmoothedHolding(h) && !AssetType.fromStorage(h.assetType).isAmountBased)
+          h.id: smoothCalc.sharePriceSeries(h, windowStart, current),
+    };
     final smoothValues = <int, Map<String, double>>{};
     final smoothPrincipals = <int, Map<String, double>>{};
     final fillers = <int, HistoryPriceLookup>{};
@@ -297,7 +319,7 @@ class HistoryBackfillService {
     for (final h in holdings) {
       final type = AssetType.fromStorage(h.assetType);
       if (isSmoothedHolding(h) && !type.isAmountBased) {
-        final flows = await _dao.getTransactionsForHolding(h.id);
+        final flows = flowsByHolding[h.id] ?? const [];
         smoothShareFlows[h.id] = flows;
         // Share-based smoothed holdings (manual-NAV / FX-linked bank
         // wealth) must replay their flows just like market-linked ones:
@@ -327,7 +349,7 @@ class HistoryBackfillService {
       }
       final symbol = rawSymbol;
       // Replay the holding's own flows for its historical quantity/cost.
-      final flows = await _dao.getTransactionsForHolding(h.id);
+      final flows = flowsByHolding[h.id] ?? const [];
       replays[h.id] = const HoldingReplay().replay(
         h,
         flows,
@@ -374,7 +396,7 @@ class HistoryBackfillService {
     for (final h in holdings) {
       if (!isSmoothedHolding(h)) continue;
       if (!AssetType.fromStorage(h.assetType).isAmountBased) continue;
-      final flows = await _dao.getTransactionsForHolding(h.id);
+      final flows = flowsByHolding[h.id] ?? const [];
       smoothValues[h.id] = smoothCalc.amountHistory(
         h,
         flows,
@@ -417,7 +439,8 @@ class HistoryBackfillService {
         await _dao.getSetting(_sinaHistoryEndpointMarker) == null ||
         await _dao.getSetting(_tencentGatewayMarker) == null ||
         await _dao.getSetting(_valuationMarker) == null ||
-        await _dao.getSetting(_transactionReplayMarker) == null;
+        await _dao.getSetting(_transactionReplayMarker) == null ||
+        await _dao.getSetting(_manualNavAndRealizedMarker) == null;
     // A type switch that crossed the amount-based boundary changes the
     // *meaning* of the stored numbers (see holding_type_conversion.dart); the
     // days written under the old semantics must not survive a light run (a
@@ -425,7 +448,7 @@ class HistoryBackfillService {
     // would show a permanent step where the type changed). The dialog sets
     // this marker and the next run — even a light one — rebuilds the whole
     // window once, then clears it.
-    final forceNext = await _dao.getSetting(historyFullRebuildKey) == '1';
+    final forceNext = inputs.full == '1';
     final needFullRebuild = forceRebuild || forceNext || firstTimeRebuild;
     final existingDates = <String>{};
     // Anchor recorded by the previous run. Null on a full rebuild (every day
@@ -462,6 +485,12 @@ class HistoryBackfillService {
     }
 
     // Compute the full window day by day, today included.
+    final realized = ExternalSaleGains(
+      holdings,
+      inputs.transactions,
+      cnyRates,
+      replayedPrincipal: soldPrincipalById,
+    );
     var day = DateTime(earliest.year, earliest.month, earliest.day);
     final rows = <SnapshotRow>[];
     while (!day.isAfter(todayDate)) {
@@ -471,6 +500,7 @@ class HistoryBackfillService {
         continue;
       }
       var assets = 0.0;
+      realized.advanceTo(key);
       var liabilities = 0.0;
       var cost = 0.0;
       var hasPrice = false;
@@ -490,7 +520,7 @@ class HistoryBackfillService {
             // A fully withdrawn balance is still a valid valuation.
             hasPrice = true;
           } else {
-            final price = smoothCalc.sharePrice(h, day, windowStart, current);
+            final price = smoothSharePrices[h.id]!(day);
             // The replayed quantity, so days held before a redemption keep
             // the pre-redemption position (see [_smoothShareReplayMarker]).
             final replayed = replays[h.id]?[key];
@@ -516,6 +546,7 @@ class HistoryBackfillService {
               value: value * valueRateOf(h, cnyRates),
               cost: principal * costRateOf(h, cnyRates),
               liability: false,
+              realizedProfit: realized.forHolding(h.id),
             ),
           );
           continue;
@@ -561,6 +592,7 @@ class HistoryBackfillService {
             value: value,
             cost: type == AssetType.liability ? 0 : holdingCost,
             liability: type == AssetType.liability,
+            realizedProfit: realized.forHolding(h.id),
           ),
         );
         if (type == AssetType.liability) {
@@ -585,6 +617,7 @@ class HistoryBackfillService {
             totalValue: assets - liabilities,
             totalCost: cost,
             liabilities: liabilities,
+            realizedProfit: realized.total,
             holdingValues: encodeHoldingValues(holdingValues),
             createdAt: current,
           ),
@@ -594,8 +627,15 @@ class HistoryBackfillService {
     }
 
     // Swap atomically so the UI never sees an empty/mid-write state.
-    if (rows.isNotEmpty) {
-      await _dao.transaction(() async {
+    final committed = await _dao.transaction(() async {
+      if (!listEquals(inputs.holdings, await _dao.getHoldings()) ||
+          !listEquals(inputs.transactions, await _dao.getTransactions()) ||
+          inputs.dirty != await _dao.getSetting(historySyncDirtyKey) ||
+          inputs.full != await _dao.getSetting(historyFullRebuildKey) ||
+          inputs.latestSnapshot != await _dao.getLatestSnapshot('CNY')) {
+        return false;
+      }
+      if (rows.isNotEmpty) {
         if (needFullRebuild) {
           // Days this pass re-derives must not be tombstoned: the rebuilt row
           // is itself the newer version that wins the merge, whereas a
@@ -611,57 +651,70 @@ class HistoryBackfillService {
           );
         }
         await _dao.batchInsertSnapshots(rows);
-      });
-    }
-    // Mark the one-time rebuild done only after a successful swap.
-    if (firstTimeRebuild) {
-      await _dao.setSetting(
-        _backfillV3Marker,
-        '${current.millisecondsSinceEpoch}',
-      );
-      await _dao.setSetting(
-        _shareReplayMarker,
-        '${current.millisecondsSinceEpoch}',
-      );
-      await _dao.setSetting(
-        _smoothShareReplayMarker,
-        '${current.millisecondsSinceEpoch}',
-      );
-      await _dao.setSetting(
-        _sinaHistoryEndpointMarker,
-        '${current.millisecondsSinceEpoch}',
-      );
-      await _dao.setSetting(
-        _tencentGatewayMarker,
-        '${current.millisecondsSinceEpoch}',
-      );
-      await _dao.setSetting(
-        _valuationMarker,
-        '${current.millisecondsSinceEpoch}',
-      );
-      await _dao.setSetting(
-        _transactionReplayMarker,
-        '${current.millisecondsSinceEpoch}',
-      );
-    }
-    // Clear the forced-full-rebuild marker only after the swap succeeded,
-    // so a run aborted by a network failure retries the full rebuild next
-    // launch instead of silently leaving the old-semantics days in place.
-    if (forceNext) {
-      await _dao.setSetting(historyFullRebuildKey, '0');
-    }
-    // Remember where the next light run must re-derive from. Written only
-    // after the swap succeeded, so an aborted run leaves the previous anchor
-    // in place and the same days are retried on the next launch.
-    //
-    // Skipped when the anchor already holds today. Re-writing it would not
-    // change the data, but it is not a no-op for anything watching the
-    // settings table: drift emits on every write to it, and this line runs on
-    // every light pass — which is exactly how the backfill used to spin its
-    // own caller (see [AssetDao.watchSetting]).
-    final anchor = todayKey(todayDate);
-    if (lastRun == null || todayKey(lastRun) != anchor) {
-      await _dao.setSetting(_lastRunKey, anchor);
+      }
+      // Mark the one-time rebuild done only after a successful swap.
+      if (firstTimeRebuild) {
+        await _dao.setSetting(
+          _backfillV3Marker,
+          '${current.millisecondsSinceEpoch}',
+        );
+        await _dao.setSetting(
+          _shareReplayMarker,
+          '${current.millisecondsSinceEpoch}',
+        );
+        await _dao.setSetting(
+          _smoothShareReplayMarker,
+          '${current.millisecondsSinceEpoch}',
+        );
+        await _dao.setSetting(
+          _sinaHistoryEndpointMarker,
+          '${current.millisecondsSinceEpoch}',
+        );
+        await _dao.setSetting(
+          _tencentGatewayMarker,
+          '${current.millisecondsSinceEpoch}',
+        );
+        await _dao.setSetting(
+          _valuationMarker,
+          '${current.millisecondsSinceEpoch}',
+        );
+        await _dao.setSetting(
+          _transactionReplayMarker,
+          '${current.millisecondsSinceEpoch}',
+        );
+        await _dao.setSetting(
+          _manualNavAndRealizedMarker,
+          '${current.millisecondsSinceEpoch}',
+        );
+      }
+      // Clear the forced-full-rebuild marker only after the swap succeeded,
+      // so a run aborted by a network failure retries the full rebuild next
+      // launch instead of silently leaving the old-semantics days in place.
+      if (forceNext) {
+        await _dao.setSetting(historyFullRebuildKey, '0');
+      }
+      // Remember where the next light run must re-derive from. Written only
+      // after the swap succeeded, so an aborted run leaves the previous anchor
+      // in place and the same days are retried on the next launch.
+      //
+      // Skipped when the anchor already holds today. Re-writing it would not
+      // change the data, but it is not a no-op for anything watching the
+      // settings table: drift emits on every write to it, and this line runs on
+      // every light pass — which is exactly how the backfill used to spin its
+      // own caller (see [AssetDao.watchSetting]).
+      final anchor = todayKey(todayDate);
+      if (lastRun == null || todayKey(lastRun) != anchor) {
+        await _dao.setSetting(_lastRunKey, anchor);
+      }
+      if (inputs.dirty == historyDirtySet) {
+        await _dao.setSetting(historySyncDirtyKey, historyDirtyClear);
+      }
+      return true;
+    });
+    if (!committed) {
+      return const BackfillResult(ok: false, days: 0, holdings: 0,
+        historyUnavailable: true, inputsChanged: true,
+        message: '账本在重建期间发生变化，需用最新数据重试');
     }
 
     return BackfillResult(

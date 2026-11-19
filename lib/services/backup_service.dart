@@ -15,6 +15,22 @@ class ImportResult {
   final String message;
 }
 
+class BackupPreview {
+  const BackupPreview({
+    required this.exportedAt,
+    required this.accounts,
+    required this.holdings,
+    required this.transactions,
+    required this.snapshots,
+  });
+
+  final DateTime? exportedAt;
+  final int accounts;
+  final int holdings;
+  final int transactions;
+  final int snapshots;
+}
+
 /// JSON backup/restore for all user data.
 ///
 /// The backup format is forward-compatible: unknown fields are ignored,
@@ -53,27 +69,58 @@ class BackupService {
     });
   });
 
-  /// Validates and imports a backup, replacing all existing data.
-  Future<ImportResult> importJson(String json) async {
+  /// Reads the same backup structure and record links used by restore.
+  /// Previewing never writes to the database.
+  BackupPreview previewJson(String json) {
+    final backup = _readBackup(json);
+    return BackupPreview(
+      exportedAt: DateTime.tryParse(
+        backup.payload['exportedAt']?.toString() ?? '',
+      ),
+      accounts: backup.accounts.length,
+      holdings: backup.holdings.length,
+      transactions: backup.transactions.length,
+      snapshots: backup.snapshots.length,
+    );
+  }
+
+  ({
+    Map<String, dynamic> payload,
+    List<Map<String, dynamic>> accounts,
+    List<Map<String, dynamic>> holdings,
+    List<Map<String, dynamic>> transactions,
+    List<Map<String, dynamic>> snapshots,
+    List<Map<String, dynamic>> rules,
+  })
+  _readBackup(String json) {
     Object? decoded;
     try {
       decoded = jsonDecode(json);
     } catch (_) {
-      return const ImportResult(ok: false, message: '文件不是有效的 JSON');
+      throw const FormatException('文件不是有效的 JSON');
     }
     if (decoded is! Map<String, dynamic> || decoded['app'] != 'asset_tracker') {
-      return const ImportResult(ok: false, message: '不是 asset-tracker 的备份文件');
+      throw const FormatException('不是 asset-tracker 的备份文件');
     }
 
     // A damaged or partial file must never be treated as an empty backup:
     // import replaces all existing rows. Older backups may omit the optional
     // snapshots and alertRules collections, but the core collections are required.
-    for (final key in ['accounts', 'holdings', 'transactions', 'snapshots', 'alertRules']) {
+    for (final key in [
+      'accounts',
+      'holdings',
+      'transactions',
+      'snapshots',
+      'alertRules',
+    ]) {
       final value = decoded[key];
-      final required = key == 'accounts' || key == 'holdings' || key == 'transactions';
+      final required =
+          key == 'accounts' || key == 'holdings' || key == 'transactions';
       if ((value == null && required) ||
-          (value != null && (value is! List || value.any((row) => row is! Map<String, dynamic>)))) {
-        return ImportResult(ok: false, message: '备份数据格式错误：$key');
+          (value != null &&
+              (value is! List ||
+                  value.any((row) => row is! Map<String, dynamic>)))) {
+        throw FormatException('备份数据格式错误：$key');
       }
     }
 
@@ -87,25 +134,32 @@ class BackupService {
     try {
       problems = _validateReferences(accounts, holdings, transactions);
     } catch (_) {
-      return const ImportResult(ok: false, message: '备份数据格式错误：无效的记录引用');
+      throw const FormatException('备份数据格式错误：无效的记录引用');
     }
     if (problems.isNotEmpty) {
-      return ImportResult(
-        ok: false,
-        message: '备份数据不完整，已取消导入：${problems.take(3).join('；')}',
-      );
+      throw FormatException('备份数据不完整，已取消导入：${problems.take(3).join('；')}');
     }
+    return (
+      payload: decoded,
+      accounts: accounts,
+      holdings: holdings,
+      transactions: transactions,
+      snapshots: snapshots,
+      rules: rules,
+    );
+  }
 
+  /// Validates and imports a backup, replacing all existing data.
+  Future<ImportResult> importJson(String json) async {
     try {
+      final (:payload, :accounts, :holdings, :transactions, :snapshots, :rules) =
+          _readBackup(json);
       // One timestamp for all restored rows: an import is the latest intent,
       // so its rows must outrank any deletion tombstone (local or on the
       // server) — otherwise "delete → restore backup → sync" silently eats
       // the restored data (tombstone deletedAt is always newer than a
       // backup's row updatedAt).
       final restoredAt = DateTime.now();
-      // Captured (and promoted) outside the closure so the settings block
-      // below can index it without a nullability check.
-      final payload = decoded;
       await _dao.transaction(() async {
         for (final table in [
           _dao.deleteAllTransactions,
@@ -185,6 +239,7 @@ class BackupService {
               note: h['note'] == null
                   ? const Value.absent()
                   : Value(h['note'].toString()),
+              archived: Value(h['archived'] == true),
               createdAt: Value(_parseDate(h['createdAt']) ?? DateTime.now()),
               updatedAt: Value(restoredAt),
             ),
@@ -226,12 +281,15 @@ class BackupService {
               costMovedAmount: t['costMovedAmount'] == null
                   ? const Value.absent()
                   : Value((t['costMovedAmount'] as num).toDouble()),
+              externalSellPrincipal: Value((t['externalSellPrincipal'] as num?)?.toDouble()),
               internalMove: t['internalMove'] == null
                   ? const Value.absent()
                   : Value(t['internalMove'] == true),
               redemptionGroup: Value(t['redemptionGroup'] as String?),
               opensHolding: Value(t['opensHolding'] as bool?),
               recordedAtMicros: Value((t['recordedAtMicros'] as num?)?.toInt()),
+              ledgerUpdatedAt: Value(_parseDate(t['ledgerUpdatedAt']) ??
+                  _parseDate(t['updatedAt']) ?? _parseDate(t['occurredAt'])),
               updatedAt: Value(restoredAt),
             ),
           );
@@ -245,6 +303,7 @@ class BackupService {
               totalCost: (s['totalCost'] as num?)?.toDouble() ?? 0,
               liabilities: Value((s['liabilities'] as num?)?.toDouble() ?? 0),
               holdingValues: Value(s['holdingValues'] as String?),
+              realizedProfit: Value((s['realizedProfit'] as num?)?.toDouble()),
               createdAt: Value(_parseDate(s['createdAt']) ?? DateTime.now()),
             ),
           );
@@ -273,13 +332,15 @@ class BackupService {
           }
         }
       });
+      return ImportResult(
+        ok: true,
+        message: '导入成功：${accounts.length} 账户 / ${holdings.length} 持仓',
+      );
+    } on FormatException catch (e) {
+      return ImportResult(ok: false, message: e.message);
     } catch (e) {
       return ImportResult(ok: false, message: '导入失败: $e');
     }
-    return ImportResult(
-      ok: true,
-      message: '导入成功：${accounts.length} 账户 / ${holdings.length} 持仓',
-    );
   }
 
   // ---------------------------------------------------------------------------
@@ -381,6 +442,7 @@ class BackupService {
     'categoryOverride': h.categoryOverride,
     'currency': h.currency,
     'note': h.note,
+    'archived': h.archived,
     'createdAt': h.createdAt.toIso8601String(),
     'updatedAt': h.updatedAt.toIso8601String(),
   };
@@ -400,6 +462,8 @@ class BackupService {
     'note': t.note,
     'costMoved': t.costMoved,
     'costMovedAmount': t.costMovedAmount,
+    if (t.externalSellPrincipal != null) 'externalSellPrincipal': t.externalSellPrincipal,
+    if (t.ledgerUpdatedAt != null) 'ledgerUpdatedAt': t.ledgerUpdatedAt!.toIso8601String(),
     'internalMove': t.internalMove,
     if (t.redemptionGroup != null) 'redemptionGroup': t.redemptionGroup,
     if (t.opensHolding != null) 'opensHolding': t.opensHolding,
@@ -414,6 +478,7 @@ class BackupService {
     'totalCost': s.totalCost,
     'liabilities': s.liabilities,
     if (s.holdingValues != null) 'holdingValues': s.holdingValues,
+    if (s.realizedProfit != null) 'realizedProfit': s.realizedProfit,
     'createdAt': s.createdAt.toIso8601String(),
   };
 

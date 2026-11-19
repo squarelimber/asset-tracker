@@ -33,7 +33,9 @@ HoldingRow _holding({
   );
 }
 
-PriceCacheRow _cache({double? change, double? changePct, DateTime? fetchedAt}) {
+PriceCacheRow _cache({
+  double? change, double? changePct, DateTime? fetchedAt, String? quoteDate,
+}) {
   return PriceCacheRow(
     symbol: 'sh600519',
     source: 'sina',
@@ -44,6 +46,7 @@ PriceCacheRow _cache({double? change, double? changePct, DateTime? fetchedAt}) {
     change: change,
     changePct: changePct,
     fetchedAt: fetchedAt ?? DateTime.now(),
+    quoteDate: quoteDate,
   );
 }
 
@@ -71,6 +74,19 @@ void main() {
   });
 
   group('todayProfitOf', () {
+    test('a NAV fetched today cannot re-label the previous session', () {
+      final now = DateTime.utc(2026, 11, 17, 7);
+      final stale = _cache(
+        change: 1.5, changePct: 0.015, fetchedAt: now, quoteDate: '2026-11-16',
+      );
+      final current = _cache(
+        change: 1.5, changePct: 0.015, fetchedAt: now, quoteDate: '2026-11-17',
+      );
+      expect(todayProfitOf(stale, 200, now: now, source: MarketSource.eastmoney), isNull);
+      expect(todayChangePctOf(stale, now: now, source: MarketSource.eastmoney), isNull);
+      expect(todayProfitOf(current, 200, now: now, source: MarketSource.eastmoney), 300);
+      expect(todayChangePctOf(current, now: now, source: MarketSource.eastmoney), 0.015);
+    });
     test('change x quantity for a quote written today', () {
       final row = _cache(change: 1.5);
       expect(todayProfitOf(row, 200), 300.0);

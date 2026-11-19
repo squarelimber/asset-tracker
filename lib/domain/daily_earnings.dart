@@ -5,22 +5,29 @@ import '../data/database.dart';
 class DailyEarning {
   const DailyEarning({
     required this.date,
-    required this.profit,
+    required double profit,
     required this.totalValue,
     required this.totalCost,
     required this.liabilities,
-  });
+    this.fromDate,
+    this.openingAssets,
+  }) : intervalProfit = profit;
 
   /// Snapshot date (yyyy-MM-dd).
   final String date;
 
-  /// Daily asset return = (assets − cost) today minus yesterday, where
+  /// Daily asset return = today's (assets − cost + realized gain) minus
+  /// yesterday's, where
   /// `assets = totalValue + liabilities` (net worth with the debt added
   /// back). Liability changes — credit-card spending, borrowing, repayment —
   /// move the debt line without touching the portfolio, so they never count
   /// as gains or losses; principal in/out moves the cost along with the
   /// balance and nets out the same way.
-  final double profit;
+  final double intervalProfit;
+  final String? fromDate;
+  final double? openingAssets;
+  bool get spansMultipleDays => fromDate != null && fromDate != date;
+  double? get profit => spansMultipleDays ? null : intervalProfit;
 
   final double totalValue;
   final double totalCost;
@@ -35,6 +42,7 @@ class MonthlyEarnings {
     required this.total,
     required this.rate,
     required this.days,
+    this.hasUnallocatedProfit = false,
   });
 
   final int year;
@@ -49,6 +57,7 @@ class MonthlyEarnings {
 
   /// Number of days with snapshot data in the month.
   final int days;
+  final bool hasUnallocatedProfit;
 }
 
 /// Yearly aggregate over [MonthlyEarnings].
@@ -58,6 +67,7 @@ class YearlyEarnings {
     required this.total,
     required this.rate,
     required this.months,
+    this.hasUnallocatedProfit = false,
   });
 
   final int year;
@@ -71,6 +81,7 @@ class YearlyEarnings {
 
   /// Months of the year that have data.
   final List<MonthlyEarnings> months;
+  final bool hasUnallocatedProfit;
 }
 
 /// Today's earning in the snapshot view: the last snapshot's asset profit
@@ -92,16 +103,32 @@ class YearlyEarnings {
   final today = snapshots.last;
   if (snapshots.length < 2) return (profit: 0.0, pct: null);
   final yesterday = snapshots[snapshots.length - 2];
-  final profitToday = _assetProfit(today);
-  final profitYesterday = _assetProfit(yesterday);
+  if (nextSnapshotDate(yesterday.date) != today.date) return null;
+  final profitToday = snapshotAssetProfit(today);
+  final profitYesterday = snapshotAssetProfit(yesterday);
   final profit = profitToday - profitYesterday;
-  final base = yesterday.totalValue + yesterday.liabilities;
+  final base = snapshotAssets(yesterday);
   final pct = base <= 0 ? null : profit / base;
   return (profit: profit, pct: pct);
 }
 
-double _assetProfit(SnapshotRow s) =>
-    (s.totalValue + s.liabilities) - s.totalCost;
+double snapshotAssets(SnapshotRow row) => row.totalValue + row.liabilities;
+
+double snapshotAssetProfit(SnapshotRow row) =>
+    snapshotAssets(row) - row.totalCost + (row.realizedProfit ?? 0);
+
+DateTime? snapshotCalendarDate(String day) {
+  final parsed = DateTime.tryParse(day);
+  if (parsed == null || todayKey(parsed) != day) return null;
+  return DateTime.utc(parsed.year, parsed.month, parsed.day);
+}
+
+String? nextSnapshotDate(String day) {
+  final date = snapshotCalendarDate(day);
+  if (date == null) return null;
+  // Calendar arithmetic avoids DST changing the length of a day.
+  return todayKey(DateTime.utc(date.year, date.month, date.day + 1));
+}
 
 /// Computes per-day earnings from daily snapshots.
 ///
@@ -112,19 +139,23 @@ class DailyEarningsCalculator {
 
   List<DailyEarning> compute(List<SnapshotRow> snapshots) {
     final result = <DailyEarning>[];
-    for (var i = 0; i < snapshots.length; i++) {
-      final s = snapshots[i];
-      final currentProfit = _assetProfit(s);
-      final prevProfit = i == 0
-          ? currentProfit
-          : _assetProfit(snapshots[i - 1]);
-      result.add(DailyEarning(
-        date: s.date,
-        profit: currentProfit - prevProfit,
-        totalValue: s.totalValue,
-        totalCost: s.totalCost,
-        liabilities: s.liabilities,
-      ));
+    SnapshotRow? previous;
+    for (final s in snapshots) {
+      if (snapshotCalendarDate(s.date) == null) continue;
+      result.add(
+        DailyEarning(
+          date: s.date,
+          profit: previous == null
+              ? 0
+              : snapshotAssetProfit(s) - snapshotAssetProfit(previous),
+          totalValue: s.totalValue,
+          totalCost: s.totalCost,
+          liabilities: s.liabilities,
+          fromDate: previous == null ? null : nextSnapshotDate(previous.date),
+          openingAssets: previous == null ? null : snapshotAssets(previous),
+        ),
+      );
+      previous = s;
     }
     return result;
   }
@@ -132,27 +163,18 @@ class DailyEarningsCalculator {
   /// Aggregates the earnings of [year]-[month] from precomputed daily
   /// earnings (any order).
   MonthlyEarnings monthOf(List<DailyEarning> earnings, int year, int month) {
-    final prefix = '$year-${month.toString().padLeft(2, '0')}';
-    final days = earnings
-        .where((e) => e.date.startsWith('$prefix-'))
-        .toList()
-      ..sort((a, b) => a.date.compareTo(b.date));
-    if (days.isEmpty) {
-      return MonthlyEarnings(year: year, month: month, total: 0, rate: null, days: 0);
-    }
-    var total = 0.0;
-    for (final d in days) {
-      total += d.profit;
-    }
-    // Base = the month's first day's asset-side value (net worth with the
-    // debt added back), matching the asset-basis profit numerator.
-    final base = days.first.totalValue + days.first.liabilities;
+    final period = _periodOf(
+      earnings,
+      DateTime.utc(year, month),
+      DateTime.utc(year, month + 1),
+    );
     return MonthlyEarnings(
       year: year,
       month: month,
-      total: total,
-      rate: base <= 0 ? null : total / base,
-      days: days.length,
+      total: period.total,
+      rate: period.rate,
+      days: period.days,
+      hasUnallocatedProfit: period.hasUnallocatedProfit,
     );
   }
 
@@ -161,29 +183,59 @@ class DailyEarningsCalculator {
     final months = <MonthlyEarnings>[];
     for (var m = 1; m <= 12; m++) {
       final agg = monthOf(earnings, year, m);
-      if (agg.days > 0) months.add(agg);
+      if (agg.days > 0 || agg.hasUnallocatedProfit) months.add(agg);
     }
-    if (months.isEmpty) {
-      return YearlyEarnings(year: year, total: 0, rate: null, months: const []);
-    }
-    final total = months.fold(0.0, (sum, m) => sum + m.total);
-    // Base = the year's first month's starting net worth.
-    final firstPrefix =
-        '$year-${months.first.month.toString().padLeft(2, '0')}-';
-    final firstDays = earnings
-        .where((e) => e.date.startsWith(firstPrefix))
-        .toList()
-      ..sort((a, b) => a.date.compareTo(b.date));
-    // Base = the year's first month's starting asset-side value (same
-    // asset-basis alignment as the monthly rate).
-    final startBase = firstDays.isEmpty
-        ? 0.0
-        : firstDays.first.totalValue + firstDays.first.liabilities;
+    // A gap can prevent precise monthly attribution while the annual
+    // difference remains known if both ends of the gap are inside the year.
+    final period = _periodOf(
+      earnings,
+      DateTime.utc(year),
+      DateTime.utc(year + 1),
+    );
     return YearlyEarnings(
       year: year,
-      total: total,
-      rate: startBase <= 0 ? null : total / startBase,
+      total: period.total,
+      rate: period.rate,
       months: months,
+      hasUnallocatedProfit: period.hasUnallocatedProfit,
+    );
+  }
+
+  ({double total, double? rate, int days, bool hasUnallocatedProfit}) _periodOf(
+    List<DailyEarning> earnings,
+    DateTime start,
+    DateTime end,
+  ) {
+    final first = todayKey(start);
+    final until = todayKey(end);
+    var total = 0.0;
+    var days = 0;
+    var hasUnallocatedProfit = false;
+    DailyEarning? opening;
+    for (final earning in earnings) {
+      final from = earning.fromDate ?? earning.date;
+      if (from.compareTo(until) >= 0 || earning.date.compareTo(first) < 0) {
+        continue;
+      }
+      final endsInPeriod = earning.date.compareTo(until) < 0;
+      if (endsInPeriod) days++;
+      if (from.compareTo(first) < 0 || !endsInPeriod) {
+        hasUnallocatedProfit = true;
+        continue;
+      }
+      total += earning.intervalProfit;
+      if (opening == null || earning.date.compareTo(opening.date) < 0) {
+        opening = earning;
+      }
+    }
+    final base =
+        opening?.openingAssets ??
+        (opening == null ? 0 : opening.totalValue + opening.liabilities);
+    return (
+      total: total,
+      rate: hasUnallocatedProfit || base <= 0 ? null : total / base,
+      days: days,
+      hasUnallocatedProfit: hasUnallocatedProfit,
     );
   }
 }

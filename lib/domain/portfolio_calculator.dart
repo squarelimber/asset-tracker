@@ -54,6 +54,7 @@ class PortfolioSummary {
     this.categoryBreakdown = const [],
     this.riskBreakdown = const [],
     this.realizedProfit = 0,
+    this.missingCurrencies = const {},
   });
 
   final double totalAssets;
@@ -75,6 +76,9 @@ class PortfolioSummary {
   /// Sum of realized gains from sell transactions (approximate: computed
   /// with the current unit cost when the average cost may have changed).
   final double realizedProfit;
+
+  /// Foreign amounts omitted because they cannot be valued in CNY.
+  final Set<String> missingCurrencies;
 
   double get netWorth => totalAssets - totalLiabilities;
 
@@ -105,8 +109,8 @@ class PortfolioCalculator {
   /// as the holding) used to compute today's change.
   /// [prevPriceByHoldingId] takes precedence and distinguishes sources that
   /// share a symbol.
-  /// [cnyRates] maps ISO currency code -> CNY per unit (default 1 = CNY),
-  /// applied to convert every holding's market value and cost into CNY.
+  /// [cnyRates] maps ISO currency code -> CNY per unit. Holdings without a
+  /// valid rate are excluded from both market value and cost totals.
   /// [sellTransactions] (optional) feeds the realized-profit estimate.
   PortfolioSummary compute(
     List<HoldingRow> holdings, {
@@ -120,6 +124,7 @@ class PortfolioCalculator {
     var cost = 0.0;
     var todayChange = 0.0;
     var prevTotal = 0.0;
+    final missingCurrencies = <String>{};
 
     final byType = <AssetType, double>{};
     final costByType = <AssetType, double>{};
@@ -130,17 +135,26 @@ class PortfolioCalculator {
 
     for (final h in holdings) {
       final type = AssetType.fromStorage(h.assetType);
-      final risk = RiskLevel.fromStorage(h.riskLevel) ??
-          RiskLevel.autoOf(type);
-      final rate = valueRateOf(h, cnyRates);
+      final risk = RiskLevel.fromStorage(h.riskLevel) ?? RiskLevel.autoOf(type);
       // Amount-based assets: quantity = current amount, price fixed at 1 and
       // costPrice stores the cumulative invested amount (in the currency).
-      final marketValue =
-          (type.isAmountBased ? h.quantity : h.quantity * h.latestPrice) * rate;
-      final holdingCost = (type.isAmountBased
-              ? effectiveCostOf(h)
-              : h.quantity * h.costPrice) *
-          costRateOf(h, cnyRates);
+      final rawValue = type.isAmountBased
+          ? h.quantity
+          : h.quantity * h.latestPrice;
+      final rawCost = type == AssetType.liability
+          ? 0.0
+          : (type.isAmountBased
+                ? effectiveCostOf(h)
+                : h.quantity * h.costPrice);
+      final rate = valueRateOfOrNull(h, cnyRates);
+      if (rate == null) {
+        if (h.quantity != 0 || rawCost != 0) {
+          missingCurrencies.add(h.currency.toUpperCase());
+        }
+        continue;
+      }
+      final marketValue = rawValue * rate;
+      final holdingCost = rawCost * costRateOfOrNull(h, cnyRates)!;
       if (type == AssetType.liability) {
         liabilities += marketValue;
         continue;
@@ -192,7 +206,12 @@ class PortfolioCalculator {
         ),
     ]..sort((a, b) => b.marketValue.compareTo(a.marketValue));
 
-    final realized = _realizedProfit(holdings, sellTransactions, cnyRates);
+    final realized = _realizedProfit(
+      holdings,
+      sellTransactions,
+      cnyRates,
+      missingCurrencies,
+    );
 
     return PortfolioSummary(
       totalAssets: assets,
@@ -204,21 +223,23 @@ class PortfolioCalculator {
       categoryBreakdown: categoryBreakdown,
       riskBreakdown: riskBreakdown,
       realizedProfit: realized,
+      missingCurrencies: Set.unmodifiable(missingCurrencies),
     );
   }
 
   /// Sum of realized gains over all sell transactions, converted into CNY.
-  /// Estimated with the holding's current unit cost, which is exact when no
-  /// purchase happened after the sell (moving average otherwise approximates).
+  /// Legacy entries without a recorded principal use the current unit cost.
   double _realizedProfit(
     List<HoldingRow> holdings,
     List<TransactionRow> sells,
     Map<String, double> cnyRates,
+    Set<String> missingCurrencies,
   ) {
     if (sells.isEmpty) return 0;
     final costByHolding = <int, double>{
       for (final h in holdings) h.id: h.costPrice,
     };
+    final holdingById = {for (final h in holdings) h.id: h};
     final typeByHolding = <int, AssetType>{
       for (final h in holdings) h.id: AssetType.fromStorage(h.assetType),
     };
@@ -230,11 +251,6 @@ class PortfolioCalculator {
     final fxLinkedByHolding = <int, bool>{
       for (final h in holdings) h.id: isFxLinked(h),
     };
-    double rateOf(String currency) {
-      final rate = cnyRates[currency.toUpperCase()];
-      return (rate == null || rate <= 0) ? 1 : rate;
-    }
-
     var total = 0.0;
     for (final t in sells) {
       final holdingId = t.holdingId;
@@ -257,8 +273,17 @@ class PortfolioCalculator {
       final price = t.price ?? 0;
       final rate = (fxLinkedByHolding[holdingId] ?? false)
           ? 1.0
-          : rateOf(t.currency);
-      total += (price - unitCost) * qty * rate;
+          : cnyRateOf(t.currency, cnyRates);
+      final principal = t.externalSellPrincipal;
+      final legacyProfit = (price - unitCost) * qty;
+      if (principal == null && legacyProfit == 0) continue;
+      if (rate == null) {
+        missingCurrencies.add(t.currency.toUpperCase());
+        continue;
+      }
+      total += principal == null
+          ? legacyProfit * rate
+          : t.amount * rate - principal * costRateOf(holdingById[holdingId]!, cnyRates);
     }
     return total;
   }

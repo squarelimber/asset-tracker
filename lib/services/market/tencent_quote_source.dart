@@ -78,6 +78,7 @@ class TencentQuoteSource extends MarketDataSource {
               change: q.change,
               changePct: q.changePct,
               fetchedAt: q.fetchedAt,
+              quoteDate: q.quoteDate,
             ));
           }
         }
@@ -132,6 +133,7 @@ class TencentQuoteSource extends MarketDataSource {
       prevClose: (prev == null || prev <= 0) ? null : prev,
       change: change,
       changePct: changePct == null ? null : changePct / 100,
+      quoteDate: parseMarketQuoteDate(f[30]),
       fetchedAt: DateTime.now(),
     );
   }

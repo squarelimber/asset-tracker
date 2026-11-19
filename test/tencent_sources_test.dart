@@ -151,6 +151,7 @@ void main() {
       expect(q.symbol, '400030');
       expect(q.price, closeTo(1.4553, 1e-9));
       expect(q.name, '东方添益债券');
+      expect(q.quoteDate, '2026-10-08');
       expect(q.changePct, closeTo(-0.0207, 1e-9));
       expect(q.prevClose, closeTo(1.4553 / (1 - 0.0207), 1e-6));
     });

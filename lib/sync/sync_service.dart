@@ -4,6 +4,7 @@ import '../core/history_sync.dart';
 import '../data/asset_dao.dart';
 import '../data/database.dart';
 import '../domain/holding_valuation.dart';
+import '../domain/transaction_service.dart';
 import 'sync_api.dart';
 import 'sync_format.dart';
 import 'sync_merge.dart';
@@ -17,6 +18,8 @@ class SyncResult {
     required this.changed,
     this.message,
     this.dataChanged = false,
+    this.localMerged = false,
+    this.uploaded = false,
   });
 
   final bool ok;
@@ -31,11 +34,29 @@ class SyncResult {
   /// Whether source-of-truth rows (not derived snapshots) changed locally,
   /// meaning the historical snapshots must be rebuilt.
   final bool dataChanged;
+  final bool localMerged;
+  final bool uploaded;
 
   final String? message;
 
-  static SyncResult fail(String message) =>
-      SyncResult(ok: false, rev: 0, conflicts: 0, changed: 0, message: message);
+  static SyncResult fail(
+    String message, {
+    int changed = 0,
+    int conflicts = 0,
+    bool dataChanged = false,
+    bool localMerged = false,
+    bool uploaded = false,
+    int rev = 0,
+  }) => SyncResult(
+    ok: false,
+    rev: rev,
+    conflicts: conflicts,
+    changed: changed,
+    message: message,
+    dataChanged: dataChanged,
+    localMerged: localMerged,
+    uploaded: uploaded,
+  );
 }
 
 /// Settings keys (stored locally, not synced).
@@ -80,68 +101,144 @@ class SyncService {
       } finally {
         api.close();
       }
-    } on SyncException catch (e) {
-      return SyncResult.fail(e.message);
     } catch (e) {
-      return SyncResult.fail('同步失败: $e');
+      return SyncResult.fail(_failureMessage(e));
     }
   }
+
+  String _failureMessage(Object error) =>
+      error is SyncException ? error.message : '同步出错：$error';
 
   Future<SyncResult> _syncWith(SyncApi api, String url) async {
     const maxAttempts = 3;
     var localDataChanged = false;
-    for (var attempt = 1; attempt <= maxAttempts; attempt++) {
-      final remote = await api.fetch();
-      final outcome = await _dao.transaction(() async {
-        final local = await _exportLocal();
-        final repaired = await _repairLegacyIdCollisions(local, remote.snapshot);
-        final outcome = const SyncMerger().merge(
-          local: repaired ? await _exportLocal() : local,
-          remote: remote.snapshot,
-          remoteTombstones: _parseTombstones(remote.tombstones),
-          localTombstones: _parseTombstones(
-            (await _dao.getTombstones()).map((t) => t.toJson()).toList(),
-          ),
+    var changed = 0;
+    var conflicts = 0;
+    var localMerged = false;
+    int? uploadedRev;
+    SyncResult failure(String message) => SyncResult.fail(
+      message,
+      changed: changed,
+      conflicts: conflicts,
+      dataChanged: localDataChanged,
+      localMerged: localMerged,
+      uploaded: uploadedRev != null,
+      rev: uploadedRev ?? 0,
+    );
+
+    try {
+      for (var attempt = 1; attempt <= maxAttempts; attempt++) {
+        final remote = await api.fetch();
+        final outcome = await _dao.transaction(() async {
+          final local = await _exportLocal();
+          final repaired = await _repairLegacyIdCollisions(
+            local,
+            remote.snapshot,
+          );
+          final branch = repaired ? await _exportLocal() : local;
+          final outcome = const SyncMerger().merge(
+            local: branch,
+            remote: remote.snapshot,
+            remoteTombstones: _parseTombstones(remote.tombstones),
+            localTombstones: _parseTombstones(
+              (await _dao.getTombstones()).map((t) => t.toJson()).toList(),
+            ),
+          );
+          await _apply(outcome);
+          final reconciled = await _reconcileConcurrentFlows(branch, remote.snapshot, outcome);
+          await _replaceTombstones(outcome.tombstones);
+          // Local data has changed even if the subsequent upload fails.
+          if (outcome.dataChanged || reconciled > 0) {
+            await _dao.setSetting(historySyncDirtyKey, historyDirtySet);
+          }
+          if (reconciled > 0) await _dao.setSetting(historyFullRebuildKey, '1');
+          return (outcome: outcome, repaired: repaired, reconciled: reconciled);
+        });
+        final merged = outcome.outcome;
+        localMerged = true;
+        localDataChanged =
+            localDataChanged || outcome.repaired || merged.dataChanged || outcome.reconciled > 0;
+        changed += merged.changed + outcome.reconciled;
+        conflicts += merged.conflicts;
+
+        final push = await api.push(
+          merged.tables,
+          merged.tombstones.map((t) => t.toJson()).toList(),
+          baseRev: remote.rev,
         );
-        await _apply(outcome);
-        await _replaceTombstones(outcome.tombstones);
-        // Local data has changed even if the subsequent upload fails.
-        if (outcome.dataChanged) {
-          await _dao.setSetting(historySyncDirtyKey, historyDirtySet);
+        if (!push.ok) {
+          // Someone else wrote to the server while we were merging: re-fetch,
+          // re-merge and retry. Re-applying is safe — the merge is LWW and
+          // idempotent on already-merged local state.
+          continue;
         }
-        return outcome;
-      });
-      localDataChanged = localDataChanged || outcome.dataChanged;
+        uploadedRev = push.rev;
 
-      final push = await api.push(
-        outcome.tables,
-        outcome.tombstones.map((t) => t.toJson()).toList(),
-        baseRev: remote.rev,
-      );
-      if (!push.ok) {
-        // Someone else wrote to the server while we were merging: re-fetch,
-        // re-merge and retry. Re-applying is safe — the merge is LWW and
-        // idempotent on already-merged local state.
-        continue;
-      }
-
-      await _dao.transaction(() async {
-        await _dao.setSetting(SyncSettingsKeys.lastRev, '${push.rev}');
-        await _dao.setSetting(
-          SyncSettingsKeys.lastSyncAt,
-          DateTime.now().toIso8601String(),
+        await _dao.transaction(() async {
+          await _dao.setSetting(SyncSettingsKeys.lastRev, '${push.rev}');
+          await _dao.setSetting(
+            SyncSettingsKeys.lastSyncAt,
+            DateTime.now().toIso8601String(),
+          );
+          await _dao.setSetting(SyncSettingsKeys.lastServerUrl, url);
+        });
+        return SyncResult(
+          ok: true,
+          rev: push.rev,
+          conflicts: conflicts,
+          changed: changed,
+          dataChanged: localDataChanged,
+          localMerged: true,
+          uploaded: true,
         );
-        await _dao.setSetting(SyncSettingsKeys.lastServerUrl, url);
-      });
-      return SyncResult(
-        ok: true,
-        rev: push.rev,
-        conflicts: outcome.conflicts,
-        changed: outcome.changed,
-        dataChanged: localDataChanged,
-      );
+      }
+    } catch (e) {
+      return failure(_failureMessage(e));
     }
-    return SyncResult.fail('同步冲突：服务器被并发更新，请重试');
+    return failure('同步冲突：服务器被并发更新，请重试');
+  }
+
+  Future<int> _reconcileConcurrentFlows(
+    Map<String, dynamic> local,
+    Map<String, dynamic> remote,
+    MergeOutcome outcome,
+  ) async {
+    Iterable<Map<String, dynamic>> rows(Map<String, dynamic> snapshot, String table) =>
+        (snapshot[table] as List? ?? const []).whereType<Map<String, dynamic>>();
+    Map<int, HoldingRow> holdings(Map<String, dynamic> snapshot) => {
+      for (final row in rows(snapshot, SyncTables.holdings).map(_rowToHolding))
+        row.id: row,
+    };
+    Map<int, TransactionRow> transactions(Map<String, dynamic> snapshot) => {
+      for (final row in rows(snapshot, SyncTables.transactions).map(_rowToTransaction))
+        row.id: row,
+    };
+    final ({List<HoldingRow> holdings, List<TransactionRow> transactions})? reconciled;
+    try {
+      reconciled = await TransactionService(_dao).reconcileConcurrentFlows(
+        localHoldings: holdings(local),
+        remoteHoldings: holdings(remote),
+        localTransactions: transactions(local),
+        remoteTransactions: transactions(remote),
+        mergedTransactions: rows(outcome.tables, SyncTables.transactions)
+            .map(_rowToTransaction).toList(),
+      );
+    } on ArgumentError catch (error) {
+      throw SyncException('两台设备的流水无法安全对账。请核对关联记录。\n${error.message}');
+    }
+    if (reconciled == null) return 0;
+    for (final (table, updated) in [
+      (SyncTables.holdings, reconciled.holdings.map(_formatter.holdingToRow)),
+      (SyncTables.transactions, reconciled.transactions.map(_formatter.transactionToRow)),
+    ]) {
+      final byId = {for (final row in updated) row['id']: row};
+      final existing = outcome.tables[table]!;
+      for (var i = 0; i < existing.length; i++) {
+        final replacement = byId[existing[i]['id']];
+        if (replacement != null) existing[i] = replacement;
+      }
+    }
+    return reconciled.holdings.length + reconciled.transactions.length;
   }
 
   Future<Map<String, dynamic>> _exportLocal() async {
@@ -476,6 +573,8 @@ class SyncService {
                 redemptionGroup: Value(row['redemptionGroup'] as String?),
                 opensHolding: Value(row['opensHolding'] as bool?),
                 recordedAtMicros: Value((row['recordedAtMicros'] as num?)?.toInt()),
+                ledgerUpdatedAt: Value(parseIso(row['ledgerUpdatedAt'])),
+                externalSellPrincipal: Value((row['externalSellPrincipal'] as num?)?.toDouble()),
                 updatedAt: Value(updatedAt),
               ),
             );
@@ -495,6 +594,7 @@ class SyncService {
             totalCost: (row['totalCost'] as num?)?.toDouble() ?? 0,
             liabilities: Value((row['liabilities'] as num?)?.toDouble() ?? 0),
             holdingValues: Value(row['holdingValues'] as String?),
+            realizedProfit: Value((row['realizedProfit'] as num?)?.toDouble()),
             createdAt: Value(parseIso(row['createdAt']) ?? DateTime.now()),
           ),
         );
@@ -609,6 +709,8 @@ class SyncService {
         redemptionGroup: row['redemptionGroup'] as String?,
         opensHolding: row['opensHolding'] as bool?,
         recordedAtMicros: (row['recordedAtMicros'] as num?)?.toInt(),
+        ledgerUpdatedAt: parseIso(row['ledgerUpdatedAt']),
+        externalSellPrincipal: (row['externalSellPrincipal'] as num?)?.toDouble(),
         updatedAt: parseIso(row['updatedAt']) ?? DateTime.now(),
       );
 

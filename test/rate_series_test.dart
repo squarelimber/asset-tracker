@@ -37,18 +37,43 @@ void main() {
       _snap('2026-03-01', 90000, 100000),
     ]);
     expect(rates, hasLength(3));
-    expect(rates[0], closeTo(10, 1e-9));
-    expect(rates[1], closeTo(20, 1e-9));
-    expect(rates[2], closeTo(-10, 1e-9));
+    expect(rates[0], 0);
+    expect(rates[1], closeTo((120000 / 110000 - 1) * 100, 1e-9));
+    expect(rates[2], closeTo((90000 / 110000 - 1) * 100, 1e-9));
   });
 
-  test('range rate is end minus start in percentage points', () {
+  test('range return measures growth from the start of the selected range', () {
     final delta = calc.rangeRatePct([
       _snap('2026-01-01', 100000, 100000), // 0%
       _snap('2026-08-08', 110000, 100000), // 10%
     ]);
     expect(delta, closeTo(10, 1e-9));
   });
+
+  test(
+    'deposits and withdrawals do not dilute existing gains in the curve',
+    () {
+      final rows = [
+        _snap('2026-01-01', 100, 100),
+        _snap('2026-01-02', 120, 100),
+        _snap('2026-01-03', 220, 200),
+        _snap('2026-01-04', 170, 150),
+        _snap('2026-01-05', 187, 150),
+      ];
+      final rates = calc.ratesOf(rows);
+      expect(
+        rates,
+        orderedEquals([
+          0,
+          closeTo(20, 1e-9),
+          closeTo(20, 1e-9),
+          closeTo(20, 1e-9),
+          closeTo(32, 1e-9),
+        ]),
+      );
+      expect(calc.rangeRatePct(rows.sublist(1, 4)), 0);
+    },
+  );
 
   test('range rate ignores deposits inside the range', () {
     final delta = calc.rangeRatePct([

@@ -101,6 +101,7 @@ class EastmoneyFundQuoteSource extends MarketDataSource {
       prevClose: prev,
       change: prev == null ? null : nav - prev,
       changePct: changePct == null ? null : changePct / 100,
+      quoteDate: parseMarketQuoteDate(row['PDATE']),
       fetchedAt: DateTime.now(),
     );
   }

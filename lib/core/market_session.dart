@@ -160,3 +160,19 @@ bool quoteChangeIsToday(
       return s != MarketSession.weekend && s != MarketSession.preOpen;
   }
 }
+
+/// Uses the session date when the source supplies it. A fetch made today can
+/// still return yesterday's close or the last published fund NAV.
+bool quoteObservationIsToday(
+  DateTime now, {
+  required DateTime fetchedAt,
+  String? quoteDate,
+  MarketSource? source,
+}) {
+  final marketDay = quoteDate == null
+      ? now
+      : now.toUtc().add(const Duration(hours: 8));
+  final observedDay = quoteDate ?? todayKey(fetchedAt.toLocal());
+  return observedDay == todayKey(marketDay) &&
+      (source == null || quoteChangeIsToday(marketDay, source));
+}

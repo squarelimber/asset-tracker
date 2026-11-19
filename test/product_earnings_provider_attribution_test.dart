@@ -47,6 +47,32 @@ SnapshotRow _snapshot(
 
 void main() {
   test(
+    'an interval crossing a year boundary marks both affected months',
+    () async {
+      final snapshots = [
+        _snapshot('2025-12-29', 100, 100, 100, 100),
+        _snapshot('2026-01-03', 100, 100, 130, 100),
+      ];
+      final container = ProviderContainer(
+        overrides: [
+          historySyncProvider.overrideWith((ref) => null),
+          snapshotsProvider.overrideWith((ref) => Stream.value(snapshots)),
+          transactionsProvider.overrideWith((ref) => Stream.value([])),
+        ],
+      );
+      addTearDown(container.dispose);
+      for (final day in ['2025-12-01', '2026-01-01']) {
+        final provider = productEarningsReportProvider(
+          DateTime.parse(day).year,
+        );
+        final subscription = container.listen(provider, (_, _) {});
+        addTearDown(subscription.close);
+        final report = await container.read(provider.future);
+        expect(report.issues.map((issue) => issue.date), contains(day));
+      }
+    },
+  );
+  test(
     'old incomplete attribution does not block next year baseline',
     () async {
       final snapshots = [

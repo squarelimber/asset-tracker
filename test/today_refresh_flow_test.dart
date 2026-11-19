@@ -60,16 +60,14 @@ class _Host extends ConsumerWidget {
   }
 }
 
-class _RetryBackfill extends HistoryBackfillService {
-  _RetryBackfill(super.dao);
+class _RetryHistory extends _FlatHistorySource {
+  _RetryHistory() : super(1);
   bool online = false;
-  bool? lastForceRebuild;
 
   @override
-  Future<BackfillResult> backfill({bool forceRebuild = false, DateTime? now}) async {
-    lastForceRebuild = forceRebuild;
-    return BackfillResult(ok: online, days: online ? 1 : 0, holdings: 1,
-      historyUnavailable: !online, wroteToday: online);
+  Future<DailyPriceHistory> fetch(String symbol, DateTime from, DateTime to) async {
+    if (!online) throw StateError('offline');
+    return super.fetch(symbol, from, to);
   }
 }
 
@@ -79,9 +77,17 @@ void main() {
     addTearDown(db.close);
     final dao = AssetDao(db);
     final id = await dao.createAccount(AccountsCompanion.insert(name: 'a', type: 'general'));
-    await dao.createHolding(HoldingsCompanion.insert(accountId: id, name: 'fund', assetType: 'mutual_fund'));
+    await dao.createHolding(HoldingsCompanion.insert(
+      accountId: id, name: 'fund', assetType: 'mutual_fund',
+      symbol: const Value('110022'), marketSource: const Value('eastmoney'),
+      quantity: const Value(100), costPrice: const Value(1),
+      purchaseDate: Value(DateTime.now().subtract(const Duration(days: 15))),
+    ));
     await dao.setSetting(historySyncDirtyKey, historyDirtySet);
-    final backfill = _RetryBackfill(dao);
+    final source = _RetryHistory();
+    final backfill = HistoryBackfillService(
+      dao, sources: {MarketSource.eastmoney: source},
+    );
     final container = ProviderContainer(overrides: [
       databaseProvider.overrideWithValue(db),
       tradingCalendarProvider.overrideWith((ref) async {}),
@@ -96,9 +102,8 @@ void main() {
     expect((await container.read(historySyncProvider.future))!.historyUnavailable, isTrue);
     expect(await dao.getSetting(historySyncDirtyKey), historyDirtySet);
     expect(await dao.getSetting(historySyncV6Key), isNull);
-    backfill.online = true;
+    source.online = true;
     expect((await container.refresh(historySyncProvider.future))!.ok, isTrue);
-    expect(backfill.lastForceRebuild, isTrue);
     expect(await dao.getSetting(historySyncDirtyKey), historyDirtyClear);
     expect(await dao.getSetting(historySyncV6Key), '1');
   });

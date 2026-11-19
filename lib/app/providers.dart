@@ -9,10 +9,12 @@ import '../data/asset_dao.dart';
 import '../data/database.dart';
 import '../domain/daily_earnings.dart';
 import '../domain/earnings_breakdown.dart';
+import '../domain/external_sale_gains.dart';
 import '../domain/holding_valuation.dart';
 import '../domain/holding_details.dart';
 import '../domain/product_monthly_earnings.dart';
 import '../domain/transaction_service.dart';
+import '../domain/transaction_identity.dart';
 import '../services/alert_notification_service.dart';
 import '../services/history_backfill_service.dart';
 import '../services/notification_service.dart';
@@ -242,6 +244,9 @@ final historySyncProvider = FutureProvider<BackfillResult?>((ref) async {
   // source rows sets it AFTER this provider may already have computed a
   // light pass — watching the flag rebuilds derived snapshots in-session.
   ref.watch(historyDirtyFlagProvider);
+  final market = ref.read(marketServiceProvider);
+  final backfill = ref.read(historyBackfillServiceProvider);
+  final snapshots = ref.read(snapshotServiceProvider);
   final dirty = await dao.getSetting(historySyncDirtyKey);
   final firstRun = await dao.getSetting(historySyncV6Key) == null;
   // Refresh quotes FIRST so the backfill prices today from fresh quotes:
@@ -249,17 +254,13 @@ final historySyncProvider = FutureProvider<BackfillResult?>((ref) async {
   // (A failed refresh does not abort — the backfill falls back to the
   // cached quote / history series, and the fetch-failure abort below leaves
   // any pre-existing today row alone.)
-  await ref.read(marketServiceProvider).refreshAll();
-  final result = await ref
-      .read(historyBackfillServiceProvider)
-      .backfill(forceRebuild: dirty == historyDirtySet || firstRun);
-  if (!result.historyUnavailable) {
-    if (dirty == historyDirtySet) {
-      await dao.setSetting(historySyncDirtyKey, historyDirtyClear);
-    }
-    if (firstRun) {
-      await dao.setSetting(historySyncV6Key, '1');
-    }
+  await market.refreshAll();
+  var result = await backfill.backfill(forceRebuild: dirty == historyDirtySet || firstRun);
+  if (result.inputsChanged) {
+    result = await backfill.backfill(forceRebuild: true);
+  }
+  if (result.ok && firstRun) {
+    await dao.setSetting(historySyncV6Key, '1');
   }
   // Today is covered by the backfill itself, with replay rules identical to
   // every earlier day (today priced at the refreshed live quote), so its
@@ -277,7 +278,7 @@ final historySyncProvider = FutureProvider<BackfillResult?>((ref) async {
   // SnapshotService remains the fallback ONLY when the backfill could not
   // write today (web / history fetch unavailable).
   if (!result.historyUnavailable && !result.wroteToday) {
-    await ref.read(snapshotServiceProvider).ensureTodaySnapshot(force: true);
+    await snapshots.ensureTodaySnapshot(force: true);
   }
   return result;
 });
@@ -299,8 +300,10 @@ final _productEarningsInputsProvider = FutureProvider.autoDispose.family((
   final snapshots = ref.watch(snapshotsProvider.future);
   final transactions = ref.watch(transactionsProvider.future);
   final end = '$year-12-31';
+  final observed = await snapshots;
   return (
-    snapshots: (await snapshots).where((s) => s.date.compareTo(end) <= 0).toList(),
+    snapshots: observed.where((s) => s.date.compareTo(end) <= 0).toList(),
+    nextSnapshot: observed.where((s) => s.date.compareTo(end) > 0).firstOrNull,
     transactions: await transactions,
   );
 });
@@ -325,6 +328,22 @@ final productEarningsReportProvider = FutureProvider.autoDispose
         attributionRequiredFrom: '$year-01-01',
         onIssue: issues.add,
       );
+      const calculator = DailyEarningsCalculator();
+      final earnings = calculator.compute([
+        ...inputs.snapshots,
+        ?inputs.nextSnapshot,
+      ]);
+      for (var month = 1; month <= 12; month++) {
+        if (calculator.monthOf(earnings, year, month).hasUnallocatedProfit) {
+          issues.add(
+            EarningsAttributionIssue(
+              date: todayKey(DateTime(year, month)),
+              message: '快照断档横跨月份，暂不能把区间收益拆分到本月。',
+              canRebuild: true,
+            ),
+          );
+        }
+      }
       issues.sort((a, b) => b.date.compareTo(a.date));
       return ProductEarningsReport(products, issues: issues);
     });
@@ -395,7 +414,18 @@ final snapshotsProvider = StreamProvider<List<SnapshotRow>>(
   // Snapshots are always recorded in CNY (values are CNY-converted); filter
   // to a single currency so today's earning and the calendar never see a
   // stray foreign-currency row that would shift the last/last-1 baseline.
-  (ref) => ref.watch(daoProvider).watchSnapshots(currency: 'CNY'),
+  (ref) {
+    final stream = ref.watch(daoProvider).watchSnapshots(currency: 'CNY');
+    final transactions = ref.watch(transactionsProvider).valueOrNull;
+    if (transactions == null || !transactions.any(isExternalSale)) return stream;
+    final holdings = ref.watch(holdingsProvider).valueOrNull;
+    if (holdings == null) return stream;
+    final rates = transactions.any((t) => isExternalSale(t) && t.currency != 'CNY')
+        ? ref.watch(cnyRatesProvider).valueOrNull ?? const <String, double>{}
+        : const <String, double>{};
+    return stream.map((rows) =>
+        ExternalSaleGains(holdings, transactions, rates).fillLegacy(rows));
+  },
 );
 
 // ---------------------------------------------------------------------------

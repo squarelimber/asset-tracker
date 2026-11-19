@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../app/providers.dart';
 import '../../core/enums.dart';
 import '../../core/formats.dart';
+import '../../domain/daily_earnings.dart';
 import '../../core/market_session.dart';
 import '../../core/ui_prefs.dart';
 import '../../domain/earnings_breakdown.dart';
@@ -66,13 +67,24 @@ class _RotatingSpotlightCardState extends ConsumerState<RotatingSpotlightCard> {
     final today = DateTime(now.year, now.month, now.day);
     final todayAsync = ref.watch(earningsBreakdownProvider(today));
     final productsAsync = ref.watch(productEarningsProvider(today.year));
+    const calculator = DailyEarningsCalculator();
+    final earnings = ref.watch(dailyEarningsProvider).valueOrNull ?? const [];
+    final monthHasGap = calculator
+        .monthOf(earnings, today.year, today.month)
+        .hasUnallocatedProfit;
     final hidden = ref.watch(hideAmountsProvider);
     final holdMs = ref.watch(spotlightHoldMsProvider).valueOrNull;
     if (holdMs != null && holdMs != _holdMs) {
       _holdMs = holdMs;
       _scheduleNext();
     }
-    final faces = _buildFaces(todayAsync, productsAsync, today, hidden: hidden);
+    final faces = _buildFaces(
+      todayAsync,
+      productsAsync,
+      today,
+      hidden: hidden,
+      monthHasGap: monthHasGap,
+    );
     final desktop = MediaQuery.sizeOf(context).width >= 1100;
     return MouseRegion(
       onEnter: (_) {
@@ -139,14 +151,18 @@ class _RotatingSpotlightCardState extends ConsumerState<RotatingSpotlightCard> {
     AsyncValue<List<ProductEarnings>> productsAsync,
     DateTime now, {
     required bool hidden,
+    required bool monthHasGap,
   }) {
     final out = <_Face>[];
     final spot = _todaySpotlight(todayAsync.valueOrNull);
-    final monthBest = _monthBest(productsAsync.valueOrNull, now);
+    final monthBest = monthHasGap
+        ? null
+        : _monthBest(productsAsync.valueOrNull, now);
     final emptyToday = _emptyTodayText(
       loading: todayAsync.isLoading,
       unavailable:
           todayAsync.hasError ||
+          (todayAsync.valueOrNull?.spansMultipleDays ?? false) ||
           (todayAsync.valueOrNull?.profit != null &&
               todayAsync.valueOrNull?.verified == false),
       today: now,
@@ -187,7 +203,9 @@ class _RotatingSpotlightCardState extends ConsumerState<RotatingSpotlightCard> {
         builder: () => monthBest == null
             ? _FaceContent(
                 title: '本月最佳',
-                emptyText: productsAsync.hasError ? '历史明细待更新' : '本月暂无收益数据',
+                emptyText: productsAsync.hasError || monthHasGap
+                    ? '历史明细待更新'
+                    : '本月暂无收益数据',
               )
             : _FaceContent(
                 title: '本月最佳',
@@ -229,7 +247,9 @@ class _RotatingSpotlightCardState extends ConsumerState<RotatingSpotlightCard> {
   ({_SpotEntry? winner, _SpotEntry? loser}) _todaySpotlight(
     EarningsBreakdown? today,
   ) {
-    if (today == null || !today.verified) return (winner: null, loser: null);
+    if (today == null || !today.verified || today.spansMultipleDays) {
+      return (winner: null, loser: null);
+    }
     _SpotEntry? winner;
     _SpotEntry? loser;
     for (final t in today.rows) {

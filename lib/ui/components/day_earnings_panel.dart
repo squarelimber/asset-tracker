@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/providers.dart';
 import '../../core/formats.dart';
+import '../../domain/daily_earnings.dart';
 import '../pages/holdings/open_holding_details.dart';
 import '../tokens.dart';
 import 'terminal_card.dart';
@@ -47,13 +48,17 @@ class DayEarningsPanel extends ConsumerWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              '${Formats.date(date)} 当日收益明细',
+              data.spansMultipleDays
+                  ? '${nextSnapshotDate(data.baselineDate!)} 至 ${data.date} 区间收益明细'
+                  : '${Formats.date(date)} 当日收益明细',
               style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
             ),
             const SizedBox(height: 8),
             Text(
               data.profit == null
                   ? '该日尚无快照，暂不能计算当日收益'
+                  : data.spansMultipleDays
+                  ? '中间缺少快照 · 区间收益 ${signed(data.profit!)}'
                   : '日历收益 ${signed(data.profit!)}',
               style: T.mono(
                 size: 13,

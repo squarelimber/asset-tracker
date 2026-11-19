@@ -106,6 +106,9 @@ class Transactions extends Table {
   /// never moved a cost); the replay then keeps the legacy behaviour.
   RealColumn get costMovedAmount => real().nullable()();
 
+  /// Cost basis of a sale whose proceeds leave the tracked portfolio.
+  RealColumn get externalSellPrincipal => real().nullable()();
+
   /// True on the sell leg of an **internal** movement whose proceeds stay in
   /// the portfolio: a redemption funding another holding (「赎回购买」/「由 X
   /// 出资」) or a sell parked in a tracked cash holding (回款到现金). The money
@@ -128,6 +131,9 @@ class Transactions extends Table {
   /// Entry order independent of the editable date and randomized row ID.
   IntColumn get recordedAtMicros => integer().nullable()();
 
+  /// Actual ledger edit time when a restore gave the row a newer sync version.
+  DateTimeColumn get ledgerUpdatedAt => dateTime().nullable()();
+
   DateTimeColumn get updatedAt => dateTime().withDefault(currentDateAndTime)();
 
   @override
@@ -148,6 +154,7 @@ class PriceCache extends Table {
   RealColumn get change => real().nullable()();
   RealColumn get changePct => real().nullable()();
   DateTimeColumn get fetchedAt => dateTime().withDefault(currentDateAndTime)();
+  TextColumn get quoteDate => text().nullable()();
 
   @override
   Set<Column> get primaryKey => {symbol};
@@ -168,6 +175,9 @@ class Snapshots extends Table {
   /// CNY holding valuations captured in the same write as the aggregate.
   /// Null on older snapshots; never reconstruct those with today's quotes.
   TextColumn get holdingValues => text().nullable()();
+
+  /// Cumulative gains realized by sales outside tracked accounts, in CNY.
+  RealColumn get realizedProfit => real().nullable()();
 
   /// Last time this day's value was (re)derived.
   ///

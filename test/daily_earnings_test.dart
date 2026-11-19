@@ -104,10 +104,11 @@ void main() {
       _snap('2026-08-01', 100000, 90000),
       _snap('2026-08-02', 105000, 90000),
       _snap('2026-08-03', 103000, 90000),
+      _snap('2026-08-31', 103000, 90000),
       _snap('2026-09-01', 110000, 90000),
     ]);
     final month = calc.monthOf(earnings, 2026, 8);
-    expect(month.days, 3);
+    expect(month.days, 4);
     expect(month.total, closeTo(3000, 1e-9)); // 0 + 5000 - 2000
     expect(month.rate, closeTo(3000 / 100000, 1e-9));
   });
@@ -118,6 +119,43 @@ void main() {
     expect(month.total, 0);
     expect(month.rate, isNull);
   });
+
+  test(
+    'the first gain uses the previous close for monthly and yearly rates',
+    () {
+      final earnings = calc.compute([
+        _snap('2025-12-31', 100, 100),
+        _snap('2026-01-01', 110, 100),
+      ]);
+      expect(calc.monthOf(earnings, 2026, 1).rate, closeTo(.10, 1e-9));
+      expect(calc.yearOf(earnings, 2026).rate, closeTo(.10, 1e-9));
+    },
+  );
+
+  test(
+    'snapshot gaps preserve only returns attributable to a whole period',
+    () {
+      final snapshots = [
+        _snap('2026-01-28', 100, 100),
+        _snap('2026-02-03', 130, 100),
+        _snap('2026-02-04', 135, 100),
+        _snap('2026-02-06', 141, 100),
+      ];
+      final earnings = calc.compute(snapshots);
+      expect(earnings[1].profit, isNull);
+      expect(earnings[2].profit, 5);
+      expect(earnings.last.profit, isNull);
+      expect(todayEarningOf(snapshots, now: DateTime(2026, 2, 6)), isNull);
+      expect(calc.monthOf(earnings, 2026, 1).hasUnallocatedProfit, isTrue);
+      final february = calc.monthOf(earnings, 2026, 2);
+      expect(february.hasUnallocatedProfit, isTrue);
+      expect(february.total, 11);
+      expect(february.rate, isNull);
+      final year = calc.yearOf(earnings, 2026);
+      expect(year.hasUnallocatedProfit, isFalse);
+      expect(year.total, 41);
+    },
+  );
 
   group('todayEarningOf', () {
     final now = DateTime(2026, 8, 16, 10);

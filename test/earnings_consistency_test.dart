@@ -405,6 +405,7 @@ void main() {
       ];
       final detail = earningsBreakdownOf(snapshots, '2026-11-02');
       expect(detail.baselineDate, '2026-10-30');
+      expect(detail.spansMultipleDays, isTrue);
       expect(detail.rows.map((r) => r.holdingId).toSet(), {1, 2});
       expect(detail.rows.firstWhere((r) => r.holdingId == 1).profit, -100);
       expect(detail.rows.firstWhere((r) => r.holdingId == 2).profit, 250);
@@ -470,6 +471,10 @@ void main() {
     final snapshots = [
       _snapshot('2025-12-31', [_holding(1, 1100, 1000)]),
       _snapshot('2026-01-01', [
+        _holding(1, 1120, 1000),
+        _holding(2, 2300, 2000),
+      ]),
+      _snapshot('2026-01-31', [
         _holding(1, 1120, 1000),
         _holding(2, 2300, 2000),
       ]),
@@ -661,6 +666,8 @@ void main() {
           sqlite.execute('INSERT INTO holdings VALUES (1, 1.2345)');
           sqlite.execute('CREATE TABLE transactions (id INTEGER PRIMARY KEY, amount REAL NOT NULL)');
           sqlite.execute('INSERT INTO transactions VALUES (1, 120)');
+          sqlite.execute('CREATE TABLE price_cache (symbol TEXT PRIMARY KEY, price REAL NOT NULL)');
+          sqlite.execute("INSERT INTO price_cache VALUES ('sh600519', 123.45)");
           sqlite.execute('PRAGMA user_version = 12');
         },
       ),
@@ -681,6 +688,9 @@ void main() {
     expect(transaction.readNullable<String>('redemption_group'), isNull);
     expect(transaction.readNullable<int>('opens_holding'), isNull);
     expect(transaction.readNullable<int>('recorded_at_micros'), isNull);
+    final quote = await db.customSelect('SELECT price, quote_date FROM price_cache').getSingle();
+    expect(quote.read<double>('price'), 123.45);
+    expect(quote.readNullable<String>('quote_date'), isNull);
     expect(
       (await db.customSelect('PRAGMA user_version').getSingle())
           .data
@@ -688,5 +698,27 @@ void main() {
           .single,
       db.schemaVersion,
     );
+  });
+
+  test('v16 resumes when the quote date column was already applied', () async {
+    final db = AppDatabase(NativeDatabase.memory(setup: (sqlite) {
+      sqlite.execute(
+        'CREATE TABLE price_cache (symbol TEXT PRIMARY KEY, price REAL NOT NULL, quote_date TEXT)',
+      );
+      sqlite.execute(
+        "INSERT INTO price_cache VALUES ('sz159980', 1.23, '2026-11-17')",
+      );
+      sqlite.execute('CREATE TABLE transactions (id INTEGER PRIMARY KEY)');
+      sqlite.execute('CREATE TABLE snapshots (date TEXT PRIMARY KEY)');
+      sqlite.execute('PRAGMA user_version = 15');
+    }));
+    addTearDown(db.close);
+    final quote = await db
+        .customSelect('SELECT price, quote_date FROM price_cache')
+        .getSingle();
+    expect(quote.read<double>('price'), 1.23);
+    expect(quote.read<String>('quote_date'), '2026-11-17');
+    final version = await db.customSelect('PRAGMA user_version').getSingle();
+    expect(version.data.values.single, db.schemaVersion);
   });
 }

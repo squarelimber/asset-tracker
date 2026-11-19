@@ -26,6 +26,21 @@ void main() {
     expect(RangeOption.all.startDate(now), isNull);
   });
 
+  test('months and years clamp to the last valid day of the target month', () {
+    expect(
+      RangeOption.month1.startDate(DateTime(2026, 3, 31)),
+      DateTime(2026, 2, 28),
+    );
+    expect(
+      RangeOption.month3.startDate(DateTime(2024, 5, 31)),
+      DateTime(2024, 2, 29),
+    );
+    expect(
+      RangeOption.year1.startDate(DateTime(2024, 2, 29)),
+      DateTime(2023, 2, 28),
+    );
+  });
+
   test('range profit is the change of value minus cost', () {
     // Start: value 100k, cost 90k (profit 10k)
     // End:   value 120k, cost 95k (profit 25k)

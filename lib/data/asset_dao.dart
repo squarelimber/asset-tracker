@@ -305,6 +305,8 @@ class AssetDao {
           updatedAt: Value(recordedAt),
         ),
       );
+      await setSetting(historyFullRebuildKey, '1');
+      await setSetting(historySyncDirtyKey, historyDirtySet);
     });
   }
 
@@ -441,10 +443,12 @@ class AssetDao {
         note: Value(t.note),
         costMoved: Value(t.costMoved),
         costMovedAmount: Value(t.costMovedAmount),
+        externalSellPrincipal: Value(t.externalSellPrincipal),
         internalMove: Value(t.internalMove),
         redemptionGroup: Value(t.redemptionGroup),
         opensHolding: Value(t.opensHolding),
         recordedAtMicros: Value(t.recordedAtMicros),
+        ledgerUpdatedAt: Value(t.ledgerUpdatedAt),
         updatedAt: Value(now ?? DateTime.now()),
       ),
     );
@@ -495,6 +499,12 @@ class AssetDao {
         .getSingleOrNull();
   }
 
+  Future<SnapshotRow?> getLatestSnapshot(String currency) =>
+      (_db.select(_db.snapshots)
+        ..where((row) => row.currency.equals(currency))
+        ..orderBy([(row) => OrderingTerm.desc(row.date)])
+        ..limit(1)).getSingleOrNull();
+
   Stream<List<SnapshotRow>> watchSnapshots({String? currency}) {
     final query = _db.select(_db.snapshots)
       ..orderBy([(t) => OrderingTerm.asc(t.date)]);
@@ -513,6 +523,9 @@ class AssetDao {
           entry.copyWith(
             holdingValues: entry.holdingValues.present
                 ? entry.holdingValues
+                : const Value(null),
+            realizedProfit: entry.realizedProfit.present
+                ? entry.realizedProfit
                 : const Value(null),
           ),
         );

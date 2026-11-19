@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math';
 
 import 'package:drift/drift.dart' hide isNotNull;
@@ -5,12 +6,17 @@ import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:asset_tracker/core/enums.dart';
+import 'package:asset_tracker/core/history_sync.dart';
 import 'package:asset_tracker/data/asset_dao.dart';
 import 'package:asset_tracker/data/database.dart';
 import 'package:asset_tracker/domain/daily_earnings.dart';
+import 'package:asset_tracker/domain/earnings_breakdown.dart';
 import 'package:asset_tracker/domain/holding_valuation.dart';
+import 'package:asset_tracker/domain/product_monthly_earnings.dart';
+import 'package:asset_tracker/domain/transaction_service.dart';
 import 'package:asset_tracker/services/history_backfill_service.dart';
 import 'package:asset_tracker/services/market/history_source.dart';
+import 'package:asset_tracker/services/snapshot_service.dart';
 
 class _FakeHistorySource extends HistoryDataSource {
   _FakeHistorySource() : super(MarketSource.eastmoney);
@@ -42,6 +48,19 @@ class _ThrowingHistorySource extends HistoryDataSource {
     DateTime to,
   ) async {
     throw Exception('network error for $symbol');
+  }
+}
+
+class _PausedHistorySource extends HistoryDataSource {
+  _PausedHistorySource() : super(MarketSource.eastmoney);
+
+  final requested = Completer<void>();
+  final quotes = Completer<DailyPriceHistory>();
+
+  @override
+  Future<DailyPriceHistory> fetch(String symbol, DateTime from, DateTime to) {
+    requested.complete();
+    return quotes.future;
   }
 }
 
@@ -109,6 +128,140 @@ void main() {
     final snapshots = await dao.getSnapshots();
     expect(snapshots, hasLength(8));
     expect(snapshots.first.totalValue, closeTo(260, 1e-6));
+  });
+
+  test('a rescheduled sale cannot precede the shares that fund it', () async {
+    final id = await seedFundHolding(purchaseDate: DateTime(2026, 1, 5));
+    final account = (await dao.getHolding(id))!.accountId;
+    final trades = TransactionService(dao);
+    Future<TransactionResult> trade(TransactionType type, double shares, int day) =>
+        trades.record(accountId: account, holdingId: id, type: type,
+          quantity: shares, price: 2.5, amount: shares * 2.5,
+          occurredAt: DateTime(2026, 1, day));
+    expect((await trade(TransactionType.buy, 100, 20)).ok, isTrue);
+    expect((await trade(TransactionType.sell, 150, 21)).ok, isTrue);
+    final sale = (await dao.getTransactions()).firstWhere((row) => row.type == 'sell');
+
+    final result = await trades.reschedule(sale.id, DateTime(2026, 1, 19));
+    expect(result.ok, isFalse);
+    expect(result.message, contains('份额不足'));
+    expect((await dao.getTransaction(sale.id))!.occurredAt, sale.occurredAt);
+    expect((await dao.getHolding(id))!.quantity, 50);
+    expect((await trades.reschedule(sale.id, DateTime(2026, 1, 22))).ok, isTrue);
+  });
+
+  test('a rescheduled purchase cannot spend cash before its opening day', () async {
+    final id = await seedFundHolding(purchaseDate: DateTime(2026, 1, 5));
+    final account = (await dao.getHolding(id))!.accountId;
+    final cash = await dao.createHolding(HoldingsCompanion.insert(
+      accountId: account, name: '现金', assetType: 'cash',
+      quantity: const Value(500), purchaseDate: Value(DateTime(2026, 1, 20)),
+    ));
+    final trades = TransactionService(dao);
+    expect((await trades.record(
+      accountId: account, holdingId: id, type: TransactionType.buy,
+      amount: 100, quantity: 40, price: 2.5, cashSourceId: cash,
+      occurredAt: DateTime(2026, 1, 21),
+    )).ok, isTrue);
+    final buy = (await dao.getTransactions()).single;
+    final result = await trades.reschedule(buy.id, DateTime(2026, 1, 19));
+    expect(result.ok, isFalse);
+    expect(result.message, contains('建仓日期'));
+    expect((await dao.getTransaction(buy.id))!.occurredAt, buy.occurredAt);
+  });
+
+  test('a rebuild cannot publish an older ledger after a flow is corrected', () async {
+    final date = DateTime(2026, 7, 8, 15);
+    final id = await seedFundHolding(purchaseDate: DateTime(2026, 7, 6), latest: 10);
+    final account = (await dao.getHolding(id))!.accountId;
+    final trades = TransactionService(dao);
+    expect((await trades.record(
+      accountId: account, holdingId: id, type: TransactionType.buy,
+      amount: 100, quantity: 10, price: 10, occurredAt: DateTime(2026, 7, 7),
+    )).ok, isTrue);
+    await SnapshotService(dao, clock: () => date).ensureTodaySnapshot();
+    final original = (await dao.getTransactions()).single;
+    final source = _PausedHistorySource();
+    final running = HistoryBackfillService(dao, sources: {MarketSource.eastmoney: source})
+        .backfill(now: date, forceRebuild: true);
+    await source.requested.future;
+    final preview = await trades.previewCorrection(original, amount: 200, quantity: 20, price: 10);
+    final correction = await trades.saveCorrection(preview);
+    expect(correction.ok, isTrue, reason: correction.message);
+    source.quotes.complete({'2026-07-06': 10, '2026-07-07': 10});
+
+    final stale = await running;
+    expect(stale.inputsChanged, isTrue);
+    expect((await dao.getSnapshot('2026-07-08', 'CNY'))!.totalValue, 1100);
+    expect(await dao.getSetting(historyFullRebuildKey), '1');
+    final refreshed = _FakeHistorySource()..data['110022'] = {
+      '2026-07-06': 10, '2026-07-07': 10,
+    };
+    final result = await HistoryBackfillService(dao,
+      sources: {MarketSource.eastmoney: refreshed},
+    ).backfill(now: date);
+    expect(result.ok, isTrue, reason: result.message);
+    expect((await dao.getSnapshot('2026-07-08', 'CNY'))!.totalValue, 1200);
+    expect(await dao.getSetting(historyFullRebuildKey), '0');
+  });
+
+  test('historical manual NAVs are valuation anchors', () async {
+    final account = await dao.createAccount(AccountsCompanion.insert(
+      name: '银行', type: 'general',
+    ));
+    final id = await dao.createHolding(HoldingsCompanion.insert(
+      accountId: account, name: '理财', assetType: 'bank_wealth',
+      marketSource: const Value('manual'), quantity: const Value(100),
+      costPrice: const Value(1), latestPrice: const Value(1.2),
+      purchaseDate: Value(DateTime(2026, 1, 5)),
+    ));
+    final service = HistoryBackfillService(dao, sources: {});
+    final now = DateTime(2026, 1, 8, 16);
+    expect((await service.backfill(now: now)).ok, isTrue);
+    await dao.recordManualNav(id, DateTime(2026, 1, 6), 1.5, now: now);
+    expect(await dao.getSetting(historyFullRebuildKey), '1');
+    expect((await service.backfill(now: now)).ok, isTrue);
+    expect((await dao.getSnapshot('2026-01-06', 'CNY'))!.totalValue, 150);
+    expect((await dao.getSnapshot('2026-01-08', 'CNY'))!.totalValue, 120);
+  });
+
+  test('a sale at the previous close keeps the realized gain and adds no daily loss', () async {
+    final id = await seedFundHolding(purchaseDate: DateTime(2026, 7, 6), latest: 12);
+    final account = (await dao.getHolding(id))!.accountId;
+    final h = (await dao.getHolding(id))!;
+    await dao.updateHolding(h.copyWith(costPrice: 10));
+    final source = _FakeHistorySource()..data['110022'] = {
+      '2026-07-06': 10, '2026-07-07': 12,
+    };
+    final sold = await TransactionService(dao).record(
+      accountId: account, holdingId: id, type: TransactionType.sell,
+      amount: 1200, quantity: 100, price: 12,
+      occurredAt: DateTime(2026, 7, 8, 14),
+    );
+    expect(sold.ok, isTrue, reason: sold.message);
+    final transactions = await dao.getTransactions();
+    expect(transactions.single.externalSellPrincipal, 1000);
+    final today = DateTime(2026, 7, 8, 16);
+    await SnapshotService(dao, clock: () => today).ensureTodaySnapshot();
+    expect((await dao.getSnapshot('2026-07-08', 'CNY'))!.realizedProfit, 200);
+    final result = await HistoryBackfillService(
+      dao, sources: {MarketSource.eastmoney: source},
+    ).backfill(now: today);
+    expect(result.ok, isTrue, reason: result.message);
+    final snapshots = (await dao.getSnapshots())..sort((a, b) => a.date.compareTo(b.date));
+    final end = snapshots.last;
+    expect(end.totalValue, 0);
+    expect(end.totalCost, 0);
+    expect(end.realizedProfit, 200);
+    final daily = const DailyEarningsCalculator().compute(snapshots);
+    expect(daily.last.profit, 0);
+    // Seed the transaction before the snapshot write, as on a live device.
+    final ready = [for (final day in snapshots) day.copyWith(
+      createdAt: transactions.single.updatedAt.add(const Duration(seconds: 1)),
+    )];
+    final products = productsFromSnapshots(ready, transactions: transactions);
+    final monthly = const ProductEarningsCalculator().monthOf(products.single, 2026, 7);
+    expect(monthly.profit, 200);
   });
 
   test('backfill retains dated zero snapshots after the last balance is withdrawn', () async {
@@ -778,6 +931,7 @@ void main() {
         await dao.setSetting('backfill_v11_tencent_history_gateway', '1');
         await dao.setSetting('backfill_v12_recorded_holding_values', '1');
         await dao.setSetting('backfill_v13_transaction_replay', '1');
+        await dao.setSetting('backfill_v14_manual_nav_and_realized', '1');
         await seedFundHolding(purchaseDate: DateTime(2026, 7, 1), latest: 2.9);
         final fake = _FakeHistorySource();
         fake.data['110022'] = {
@@ -842,6 +996,7 @@ void main() {
     await dao.setSetting('backfill_v11_tencent_history_gateway', '1');
     await dao.setSetting('backfill_v12_recorded_holding_values', '1');
     await dao.setSetting('backfill_v13_transaction_replay', '1');
+    await dao.setSetting('backfill_v14_manual_nav_and_realized', '1');
     await dao.setSetting('backfill_last_run', '2026-07-16');
     await seedFundHolding(purchaseDate: DateTime(2026, 7, 1), latest: 2.9);
     final fake = _FakeHistorySource();

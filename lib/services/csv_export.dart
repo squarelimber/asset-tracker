@@ -22,10 +22,10 @@ class CsvExport {
   static String _num(double v) => v.toStringAsFixed(4).replaceFirst(RegExp(r'\.?0+$'), '');
 
   /// Holdings CSV. [accountName] maps holding.accountId -> account name.
-  /// Market value converts at the current rate ([valueRateOf]); cost converts
+  /// Market value converts at the current rate; cost converts
   /// at the recorded purchase rate (costFxRate) falling back to the current
-  /// rate ([costRateOf]) — the same口径 as the in-app totals (a missing rate
-  /// falls back to 1). The 币种 column keeps each holding's original currency
+  /// rate. Converted fields that need an unavailable rate are blank.
+  /// The 币种 column keeps each holding's original currency
   /// and the per-unit figures (数量/单价) remain in that currency.
   String holdings(
     List<HoldingRow> holdings,
@@ -37,28 +37,36 @@ class CsvExport {
         '账户,名称,类型,代码,数量,成本单价,最新价,币种,买入日期,市值(CNY),成本(CNY),收益(CNY)');
     for (final h in holdings) {
       final type = AssetType.fromStorage(h.assetType);
-      final marketRate = valueRateOf(h, cnyRates);
-      final costRate = costRateOf(h, cnyRates);
-      final marketValueCny = (type.isAmountBased
-          ? h.quantity
-          : h.quantity * h.latestPrice) * marketRate;
-      final costCny = (type.isAmountBased
-          ? effectiveCostOf(h)
-          : h.quantity * h.costPrice) * costRate;
-      buf.writeln([
-        _esc(accountName[h.accountId] ?? ''),
-        _esc(h.name),
-        type.label,
-        _esc(h.symbol ?? ''),
-        _num(h.quantity),
-        _num(h.costPrice),
-        _num(h.latestPrice),
-        h.currency,
-        h.purchaseDate == null ? '' : Formats.date(h.purchaseDate!),
-        _num(marketValueCny),
-        _num(costCny),
-        _num(marketValueCny - costCny),
-      ].join(','));
+      final marketRate = valueRateOfOrNull(h, cnyRates);
+      final costRate = costRateOfOrNull(h, cnyRates);
+      final marketValueCny = marketRate == null
+          ? null
+          : (type.isAmountBased ? h.quantity : h.quantity * h.latestPrice) *
+                marketRate;
+      final costCny = costRate == null
+          ? null
+          : (type.isAmountBased
+                    ? effectiveCostOf(h)
+                    : h.quantity * h.costPrice) *
+                costRate;
+      buf.writeln(
+        [
+          _esc(accountName[h.accountId] ?? ''),
+          _esc(h.name),
+          type.label,
+          _esc(h.symbol ?? ''),
+          _num(h.quantity),
+          _num(h.costPrice),
+          _num(h.latestPrice),
+          h.currency,
+          h.purchaseDate == null ? '' : Formats.date(h.purchaseDate!),
+          marketValueCny == null ? '' : _num(marketValueCny),
+          costCny == null ? '' : _num(costCny),
+          marketValueCny == null || costCny == null
+              ? ''
+              : _num(marketValueCny - costCny),
+        ].join(','),
+      );
     }
     return buf.toString();
   }

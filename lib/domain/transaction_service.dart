@@ -6,7 +6,11 @@ import '../core/history_sync.dart';
 import '../data/asset_dao.dart';
 import '../data/database.dart';
 import 'holding_cost.dart';
+import 'holding_valuation.dart';
 import 'transaction_identity.dart';
+
+part 'transaction_correction.dart';
+part 'transaction_merge.dart';
 
 /// Outcome of a transaction record/remove operation.
 class TransactionResult {
@@ -81,43 +85,17 @@ class TransactionService {
       // time back-computes a wrong principal for every day before the flow.
       double movedCost = 0;
       await _dao.transaction(() async {
-        switch (type) {
-          case TransactionType.buy:
-            movedCost = await _applyBuy(
-              holdingId: holdingId,
-              quantity: quantity,
-              amount: amount,
-              cashSourceId: cashSourceId,
-            );
-          case TransactionType.sell:
-            movedCost = await _applySell(
-              holdingId: holdingId,
-              quantity: quantity,
-              amount: amount,
-              cashTargetId: cashTargetId,
-            );
-          case TransactionType.transferIn || TransactionType.transferOut:
-            movedCost = await _applyTransfer(
-              sourceId: cashSourceId,
-              targetId: cashTargetId,
-              amount: amount,
-            );
-          case TransactionType.dividend:
-            // Cost-basis method: a cash dividend reduces the holding's cost
-            // (a repayment of capital), so the ex-dividend price drop does
-            // not show up as a phantom loss in the return rate.
-            await _applyDividend(holdingId, amount, cashTargetId);
-          case TransactionType.income:
-            movedCost =
-                await _applyCashMove(cashTargetId, amount, invested: true);
-          case TransactionType.expense:
-            movedCost =
-                await _applyCashMove(cashTargetId, -amount, invested: true);
-          case TransactionType.consume:
-            await _applyConsume(holdingId, amount);
-          case TransactionType.split:
-            await _applySplit(holdingId, amount);
-        }
+        movedCost = await _applyFlow(
+          type: type,
+          holdingId: holdingId,
+          quantity: quantity,
+          amount: amount,
+          cashSourceId: cashSourceId,
+          cashTargetId: cashTargetId,
+        );
+        final externalPrincipal =
+            type == TransactionType.sell && cashTargetId == null ? movedCost : null;
+        if (externalPrincipal != null) movedCost = 0;
 
         await _dao.createTransaction(TransactionsCompanion.insert(
           accountId: accountId,
@@ -132,6 +110,7 @@ class TransactionService {
           occurredAt: occurredAt ?? DateTime.now(),
           note: note == null || note.isEmpty ? const Value.absent() : Value(note),
           costMovedAmount: Value(movedCost),
+          externalSellPrincipal: Value(externalPrincipal),
           // A sell whose proceeds are parked in a tracked cash holding never
           // leaves the portfolio (the balance grows by the proceeds, the
           // invested amount by the sold principal): it is an internal
@@ -203,40 +182,17 @@ class TransactionService {
       // rebuild to "fix" the balance afterwards).
       double movedCost = 0;
       await _dao.transaction(() async {
-        switch (type) {
-          case TransactionType.buy:
-            movedCost = await _applyBuy(
-              holdingId: holdingId,
-              quantity: quantity,
-              amount: amount,
-              cashSourceId: cashSourceId,
-            );
-          case TransactionType.sell:
-            movedCost = await _applySell(
-              holdingId: holdingId,
-              quantity: quantity,
-              amount: amount,
-              cashTargetId: cashTargetId,
-            );
-          case TransactionType.transferIn || TransactionType.transferOut:
-            movedCost = await _applyTransfer(
-              sourceId: cashSourceId,
-              targetId: cashTargetId,
-              amount: amount,
-            );
-          case TransactionType.dividend:
-            await _applyDividend(holdingId, amount, cashTargetId);
-          case TransactionType.income:
-            movedCost =
-                await _applyCashMove(cashTargetId, amount, invested: true);
-          case TransactionType.expense:
-            movedCost =
-                await _applyCashMove(cashTargetId, -amount, invested: true);
-          case TransactionType.consume:
-            await _applyConsume(holdingId, amount);
-          case TransactionType.split:
-            await _applySplit(holdingId, amount);
-        }
+        movedCost = await _applyFlow(
+          type: type,
+          holdingId: holdingId,
+          quantity: quantity,
+          amount: amount,
+          cashSourceId: cashSourceId,
+          cashTargetId: cashTargetId,
+        );
+        final externalPrincipal =
+            type == TransactionType.sell && cashTargetId == null ? movedCost : null;
+        if (externalPrincipal != null) movedCost = 0;
 
         await _dao.createTransaction(TransactionsCompanion.insert(
           accountId: accountId,
@@ -253,6 +209,7 @@ class TransactionService {
           occurredAt: occurredAt,
           note: note == null || note.isEmpty ? const Value.absent() : Value(note),
           costMovedAmount: Value(movedCost),
+          externalSellPrincipal: Value(externalPrincipal),
           internalMove: Value(
             type == TransactionType.sell && cashTargetId != null,
           ),
@@ -684,6 +641,51 @@ class TransactionService {
     }
   }
 
+  Future<double> _applyFlow({
+    required TransactionType type,
+    required int? holdingId,
+    required double? quantity,
+    required double amount,
+    required int? cashSourceId,
+    required int? cashTargetId,
+    bool moveCost = true,
+  }) async {
+    switch (type) {
+      case TransactionType.buy:
+        return _applyBuy(
+          holdingId: holdingId,
+          quantity: quantity,
+          amount: amount,
+          cashSourceId: cashSourceId,
+        );
+      case TransactionType.sell:
+        return _applySell(
+          holdingId: holdingId,
+          quantity: quantity,
+          amount: amount,
+          cashTargetId: cashTargetId,
+        );
+      case TransactionType.transferIn || TransactionType.transferOut:
+        return _applyTransfer(
+          sourceId: cashSourceId,
+          targetId: cashTargetId,
+          amount: amount,
+          moveCost: moveCost,
+        );
+      case TransactionType.income:
+        return _applyCashMove(cashTargetId, amount, invested: true);
+      case TransactionType.expense:
+        return _applyCashMove(cashTargetId, -amount, invested: true);
+      case TransactionType.dividend:
+        await _applyDividend(holdingId, amount, cashTargetId);
+      case TransactionType.consume:
+        await _applyConsume(holdingId, amount);
+      case TransactionType.split:
+        await _applySplit(holdingId, amount);
+    }
+    return 0;
+  }
+
   /// Buys into [holdingId], optionally funded from [cashSourceId]. Returns
   /// the invested amount the funding leg moved (0 when it has no cash leg).
   ///
@@ -726,7 +728,7 @@ class TransactionService {
   }
 
   /// Sells out of [holdingId], optionally parking the proceeds in
-  /// [cashTargetId]. Returns the invested amount that leg moved.
+  /// [cashTargetId]. Returns the cost basis of the sold position.
   ///
   /// A sell into a tracked cash holding is an **internal** movement: the
   /// balance receives the full proceeds but the cash account's invested
@@ -750,6 +752,7 @@ class TransactionService {
       throw ArgumentError('卖出数量超过持仓数量（当前 ${_fmt(holding.quantity)}）');
     }
     final newQty = holding.quantity - quantity;
+    final soldPrincipal = quantity * holding.costPrice;
     // Keep the unit cost after a full sell-out: the realized-gain estimate
     // reads the holding's current cost, and a later buy overwrites it
     // (moving average with oldQty = 0 is just the new purchase price).
@@ -757,7 +760,6 @@ class TransactionService {
     if (cashTargetId != null) {
       final target = await _getHolding(cashTargetId);
       _assertSameCurrency(target, holding);
-      final soldPrincipal = quantity * holding.costPrice;
       return _applyCashMove(
         cashTargetId,
         amount,
@@ -765,7 +767,7 @@ class TransactionService {
         costCredit: soldPrincipal,
       );
     }
-    return 0;
+    return soldPrincipal;
   }
 
   /// Moves [amount] between two cash/liability holdings. Returns the
@@ -1036,9 +1038,13 @@ class TransactionService {
         if (date.isAfter(now)) throw ArgumentError('调整后的交易时间晚于现在');
         final partner = await _dao.getRedemptionPartner(transaction);
         final rows = [transaction, ?partner];
+        await _validateRescheduledBalances(rows, date);
         for (final row in rows) {
           await _updateOpeningDate(row, date, now);
-          await _dao.updateTransaction(row.copyWith(occurredAt: date), now: now);
+          await _dao.updateTransaction(
+            row.copyWith(occurredAt: date, ledgerUpdatedAt: const Value(null)),
+            now: now,
+          );
         }
         await _dao.setSetting(historyFullRebuildKey, '1');
         await _dao.setSetting(historySyncDirtyKey, historyDirtySet);
@@ -1050,6 +1056,69 @@ class TransactionService {
     } catch (e) {
       return TransactionResult.fail(_recordFailMessage(e));
     }
+  }
+
+  Future<void> _validateRescheduledBalances(
+    List<TransactionRow> rows, DateTime date,
+  ) async {
+    final moved = rows.map((row) => row.id).toSet();
+    for (final id in rows.expand(_correctionHoldingIds).toSet()) {
+      final holding = await _getHolding(id);
+      final opened = holding.purchaseDate;
+      if (opened != null &&
+          todayKey(date).compareTo(todayKey(opened)) < 0 &&
+          rows.any((row) => row.holdingId != id &&
+              (row.cashSourceId == id || row.cashTargetId == id))) {
+        throw ArgumentError('交易日期不能早于「${holding.name}」的建仓日期');
+      }
+      final type = AssetType.fromStorage(holding.assetType);
+      if (type == AssetType.liability) continue;
+      final timeline = await _dao.getTransactionsForHolding(id);
+      int byDate(TransactionRow a, TransactionRow b) {
+        final dateOrder = a.occurredAt.compareTo(b.occurredAt);
+        return dateOrder != 0 ? dateOrder : compareTransactionEntryOrder(a, b);
+      }
+      timeline.sort(byDate);
+      var opening = holding.quantity;
+      for (final row in timeline.reversed) {
+        final (delta, factor) = _balanceEffect(holding, row);
+        opening = (opening - delta) / factor;
+      }
+      final revised = [
+        for (final row in timeline) moved.contains(row.id) ? row.copyWith(occurredAt: date) : row,
+      ]..sort(byDate);
+      var balance = opening;
+      for (final row in revised) {
+        final (delta, factor) = _balanceEffect(holding, row);
+        balance = balance * factor + delta;
+        if (balance < -1e-6) {
+          throw ArgumentError('调整后 ${todayKey(row.occurredAt.toLocal())} 的「${holding.name}」余额或份额不足');
+        }
+      }
+      if (!_correctionClose(balance, holding.quantity)) {
+        throw ArgumentError('调整后「${holding.name}」的份额与现有账本不一致，请检查折算与交易顺序');
+      }
+    }
+  }
+
+  (double, double) _balanceEffect(HoldingRow holding, TransactionRow row) {
+    final type = TransactionType.fromStorage(row.type);
+    final amountBased = AssetType.fromStorage(holding.assetType).isAmountBased;
+    final subject = row.holdingId == holding.id;
+    final source = row.cashSourceId == holding.id;
+    final target = row.cashTargetId == holding.id;
+    final quantity = amountBased ? row.amount : (row.quantity ?? 0);
+    final delta = switch (type) {
+      TransactionType.buy => (subject ? quantity : 0) - (source ? row.amount : 0),
+      TransactionType.sell => (target ? row.amount : 0) - (subject ? quantity : 0),
+      TransactionType.transferIn || TransactionType.transferOut =>
+        (target ? row.amount : 0) - (source ? row.amount : 0),
+      TransactionType.income || TransactionType.dividend => target ? row.amount : 0.0,
+      TransactionType.expense => target ? -row.amount : 0.0,
+      _ => 0.0,
+    };
+    return (delta.toDouble(), subject && type == TransactionType.split && row.amount > 0
+        ? row.amount : 1);
   }
 
   Future<void> _updateOpeningDate(
@@ -1112,14 +1181,14 @@ class TransactionService {
     }
   }
 
-  Future<void> _reverseTransaction(TransactionRow txn) async {
+  Future<void> _reverseTransaction(TransactionRow txn, {bool checkNewer = true}) async {
     final type = TransactionType.fromStorage(txn.type);
 
     switch (type) {
       case TransactionType.buy:
-        await _reverseBuy(txn);
+        await _reverseBuy(txn, checkNewer: checkNewer);
       case TransactionType.sell:
-        await _reverseSell(txn);
+        await _reverseSell(txn, checkNewer: checkNewer);
       case TransactionType.transferIn || TransactionType.transferOut:
         // Reversing a transfer swaps the source and target; rolling the
         // same direction back would deduct twice. Legacy transfers did
@@ -1146,18 +1215,18 @@ class TransactionService {
       case TransactionType.consume:
         await _applyConsume(txn.holdingId, -txn.amount);
       case TransactionType.split:
-        await _reverseSplit(txn);
+        await _reverseSplit(txn, checkNewer: checkNewer);
     }
   }
 
-  Future<void> _reverseBuy(TransactionRow txn) async {
+  Future<void> _reverseBuy(TransactionRow txn, {required bool checkNewer}) async {
     final holdingId = txn.holdingId;
     if (holdingId == null) throw ArgumentError('买入流水缺少持仓');
     final holding = await _getHolding(holdingId);
 
     // Moving average can only be reversed when this is the latest
     // transaction of the holding.
-    final newer = await _dao.hasNewerTransaction(holdingId, txn);
+    final newer = checkNewer && await _dao.hasNewerTransaction(holdingId, txn);
     if (newer) {
       throw ArgumentError('该持仓存在更晚的交易，请先删除更晚的流水');
     }
@@ -1172,7 +1241,7 @@ class TransactionService {
     final basis = (txn.internalMove || txn.cashSourceId != null)
         ? (txn.costMovedAmount ?? txn.amount)
         : txn.amount;
-    if (qty > holding.quantity) {
+    if (qty > holding.quantity + (checkNewer ? 0 : 1e-9)) {
       throw ArgumentError('当前持仓数量不足，无法撤销该买入');
     }
     if (AssetType.fromStorage(holding.assetType).isAmountBased) {
@@ -1183,7 +1252,7 @@ class TransactionService {
         costCredit: -basis,
       );
     } else {
-      final newQty = holding.quantity - qty;
+      final newQty = (holding.quantity - qty).clamp(0.0, double.infinity);
       // A full reversal keeps the unit cost (same invariant as a full
       // sell-out) so realized gains stay computable.
       final cost = newQty == 0
@@ -1201,11 +1270,11 @@ class TransactionService {
     }
   }
 
-  Future<void> _reverseSell(TransactionRow txn) async {
+  Future<void> _reverseSell(TransactionRow txn, {required bool checkNewer}) async {
     final holdingId = txn.holdingId;
     if (holdingId == null) throw ArgumentError('卖出流水缺少持仓');
     final holding = await _getHolding(holdingId);
-    if (await _dao.hasNewerTransaction(holdingId, txn)) {
+    if (checkNewer && await _dao.hasNewerTransaction(holdingId, txn)) {
       throw ArgumentError('该持仓存在更晚的交易，请先删除更晚的流水');
     }
     final qty = txn.quantity ?? 0;
@@ -1244,12 +1313,12 @@ class TransactionService {
   /// deleting a non-latest split would silently rescale those later
   /// numbers too. Like a buy reversal, require strict chronological
   /// order first.
-  Future<void> _reverseSplit(TransactionRow txn) async {
+  Future<void> _reverseSplit(TransactionRow txn, {required bool checkNewer}) async {
     final holdingId = txn.holdingId;
     if (holdingId == null) throw ArgumentError('折算流水缺少持仓');
     final ratio = txn.amount;
     if (ratio <= 0) throw ArgumentError('折算流水比例无效');
-    final newer = await _dao.hasNewerTransaction(holdingId, txn);
+    final newer = checkNewer && await _dao.hasNewerTransaction(holdingId, txn);
     if (newer) {
       throw ArgumentError('该持仓存在更晚的交易，请先删除更晚的流水');
     }

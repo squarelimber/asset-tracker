@@ -44,6 +44,7 @@ PriceCacheCompanion _priceCacheCompanion(String symbol, MarketQuote quote) {
     change: Value(quote.change),
     changePct: Value(quote.changePct),
     fetchedAt: Value(quote.fetchedAt),
+    quoteDate: Value(quote.quoteDate),
   );
 }
 

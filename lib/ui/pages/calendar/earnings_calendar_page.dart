@@ -18,9 +18,10 @@ import '../../tokens.dart';
 final earningsProvider = dailyEarningsProvider;
 
 class EarningsCalendarPage extends ConsumerStatefulWidget {
-  const EarningsCalendarPage({super.key, this.initialDate});
+  const EarningsCalendarPage({super.key, this.initialDate, this.initialMonth});
 
   final DateTime? initialDate;
+  final DateTime? initialMonth;
 
   @override
   ConsumerState<EarningsCalendarPage> createState() =>
@@ -39,7 +40,7 @@ class _EarningsCalendarPageState extends ConsumerState<EarningsCalendarPage> {
   @override
   void initState() {
     super.initState();
-    final now = widget.initialDate ?? DateTime.now();
+    final now = widget.initialDate ?? widget.initialMonth ?? DateTime.now();
     _year = now.year;
     _month = now.month;
     _selectedDate = widget.initialDate == null ? null : DateUtils.dateOnly(now);
@@ -166,8 +167,10 @@ class _CalendarBody extends StatelessWidget {
     final yearSummary = isYearView ? calc.yearOf(earnings, year) : null;
     final prefix = '$year-${month.toString().padLeft(2, '0')}';
     final profits = earnings
-        .where((e) => e.date.startsWith(prefix) && e.profit != 0)
+        .where((e) => e.date.startsWith(prefix))
         .map((e) => e.profit)
+        .whereType<double>()
+        .where((profit) => profit != 0)
         .toList();
     final minProfit = profits.isEmpty ? 0.0 : profits.reduce(math.min);
     final maxProfit = profits.isEmpty ? 0.0 : profits.reduce(math.max);
@@ -228,7 +231,7 @@ class _CalendarBody extends StatelessWidget {
               ],
             ],
             const SizedBox(height: T.s3),
-            Text('收益按相邻快照的资产与成本变化计算，剔除资金进出；点击日期查看同批快照的持仓明细', style: T.label()),
+            Text('收益按连续每日快照计算。标记「缺」的日期可查看两次快照之间的区间收益。', style: T.label()),
           ],
         ),
       ),
@@ -327,10 +330,10 @@ class _DayCell extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final hidden = ref.watch(hideAmountsProvider);
     final isToday = _isToday(date);
-    final hasEarning = earning != null && earning!.profit != 0;
-    final profit = earning?.profit ?? 0;
+    final profit = earning?.profit;
+    final hasEarning = profit != null && profit != 0;
     return HeatCell(
-      value: profit,
+      value: profit ?? 0,
       min: minProfit,
       max: maxProfit,
       height: 44,
@@ -351,6 +354,8 @@ class _DayCell extends ConsumerWidget {
           Text(
             earning == null
                 ? ''
+                : profit == null
+                ? '缺'
                 : hidden
                 ? Formats.masked()
                 : hasEarning
@@ -394,7 +399,9 @@ class _MonthSummary extends ConsumerWidget {
                 Text('本月收益', style: T.label()),
                 const SizedBox(height: T.s1),
                 Text(
-                  month.days == 0
+                  month.hasUnallocatedProfit
+                      ? '待核对'
+                      : month.days == 0
                       ? '暂无快照'
                       : hidden
                       ? Formats.masked()
@@ -404,7 +411,11 @@ class _MonthSummary extends ConsumerWidget {
                   style: T.mono(
                     size: 22,
                     weight: FontWeight.w700,
-                    color: hasEarning ? T.changeColor(month.total) : T.text3,
+                    color: month.hasUnallocatedProfit
+                        ? T.warning
+                        : hasEarning
+                        ? T.changeColor(month.total)
+                        : T.text3,
                   ),
                 ),
               ],
@@ -451,7 +462,9 @@ class _YearSummary extends ConsumerWidget {
                 Text('本年收益', style: T.label()),
                 const SizedBox(height: T.s1),
                 Text(
-                  year.months.isEmpty
+                  year.hasUnallocatedProfit
+                      ? '待核对'
+                      : year.months.isEmpty
                       ? '暂无快照'
                       : hidden
                       ? Formats.masked()
@@ -461,7 +474,11 @@ class _YearSummary extends ConsumerWidget {
                   style: T.mono(
                     size: 22,
                     weight: FontWeight.w700,
-                    color: hasEarning ? T.changeColor(year.total) : T.text3,
+                    color: year.hasUnallocatedProfit
+                        ? T.warning
+                        : hasEarning
+                        ? T.changeColor(year.total)
+                        : T.text3,
                   ),
                 ),
               ],
@@ -520,7 +537,9 @@ class _YearGrid extends StatelessWidget {
     final byMonth = {
       for (var m = 1; m <= 12; m++) m: calc.monthOf(earnings, year, m),
     };
-    final maxAbs = byMonth.values.map((m) => m.total.abs()).reduce(math.max);
+    final maxAbs = byMonth.values
+        .where((m) => !m.hasUnallocatedProfit)
+        .fold(0.0, (max, month) => math.max(max, month.total.abs()));
     final rows = <TableRow>[];
     for (var r = 0; r < 4; r++) {
       final cells = <Widget>[];
@@ -532,7 +551,9 @@ class _YearGrid extends StatelessWidget {
             label: _monthNames[m - 1],
             month: agg,
             maxAbs: maxAbs,
-            onTap: agg.days > 0 ? () => onTapMonth(m) : null,
+            onTap: agg.days > 0 || agg.hasUnallocatedProfit
+                ? () => onTapMonth(m)
+                : null,
           ),
         );
       }
@@ -562,9 +583,9 @@ class _MonthTile extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final hidden = ref.watch(hideAmountsProvider);
-    final hasData = month.days > 0;
+    final hasData = month.days > 0 && !month.hasUnallocatedProfit;
     final hasEarning = hasData && month.total != 0;
-    final frac = maxAbs == 0
+    final frac = !hasData || maxAbs == 0
         ? 0.0
         : (month.total.abs() / maxAbs).clamp(0.0, 1.0);
     final tile = TerminalCard(
@@ -577,7 +598,9 @@ class _MonthTile extends ConsumerWidget {
           Text(label, style: T.label()),
           const SizedBox(height: T.s1),
           Text(
-            !hasData
+            month.hasUnallocatedProfit
+                ? '待核对'
+                : !hasData
                 ? '--'
                 : hidden
                 ? Formats.masked()

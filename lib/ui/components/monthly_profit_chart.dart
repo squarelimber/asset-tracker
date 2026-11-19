@@ -12,10 +12,15 @@ class MonthlyProfitChart extends StatefulWidget {
     super.key,
     required this.months,
     required this.hideAmounts,
+    this.onOpenCalendar,
+    this.onOpenProducts,
   });
 
-  final Map<String, double> months;
+  /// Null values mark months whose return cannot be separated from a gap.
+  final Map<String, double?> months;
   final bool hideAmounts;
+  final ValueChanged<String>? onOpenCalendar;
+  final ValueChanged<String>? onOpenProducts;
 
   @override
   State<MonthlyProfitChart> createState() => _MonthlyProfitChartState();
@@ -76,6 +81,9 @@ class _MonthlyProfitChartState extends State<MonthlyProfitChart> {
     maximum += range * 0.12;
     final step = (maximum - minimum) / 4;
     final containsMissing = keys.any((key) => !widget.months.containsKey(key));
+    final containsUnverified = keys.any(
+      (key) => widget.months.containsKey(key) && widget.months[key] == null,
+    );
     final containsZero = keys.any((key) => widget.months[key] == 0);
 
     return Column(
@@ -98,7 +106,11 @@ class _MonthlyProfitChartState extends State<MonthlyProfitChart> {
                     value: key,
                     child: Text(
                       '${key.substring(0, 4)}年${key.substring(5)}月'
-                      '${widget.months.containsKey(key) ? '' : '（无记录）'}',
+                      '${widget.months[key] != null
+                          ? ''
+                          : widget.months.containsKey(key)
+                          ? '（待核对）'
+                          : '（无记录）'}',
                     ),
                   ),
               ],
@@ -106,7 +118,7 @@ class _MonthlyProfitChartState extends State<MonthlyProfitChart> {
             ),
             Text(
               selectedValue == null
-                  ? '无记录'
+                  ? (widget.months.containsKey(selected) ? '待核对' : '无记录')
                   : widget.hideAmounts
                   ? '****'
                   : '${selectedValue >= 0 ? '+' : ''}${Formats.money(selectedValue)}',
@@ -183,6 +195,8 @@ class _MonthlyProfitChartState extends State<MonthlyProfitChart> {
                           final key = keys[index];
                           final marker = !widget.months.containsKey(key)
                               ? '缺'
+                              : widget.months[key] == null
+                              ? '待'
                               : !widget.hideAmounts && widget.months[key] == 0
                               ? '0'
                               : '';
@@ -233,9 +247,10 @@ class _MonthlyProfitChartState extends State<MonthlyProfitChart> {
                             toY: widget.months[keys[index]] ?? 0,
                             width: 12,
                             borderRadius: BorderRadius.circular(2),
-                            color: widget.months.containsKey(keys[index])
-                                ? T.changeColor(widget.months[keys[index]]!)
-                                : Colors.transparent,
+                            color: switch (widget.months[keys[index]]) {
+                              final amount? => T.changeColor(amount),
+                              null => Colors.transparent,
+                            },
                           ),
                         ],
                       ),
@@ -245,16 +260,35 @@ class _MonthlyProfitChartState extends State<MonthlyProfitChart> {
             );
           },
         ),
-        if (containsMissing || (!widget.hideAmounts && containsZero))
+        if (containsMissing ||
+            containsUnverified ||
+            (!widget.hideAmounts && containsZero))
           Padding(
             padding: const EdgeInsets.only(top: T.s1),
             child: Text(
               [
                 if (containsMissing) '缺：无快照',
+                if (containsUnverified) '待：跨月区间收益待核对',
                 if (!widget.hideAmounts && containsZero) '0：零收益',
               ].join('  ·  '),
               style: T.label(),
             ),
+          ),
+        if (widget.onOpenCalendar != null || widget.onOpenProducts != null)
+          Wrap(
+            spacing: T.s2,
+            children: [
+              if (widget.onOpenCalendar case final open?)
+                TextButton(
+                  onPressed: () => open(selected),
+                  child: const Text('查看每日明细'),
+                ),
+              if (widget.onOpenProducts case final open?)
+                TextButton(
+                  onPressed: () => open(selected),
+                  child: const Text('查看产品收益'),
+                ),
+            ],
           ),
       ],
     );

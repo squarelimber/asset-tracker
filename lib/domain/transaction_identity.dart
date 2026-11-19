@@ -1,6 +1,14 @@
 import '../core/enums.dart';
 import '../data/database.dart';
 
+extension TransactionHistoryTimestamp on TransactionRow {
+  DateTime get historyUpdatedAt => ledgerUpdatedAt ?? updatedAt;
+}
+
+bool isExternalSale(TransactionRow row) =>
+    row.type == TransactionType.sell.storageName &&
+    !row.internalMove && row.cashTargetId == null && row.holdingId != null;
+
 bool isRedemptionLeg(TransactionRow row) =>
     row.internalMove &&
     row.holdingId != null &&

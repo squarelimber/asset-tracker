@@ -343,7 +343,8 @@ void main() {
       expect(month.days, 1);
       expect(month.profit, closeTo(-5, 1e-9));
       expect(calc.yearlyProfit(calc.yearOf(product, 2026)), closeTo(-5, 1e-9));
-      expect(month.rate, closeTo(-5 / 5595, 1e-9));
+      expect(month.rate, closeTo(-5 / 1000, 1e-9));
+      expect(calc.yearlyRate([month], product, 2026), closeTo(-5 / 1000, 1e-9));
     });
 
     test('monthly profit is the sum of daily value-cost deltas', () {
@@ -362,8 +363,8 @@ void main() {
       final m = calc.monthOf(p, 2026, 2);
       expect(m.days, 3);
       expect(m.profit, closeTo(10, 1e-9));
-      // Base = value on the month's first data day (2026-02-01).
-      expect(m.rate, closeTo(10 / 105, 1e-9));
+      // Base = the preceding close, before the gain on February 1.
+      expect(m.rate, closeTo(10 / 100, 1e-9));
     });
 
     test('first month has a zero-profit first day (no baseline)', () {
@@ -453,8 +454,8 @@ void main() {
       expect(a.daily[1].value, 165);
       final m = calc.monthOf(a, 2026, 2);
       expect(m.profit, closeTo(15, 1e-9));
-      // Base = merged value on the month's first data day (2026-02-01).
-      expect(m.rate, closeTo(15 / 165, 1e-9));
+      // Base = the merged balance at the preceding close.
+      expect(m.rate, closeTo(15 / 150, 1e-9));
     });
 
     test('product is closed only when all its holdings are sold out', () {

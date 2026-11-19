@@ -1,6 +1,7 @@
 import 'package:drift/drift.dart' show Value;
 
 import '../core/enums.dart';
+import '../core/market_session.dart';
 import '../core/symbols.dart';
 import '../data/asset_dao.dart';
 import '../data/database.dart';
@@ -45,11 +46,16 @@ class AlertService {
     // Resolve quotes by source and holding, including source-checked legacy rows.
     final cacheKeys = holdingQuoteCacheKeys(holdings);
     final cache = await _dao.getCachedPrices(cacheKeys);
-    final prev = <int, double>{
-      for (final h in holdings)
-        if (cachedQuoteForHolding(cache, h)?.prevClose != null)
-          h.id: cachedQuoteForHolding(cache, h)!.prevClose!,
-    };
+    final prev = <int, double>{};
+    for (final holding in holdings) {
+      final quote = cachedQuoteForHolding(cache, holding);
+      if (quote != null && quote.prevClose != null &&
+          quoteObservationIsToday(current, fetchedAt: quote.fetchedAt,
+            quoteDate: quote.quoteDate,
+            source: MarketSource.fromStorage(holding.marketSource))) {
+        prev[holding.id] = quote.prevClose!;
+      }
+    }
 
     final summary = const PortfolioCalculator().compute(
       holdings,

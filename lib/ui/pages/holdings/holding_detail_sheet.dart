@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../app/providers.dart';
 import '../../../core/enums.dart';
 import '../../../core/formats.dart';
+import '../../../core/nav_history.dart';
 import '../../../core/symbols.dart';
 import '../../../data/database.dart';
 import '../../../domain/closed_holding.dart';
@@ -78,6 +79,13 @@ class HoldingDetailSheet extends ConsumerWidget {
     final cache = ref.watch(priceCacheProvider).value ?? const <String, PriceCacheRow>{};
     final todayRow = cachedQuoteForHolding(cache, holding);
     final source = MarketSource.fromStorage(holding.marketSource);
+    final manualHistory = decodeNavHistory(holding.manualNavHistory);
+    final manualDate = (manualHistory.keys.toList()..sort()).lastOrNull;
+    final valuationQuote = source != MarketSource.manual &&
+            !hasManualNav(holding) &&
+            todayRow?.price == holding.latestPrice
+        ? todayRow
+        : null;
     final todayProfit = isClosed || txns.valueOrNull == null
         ? null
         : todayProfitOf(todayRow, holding.quantity, source: source,
@@ -185,6 +193,22 @@ class HoldingDetailSheet extends ConsumerWidget {
                 InfoRow(label: '数量/份额', value: Formats.smartNum(holding.quantity)),
               ],
               InfoRow(label: '币种', value: holding.currency),
+              if (!isClosed && !type.isAmountBased && type != AssetType.liability) ...[
+                if (manualDate != null && manualHistory[manualDate] == holding.latestPrice)
+                  InfoRow(label: '净值日期', value: manualDate)
+                else if (valuationQuote != null) ...[
+                  if (valuationQuote.quoteDate case final date?)
+                    InfoRow(
+                      label: type == AssetType.mutualFund ? '净值日期' : '行情日期',
+                      value: date,
+                    ),
+                  InfoRow(
+                    label: '行情获取时间',
+                    value: Formats.dateTime(valuationQuote.fetchedAt.toLocal()),
+                  ),
+                ] else
+                  const InfoRow(label: '估值来源', value: '账本记录 · 日期未知'),
+              ],
               InfoRow(
                 label: type == AssetType.liability ? '开卡日期' : '买入日期',
                 value: Formats.date(buyDate),
@@ -268,6 +292,7 @@ class InfoRow extends ConsumerWidget {
     final hide = ref.watch(hideAmountsProvider);
     final sensitive = !const {
       '状态', '币种', '清仓日期', '买入日期', '开卡日期', '持有时间', '最新单价',
+      '净值日期', '行情日期', '行情获取时间', '估值来源',
     }.contains(label);
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6),

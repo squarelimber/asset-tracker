@@ -4,8 +4,11 @@ import 'package:drift/drift.dart' hide isNull;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:asset_tracker/core/formats.dart';
 import 'package:asset_tracker/data/asset_dao.dart';
 import 'package:asset_tracker/data/database.dart';
+import 'package:asset_tracker/domain/risk_metrics.dart';
+import 'package:asset_tracker/domain/transaction_identity.dart';
 import 'package:asset_tracker/services/backup_service.dart';
 
 void main() {
@@ -21,6 +24,48 @@ void main() {
 
   tearDown(() async {
     await db.close();
+  });
+
+  test('restore preserves archived status and the usable snapshot interval', () async {
+    final start = DateTime(2026, 1, 5);
+    final account = await dao.createAccount(AccountsCompanion.insert(
+      name: '账户', type: 'general',
+    ));
+    final holding = await dao.createHolding(HoldingsCompanion.insert(
+      accountId: account, name: '已归档', assetType: 'etf',
+      archived: const Value(true),
+    ));
+    await dao.createTransaction(TransactionsCompanion.insert(
+      accountId: account, type: 'buy', holdingId: Value(holding),
+      amount: 1000, occurredAt: start, updatedAt: Value(start),
+    ));
+    for (var i = 0; i < 35; i++) {
+      final day = start.add(Duration(days: i, hours: 16));
+      await dao.upsertSnapshot(SnapshotsCompanion.insert(
+        date: todayKey(day), totalValue: 1000 + i + (i.isEven ? 0 : 2),
+        totalCost: 1000, createdAt: Value(day), realizedProfit: const Value(0),
+      ));
+    }
+    final db2 = AppDatabase(NativeDatabase.memory());
+    addTearDown(db2.close);
+    final restored = AssetDao(db2);
+    final result = await BackupService(restored).importJson(await service.exportJson());
+    expect(result.ok, isTrue, reason: result.message);
+    expect((await restored.getHolding(holding))!.archived, isTrue);
+    final flow = (await restored.getTransactions()).single;
+    expect(flow.updatedAt.isAfter(start), isTrue);
+    expect(flow.historyUpdatedAt, start);
+
+    Future<RiskMetricsEstimate> riskOf(AssetDao device) async =>
+        estimateRiskMetrics(
+          await device.getSnapshots(), await device.getTransactions(),
+          annualRiskFreeRate: .01, now: DateTime(2026, 3),
+        );
+    final before = await riskOf(dao);
+    final after = await riskOf(restored);
+    expect(before.sampleCount, 34);
+    expect(after.sampleCount, before.sampleCount);
+    expect(after.sharpe, before.sharpe);
   });
 
   test('round-trip preserves original ids and transfer links', () async {
@@ -75,6 +120,12 @@ void main() {
     ));
 
     final json = await service.exportJson();
+    final preview = service.previewJson(json);
+    expect(preview.exportedAt, isA<DateTime>());
+    expect(preview.accounts, 2);
+    expect(preview.holdings, 3);
+    expect(preview.transactions, 1);
+    expect(preview.snapshots, 0);
 
     // Fresh database on "another device".
     final db2 = AppDatabase(NativeDatabase.memory());

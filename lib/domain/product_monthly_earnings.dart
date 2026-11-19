@@ -164,7 +164,8 @@ class ProductEarningsCalculator {
       final cur = p.daily[i];
       if (!cur.date.startsWith(prefix) || !_hasObservation(p, i)) continue;
       final prev = i > 0 ? p.daily[i - 1] : null;
-      base ??= cur.value;
+      final openingValue = prev?.value ?? 0;
+      base ??= openingValue > 0 ? openingValue : cur.value;
       lastIndex = i;
       dailyProfits.add(
         prev == null
@@ -200,7 +201,9 @@ class ProductEarningsCalculator {
   // Snapshots can pad the series with zero balances. A transition from a
   // real position to zero still belongs to the day it was recorded.
   static bool _hasObservation(ProductEarnings p, int i) =>
-      _hasPosition(p.daily[i]) || (i > 0 && _hasPosition(p.daily[i - 1]));
+      _hasPosition(p.daily[i]) ||
+      (i > 0 && _hasPosition(p.daily[i - 1])) ||
+      (p.dailyProfitAdjustments[p.daily[i].date] ?? 0) != 0;
 
   /// All months of [year] that have data, in ascending order.
   List<ProductMonthEarning> yearOf(ProductEarnings p, int year) {
@@ -224,7 +227,9 @@ class ProductEarningsCalculator {
     for (var i = 0; i < p.daily.length; i++) {
       final d = p.daily[i];
       if (d.date.startsWith(firstPrefix) && _hasObservation(p, i)) {
-        return d.value <= 0 ? null : yearlyProfit(months) / d.value;
+        final openingValue = i > 0 ? p.daily[i - 1].value : 0;
+        final base = openingValue > 0 ? openingValue : d.value;
+        return base <= 0 ? null : yearlyProfit(months) / base;
       }
     }
     return null;
@@ -308,7 +313,8 @@ class HoldingReplay {
         t.amount,
         costBasis,
         t.id,
-        keepsPrincipal ? t.costMovedAmount : null,
+        isExternalSale(t) ? t.externalSellPrincipal :
+            (keepsPrincipal ? t.costMovedAmount : null),
       ));
     }
 

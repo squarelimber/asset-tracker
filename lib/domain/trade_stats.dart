@@ -135,7 +135,10 @@ class TradeStatsCalculator {
             final unitCost = costByHolding[t.holdingId] ?? 0;
             final qty = t.quantity ?? 0;
             final price = t.price ?? 0;
-            realized += (price - unitCost) * qty * rateOf(t.currency);
+            final principal = t.externalSellPrincipal;
+            realized += (principal == null
+                ? (price - unitCost) * qty
+                : t.amount - principal) * rateOf(t.currency);
           }
         case TransactionType.income:
           income += amount;
@@ -200,8 +203,11 @@ class TradeStatsCalculator {
       final unitCost = costByHolding[holdingId] ?? 0;
       final qty = t.quantity ?? 0;
       final price = t.price ?? 0;
-      result[holdingId] =
-          (result[holdingId] ?? 0) + (price - unitCost) * qty * rateOf(t.currency);
+      final principal = t.externalSellPrincipal;
+      final profit = principal == null
+          ? (price - unitCost) * qty
+          : t.amount - principal;
+      result[holdingId] = (result[holdingId] ?? 0) + profit * rateOf(t.currency);
     }
     return result;
   }

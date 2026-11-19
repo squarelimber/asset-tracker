@@ -18,13 +18,19 @@ enum RangeOption {
 
   /// Computes the inclusive start date for a preset option, or null for all.
   DateTime? startDate(DateTime now) => switch (this) {
-    month1 => DateTime(now.year, now.month - 1, now.day),
-    month3 => DateTime(now.year, now.month - 3, now.day),
+    month1 => _monthsBefore(now, 1),
+    month3 => _monthsBefore(now, 3),
     ytd => DateTime(now.year, 1, 1),
-    year1 => DateTime(now.year - 1, now.month, now.day),
-    year3 => DateTime(now.year - 3, now.month, now.day),
+    year1 => _monthsBefore(now, 12),
+    year3 => _monthsBefore(now, 36),
     all || custom => null,
   };
+
+  static DateTime _monthsBefore(DateTime now, int months) {
+    final month = now.month - months;
+    final lastDay = DateTime(now.year, month + 1, 0).day;
+    return DateTime(now.year, month, min(now.day, lastDay));
+  }
 }
 
 /// Stats for a selected snapshot range.
@@ -42,6 +48,8 @@ class RangeStats {
     required this.startCost,
     required this.endCost,
     required this.days,
+    this.startRealized = 0,
+    this.endRealized = 0,
   });
 
   final double startValue;
@@ -49,12 +57,14 @@ class RangeStats {
   final double startCost;
   final double endCost;
   final int days;
+  final double startRealized;
+  final double endRealized;
 
   /// Profit at range start (market value - cost).
-  double get startProfit => startValue - startCost;
+  double get startProfit => startValue - startCost + startRealized;
 
   /// Profit at range end (market value - cost).
-  double get endProfit => endValue - endCost;
+  double get endProfit => endValue - endCost + endRealized;
 
   /// Gain realized over the range, independent of new investments.
   double get profit => endProfit - startProfit;
@@ -90,6 +100,8 @@ class RangeStatsCalculator {
       endValue: last.totalValue + last.liabilities,
       startCost: first.totalCost,
       endCost: last.totalCost,
+      startRealized: first.realizedProfit ?? 0,
+      endRealized: last.realizedProfit ?? 0,
       days: days,
     );
   }

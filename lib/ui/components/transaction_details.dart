@@ -8,16 +8,19 @@ import '../../core/formats.dart';
 import '../../data/database.dart';
 import '../pages/holdings/open_holding_details.dart';
 import '../tokens.dart';
+import 'transaction_correction_dialog.dart';
 import 'transaction_presentation.dart';
 
 /// Shows the values recorded on this transaction, without deriving missing
 /// prices or quantities from the current holding.
+enum _TransactionAction { editDate, correct }
+
 Future<void> showTransactionDetails(
   BuildContext context,
   TransactionRow transaction, {
   Future<void> Function()? onEditDate,
 }) async {
-  final edit = await showModalBottomSheet<bool>(
+  final action = await showModalBottomSheet<_TransactionAction>(
     context: context,
     isScrollControlled: true,
     builder: (_) => _TransactionDetails(
@@ -25,7 +28,12 @@ Future<void> showTransactionDetails(
       canEditDate: onEditDate != null,
     ),
   );
-  if (edit == true && onEditDate != null && context.mounted) await onEditDate();
+  if (!context.mounted) return;
+  if (action == _TransactionAction.editDate && onEditDate != null) {
+    await onEditDate();
+  } else if (action == _TransactionAction.correct) {
+    await showTransactionCorrectionDialog(context, transaction);
+  }
 }
 
 class _TransactionDetails extends ConsumerWidget {
@@ -158,16 +166,28 @@ class _TransactionDetails extends ConsumerWidget {
                       ),
                     ),
                   ),
-                  if (canEditDate)
-                    TextButton(
-                      onPressed: () => Navigator.pop(context, true),
-                      child: const Text('修改日期'),
-                    ),
                   IconButton(
                     tooltip: '关闭',
                     onPressed: () => Navigator.pop(context),
                     icon: const Icon(Icons.close),
                   ),
+                ],
+              ),
+              Wrap(
+                spacing: T.s2,
+                children: [
+                  TextButton.icon(
+                    onPressed: () =>
+                        Navigator.pop(context, _TransactionAction.correct),
+                    icon: const Icon(Icons.edit_outlined, size: 16),
+                    label: const Text('更正交易'),
+                  ),
+                  if (canEditDate)
+                    TextButton(
+                      onPressed: () =>
+                          Navigator.pop(context, _TransactionAction.editDate),
+                      child: const Text('修改日期'),
+                    ),
                 ],
               ),
               for (final (label, value) in rows)

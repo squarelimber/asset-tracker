@@ -164,13 +164,17 @@ class SettingsPage extends ConsumerWidget {
     );
   }
 
-  Future<void> _export(BuildContext context, WidgetRef ref) async {
+  Future<void> _export(
+    BuildContext context,
+    WidgetRef ref, {
+    String? fileName,
+  }) async {
     final json = await ref.read(backupServiceProvider).exportJson();
     if (!context.mounted) return;
     await _exportFile(
       context,
       Uint8List.fromList(utf8.encode(json)),
-      fileName: backupFileName(),
+      fileName: fileName ?? backupFileName(),
       mime: 'application/json',
       typeGroup: const XTypeGroup(label: 'JSON', extensions: ['json']),
     );
@@ -196,45 +200,139 @@ class SettingsPage extends ConsumerWidget {
 
   Future<void> _import(BuildContext context, WidgetRef ref) async {
     const typeGroup = XTypeGroup(label: 'JSON', extensions: ['json']);
-    final file = await openFile(acceptedTypeGroups: [typeGroup]);
-    if (file == null) return;
+    final XFile? file;
+    try {
+      file = await openFile(acceptedTypeGroups: [typeGroup]);
+    } catch (_) {
+      if (context.mounted) _showImportMessage(context, '无法打开文件选择器', ok: false);
+      return;
+    }
+    final backupFile = file;
+    if (backupFile == null) return;
+    if (!context.mounted) return;
+    final service = ref.read(backupServiceProvider);
+    final String json;
+    final BackupPreview preview;
+    try {
+      json = utf8.decode(await backupFile.readAsBytes());
+      preview = service.previewJson(json);
+    } on FormatException catch (error) {
+      if (context.mounted) {
+        _showImportMessage(context, error.message, ok: false);
+      }
+      return;
+    } catch (_) {
+      if (context.mounted) _showImportMessage(context, '无法读取备份文件', ok: false);
+      return;
+    }
     if (!context.mounted) return;
 
-    final confirm = await showDialog<bool>(
+    final result = await showDialog<ImportResult>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('导入备份'),
-        content: const Text(
-          '导入将覆盖本机数据，且无法撤销。同步服务器上的其他记录不会被删除，'
-          '之后同步时可能重新出现。确定继续吗？',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('取消'),
+      barrierDismissible: false,
+      builder: (dialogContext) {
+        var busy = false;
+        String? error;
+        return StatefulBuilder(
+          builder: (dialogContext, setState) => PopScope(
+            canPop: !busy,
+            child: AlertDialog(
+              scrollable: true,
+              title: const Text('核对备份'),
+              content: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(backupFile.name, style: T.label()),
+                  if (preview.exportedAt case final time?)
+                    Text('备份时间 ${Formats.dateTime(time.toLocal())}')
+                  else
+                    const Text('文件未记录备份时间'),
+                  const SizedBox(height: T.s2),
+                  Text('${preview.accounts} 个账户 · ${preview.holdings} 项持仓'),
+                  Text(
+                    '${preview.transactions} 条流水 · ${preview.snapshots} 个快照',
+                  ),
+                  const SizedBox(height: T.s2),
+                  const Text('恢复会覆盖当前账本。再次同步时，服务器上保留的记录可能重新合入。'),
+                  TextButton.icon(
+                    onPressed: busy
+                        ? null
+                        : () async {
+                            setState(() {
+                              busy = true;
+                              error = null;
+                            });
+                            try {
+                              final timestamp = DateTime.now()
+                                  .toIso8601String()
+                                  .split('.')
+                                  .first
+                                  .replaceAll(':', '');
+                              await _export(
+                                dialogContext,
+                                ref,
+                                fileName: '恢复前_asset_tracker_$timestamp.json',
+                              );
+                            } catch (_) {
+                              if (dialogContext.mounted) error = '当前账本导出失败，请重试';
+                            } finally {
+                              if (dialogContext.mounted) {
+                                setState(() => busy = false);
+                              }
+                            }
+                          },
+                    icon: const Icon(Icons.save_alt),
+                    label: const Text('先导出当前账本'),
+                  ),
+                  if (error != null)
+                    Text(error!, style: T.label(color: T.warning)),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: busy ? null : () => Navigator.pop(dialogContext),
+                  child: const Text('取消'),
+                ),
+                FilledButton(
+                  style: FilledButton.styleFrom(backgroundColor: T.up),
+                  onPressed: busy
+                      ? null
+                      : () async {
+                          setState(() {
+                            busy = true;
+                            error = null;
+                          });
+                          final result = await service.importJson(json);
+                          if (!dialogContext.mounted) return;
+                          if (result.ok) {
+                            Navigator.pop(dialogContext, result);
+                          } else {
+                            setState(() {
+                              busy = false;
+                              error = result.message;
+                            });
+                          }
+                        },
+                  child: const Text('覆盖导入'),
+                ),
+              ],
+            ),
           ),
-          FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: T.up),
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('覆盖导入'),
-          ),
-        ],
-      ),
+        );
+      },
     );
-    if (confirm != true) return;
+    if (result != null && context.mounted) {
+      _showImportMessage(context, result.message, ok: true);
+    }
+  }
 
-    // Read as raw bytes and decode UTF-8 explicitly: cross_file's
-    // XFile.readAsString() maps bytes 1:1 (Latin-1) on the Android bytes
-    // path, which garbles Chinese characters.
-    final bytes = await file.readAsBytes();
-    final json = utf8.decode(bytes);
-    final result = await ref.read(backupServiceProvider).importJson(json);
-    if (!context.mounted) return;
+  void _showImportMessage(
+    BuildContext context,
+    String message, {
+    required bool ok,
+  }) {
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(result.message),
-        backgroundColor: result.ok ? null : T.up,
-      ),
+      SnackBar(content: Text(message), backgroundColor: ok ? null : T.up),
     );
   }
 
@@ -249,9 +347,7 @@ class SettingsPage extends ConsumerWidget {
     final accountName = {for (final a in accounts) a.id: a.name};
     final allHoldings = await dao.getHoldings();
     final holdingName = {for (final h in allHoldings) h.id: h.name};
-    // FX rates for converting foreign-currency holdings to CNY in the
-    // holdings export (missing rates fall back to the raw value). Await the
-    // future so a cold start never silently exports ×1 "CNY" values.
+    // Await the rates before export. Unavailable conversions stay blank.
     final cnyRates = await ref
         .read(cnyRatesProvider.future)
         .catchError((_) => const <String, double>{});

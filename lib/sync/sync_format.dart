@@ -90,6 +90,8 @@ class SyncFormatter {
     'note': t.note,
     'costMoved': t.costMoved,
     'costMovedAmount': t.costMovedAmount,
+    if (t.externalSellPrincipal != null) 'externalSellPrincipal': t.externalSellPrincipal,
+    if (t.ledgerUpdatedAt != null) 'ledgerUpdatedAt': t.ledgerUpdatedAt!.toIso8601String(),
     'internalMove': t.internalMove,
     if (t.redemptionGroup != null) 'redemptionGroup': t.redemptionGroup,
     if (t.opensHolding != null) 'opensHolding': t.opensHolding,
@@ -104,6 +106,7 @@ class SyncFormatter {
     'totalCost': s.totalCost,
     'liabilities': s.liabilities,
     if (s.holdingValues != null) 'holdingValues': s.holdingValues,
+    if (s.realizedProfit != null) 'realizedProfit': s.realizedProfit,
     'createdAt': s.createdAt.toIso8601String(),
     // Snapshots have no separate updatedAt column; `createdAt` is
     // rewritten on every recompute (see the Snapshots table) and is

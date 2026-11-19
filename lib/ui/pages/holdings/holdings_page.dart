@@ -97,8 +97,11 @@ double? todayProfitOf(
 }) {
   if (row == null || row.change == null) return null;
   final n = now ?? DateTime.now();
-  if (!_isSameDay(row.fetchedAt, n)) return null;
-  if (source != null && !quoteChangeIsToday(n, source)) return null;
+  if (!quoteObservationIsToday(
+    n, fetchedAt: row.fetchedAt, quoteDate: row.quoteDate, source: source,
+  )) {
+    return null;
+  }
   if (transactions == null) return row.change! * quantity;
   if (!quantity.isFinite ||
       quantity < 0 ||
@@ -165,8 +168,11 @@ double? todayChangePctOf(
 }) {
   if (row == null || row.changePct == null) return null;
   final n = now ?? DateTime.now();
-  if (!_isSameDay(row.fetchedAt, n)) return null;
-  if (source != null && !quoteChangeIsToday(n, source)) return null;
+  if (!quoteObservationIsToday(
+    n, fetchedAt: row.fetchedAt, quoteDate: row.quoteDate, source: source,
+  )) {
+    return null;
+  }
   return row.changePct;
 }
 
@@ -178,7 +184,8 @@ double assetTotalOf(List<HoldingRow> holdings, Map<String, double> rates) {
   return holdings.fold(0.0, (sum, h) {
     final type = AssetType.fromStorage(h.assetType);
     if (type == AssetType.liability) return sum;
-    final rate = valueRateOf(h, rates);
+    final rate = valueRateOfOrNull(h, rates);
+    if (rate == null) return sum;
     return sum +
         (type.isAmountBased ? h.quantity : h.quantity * h.latestPrice) * rate;
   });
@@ -188,7 +195,8 @@ double assetTotalOf(List<HoldingRow> holdings, Map<String, double> rates) {
 double liabilityTotalOf(List<HoldingRow> holdings, Map<String, double> rates) {
   return holdings.fold(0.0, (sum, h) {
     if (AssetType.fromStorage(h.assetType) != AssetType.liability) return sum;
-    final rate = valueRateOf(h, rates);
+    final rate = valueRateOfOrNull(h, rates);
+    if (rate == null) return sum;
     return sum + h.quantity * rate;
   });
 }
@@ -299,10 +307,8 @@ class _HoldingsPageState extends ConsumerState<HoldingsPage> {
         : list.where((h) => _matchesQuery(h, q)).toList();
     filtered = filtered.where(_matchesFilter).toList();
     double? converted(HoldingRow h, double value) {
-      if (h.currency.toUpperCase() == 'CNY' || isFxLinked(h)) return value;
-      final rate = rates[h.currency.toUpperCase()];
-      if (rate == null || !rate.isFinite || rate <= 0) return null;
-      return value * rate;
+      final rate = valueRateOfOrNull(h, rates);
+      return rate == null ? null : value * rate;
     }
 
     int compareValues(double? a, double? b, {required bool descending}) {
@@ -502,6 +508,11 @@ class _HoldingsPageState extends ConsumerState<HoldingsPage> {
     final total = _isAssets
         ? assetTotalOf(visible, rates)
         : liabilityTotalOf(visible, rates);
+    final missing = {
+      for (final h in visible)
+        if (h.quantity != 0 && valueRateOfOrNull(h, rates) == null)
+          h.currency.toUpperCase(),
+    }.toList()..sort();
     final hasFilters = _filter != HoldingFilter.all || _query.trim().isNotEmpty;
     final empty = EmptyState(
       message: hasFilters ? '没有符合条件的持仓' : (_isAssets ? '暂无资产' : '暂无负债'),
@@ -517,7 +528,7 @@ class _HoldingsPageState extends ConsumerState<HoldingsPage> {
           child: Row(
             mainAxisAlignment: MainAxisAlignment.end,
             children: [
-              Text('合计', style: T.label(size: 12)),
+              Text(missing.isEmpty ? '合计' : '已折算合计', style: T.label(size: 12)),
               const SizedBox(width: T.s2),
               Flexible(
                 child: Text(
@@ -539,6 +550,11 @@ class _HoldingsPageState extends ConsumerState<HoldingsPage> {
           _buildControls(desktop),
           const SizedBox(height: T.s3),
           summary,
+          if (missing.isNotEmpty)
+            Text(
+              '缺少 ${missing.join('、')} 汇率',
+              style: T.label(color: T.warning),
+            ),
           const SizedBox(height: T.s2),
           Expanded(
             child: desktop

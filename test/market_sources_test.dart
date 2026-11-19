@@ -25,6 +25,7 @@ void main() {
       expect(q.isSuccess, isTrue);
       expect(q.price, 1690.00);
       expect(q.prevClose, 1680.00);
+      expect(q.quoteDate, '2026-08-08');
       expect(q.changePct, closeTo(0.005952, 0.000001));
     });
 

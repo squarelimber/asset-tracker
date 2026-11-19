@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import '../core/formats.dart';
 import '../data/database.dart';
+import 'transaction_identity.dart';
 
 /// Estimates risk-adjusted return from a recent, uninterrupted series of
 /// daily CNY snapshots. This is not a time-weighted return: intraday cash
@@ -62,7 +63,7 @@ RiskMetricsEstimate estimateRiskMetrics(
   // had already occurred as of each snapshot, including old flow dates.
   final flowUpdates = [
     for (final t in transactions)
-      (day: todayKey(t.occurredAt.toLocal()), updatedAt: t.updatedAt),
+      (day: todayKey(t.occurredAt.toLocal()), updatedAt: t.historyUpdatedAt),
   ]..sort((a, b) => a.day.compareTo(b.day));
   final stale = <bool>[];
   DateTime? latestUpdate;
@@ -135,8 +136,8 @@ RiskMetricsEstimate estimateRiskMetrics(
       continue;
     }
     final r =
-        ((currentAssets - current.totalCost) -
-            (previousAssets - previous.totalCost)) /
+        ((currentAssets - current.totalCost + (current.realizedProfit ?? 0)) -
+            (previousAssets - previous.totalCost + (previous.realizedProfit ?? 0))) /
         previousAssets;
     if (!r.isFinite) {
       interruptedDate = current.date;

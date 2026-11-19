@@ -77,6 +77,10 @@ class StatsPage extends ConsumerWidget {
                       child: Text('暂无收益数据，每日打开 App 自动记录净值'),
                     );
                   }
+                  final verifiedMonths = <String, double>{
+                    for (final entry in months.entries)
+                      entry.key: ?entry.value,
+                  };
                   return Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -89,18 +93,26 @@ class StatsPage extends ConsumerWidget {
                             MonthlyProfitChart(
                               months: months,
                               hideAmounts: hide,
+                              onOpenCalendar: (month) =>
+                                  context.push('/earnings-calendar?month=$month'),
+                              onOpenProducts: (month) =>
+                                  context.push('/product-earnings?month=$month'),
                             ),
                           ],
                         ),
                       ),
                       Text(
-                        '月度收益根据净值快照计算，转入转出本金不计入。缺少快照的月份显示为无数据；快照不连续时，间隔收益归入下一条快照所在月份。',
+                        '月度收益按快照计算，剔除本金进出。快照断档跨月时，相关月份显示为待核对。',
                         style: T.label(),
                       ),
                       const SizedBox(height: T.s3),
-                      TerminalCard(
-                        child: _MonthSummary(months: months, hide: hide),
-                      ),
+                      if (verifiedMonths.isNotEmpty)
+                        TerminalCard(
+                          child: _MonthSummary(
+                            months: verifiedMonths,
+                            hide: hide,
+                          ),
+                        ),
                     ],
                   );
                 },
@@ -141,12 +153,25 @@ class StatsPage extends ConsumerWidget {
   }
 }
 
-Map<String, double> _monthlyProfitOf(List<SnapshotRow> snapshots) {
-  final earnings = const DailyEarningsCalculator().compute(snapshots);
-  final byMonth = <String, double>{};
-  for (final day in earnings) {
-    final key = day.date.substring(0, 7);
-    byMonth[key] = (byMonth[key] ?? 0) + day.profit;
+Map<String, double?> _monthlyProfitOf(List<SnapshotRow> snapshots) {
+  const calc = DailyEarningsCalculator();
+  final earnings = calc.compute(snapshots);
+  if (earnings.isEmpty) return const {};
+  final first = DateTime.parse(earnings.first.date);
+  final last = DateTime.parse(earnings.last.date);
+  final byMonth = <String, double?>{};
+  for (
+    var month = DateTime(first.year, first.month);
+    !month.isAfter(last);
+    month = DateTime(month.year, month.month + 1)
+  ) {
+    final summary = calc.monthOf(earnings, month.year, month.month);
+    final key = todayKey(month).substring(0, 7);
+    if (summary.hasUnallocatedProfit) {
+      byMonth[key] = null;
+    } else if (summary.days > 0) {
+      byMonth[key] = summary.total;
+    }
   }
   return byMonth;
 }

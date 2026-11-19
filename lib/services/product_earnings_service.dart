@@ -166,13 +166,14 @@ class ProductEarningsService {
           }
         } else {
           final replayMap = replays[h.id] ?? const <String, (double, double)>{};
+          final priceOn = smoothCalc.sharePriceSeries(h, from, current);
           for (
             var day = DateTime(from.year, from.month, from.day);
             !day.isAfter(current);
             day = day.add(const Duration(days: 1))
           ) {
             final key = todayKey(day);
-            final price = smoothCalc.sharePrice(h, day, from, current);
+            final price = priceOn(day);
             // The replayed quantity/cost, so pre-redemption days keep the
             // pre-redemption position.
             final rc = replayMap[key];

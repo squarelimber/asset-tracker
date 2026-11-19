@@ -242,6 +242,58 @@ void main() {
     expect(find.text('+0.00'), findsNothing);
   });
 
+  testWidgets('a gap shows the interval total separately from the daily cell', (
+    tester,
+  ) async {
+    SnapshotRow snapshot(String date, double value) => SnapshotRow(
+      date: date,
+      currency: 'CNY',
+      totalValue: value,
+      totalCost: 1000,
+      liabilities: 0,
+      createdAt: DateTime.parse(date),
+      holdingValues: encodeHoldingValues([
+        DayHoldingValue(
+          holdingId: 1,
+          name: '测试产品',
+          type: AssetType.etf,
+          value: value,
+          cost: 1000,
+          liability: false,
+        ),
+      ]),
+    );
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          snapshotsProvider.overrideWith(
+            (ref) => Stream.value([
+              snapshot('2026-01-28', 1000),
+              snapshot('2026-02-03', 1030),
+            ]),
+          ),
+          transactionsProvider.overrideWith((ref) => Stream.value([])),
+          historySyncProvider.overrideWith((ref) async => null),
+          hideAmountsProvider.overrideWith((ref) => false),
+        ],
+        child: MaterialApp(
+          home: EarningsCalendarPage(initialDate: DateTime(2026, 2, 3)),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('待核对'), findsOneWidget);
+    expect(find.text('缺'), findsOneWidget);
+    final detail = find.text('中间缺少快照 · 区间收益 +¥30.00');
+    await tester.scrollUntilVisible(
+      detail,
+      150,
+      scrollable: find.byType(Scrollable).first,
+    );
+    expect(detail, findsOneWidget);
+    expect(find.text('日历收益 +¥30.00'), findsNothing);
+  });
+
   testWidgets(
     'trend sheet shows daily change, and masks the whole explanation',
     (tester) async {

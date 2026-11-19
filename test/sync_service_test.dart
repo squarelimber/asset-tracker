@@ -114,6 +114,48 @@ void main() {
     expect(await dao.getSetting(SyncSettingsKeys.lastRev), '1');
   });
 
+  test('offline purchases converge with both cash legs and survive retries', () async {
+    final cash = await seedHolding(amount: 1000);
+    final account = (await dao.getHolding(cash))!.accountId;
+    final fund = await dao.createHolding(HoldingsCompanion.insert(
+      accountId: account, name: 'ETF', assetType: 'etf',
+    ));
+    final db2 = AppDatabase(NativeDatabase.memory());
+    addTearDown(db2.close);
+    final otherDao = AssetDao(db2);
+    final other = SyncService(otherDao,
+      apiFactory: (url, token) => SyncApi(url, client: server.client),
+    );
+    const target = (url: 'http://fake:8787', token: null as String?);
+    expect((await service.sync()).ok, isTrue);
+    expect((await other.sync(target: target)).ok, isTrue);
+
+    final first = await TransactionService(dao).record(
+      accountId: account, holdingId: fund, type: TransactionType.buy,
+      quantity: 2, price: 10, amount: 20, cashSourceId: cash,
+    );
+    final second = await TransactionService(otherDao).record(
+      accountId: account, holdingId: fund, type: TransactionType.buy,
+      quantity: 3, price: 20, amount: 60, cashSourceId: cash,
+    );
+    expect(first.ok, isTrue, reason: first.message);
+    expect(second.ok, isTrue, reason: second.message);
+    expect((await service.sync()).ok, isTrue);
+    server.concurrentWrites = 1;
+    final merged = await other.sync(target: target);
+    expect(merged.ok, isTrue, reason: merged.message);
+    expect((await service.sync()).ok, isTrue);
+    expect((await other.sync(target: target)).ok, isTrue);
+    for (final device in [dao, otherDao]) {
+      final holding = (await device.getHolding(fund))!;
+      expect(holding.quantity, 5);
+      expect(holding.costPrice, 16);
+      expect((await device.getHolding(cash))!.quantity, 920);
+      expect((await device.getHolding(cash))!.costPrice, 920);
+      expect(await device.getTransactions(), hasLength(2));
+    }
+  });
+
   test('an explicit sync uses the selected server instead of the saved address', () async {
     String? usedUrl;
     String? usedToken;
@@ -217,20 +259,30 @@ void main() {
     }
   });
 
-  test('downloaded changes still schedule a rebuild when the upload fails', () async {
-    final id = await seedHolding(name: '旧名称');
-    final first = await service.sync();
-    expect(first.ok, isTrue);
-    final rows = server.snapshot['holdings'] as List;
-    (rows.single as Map)['name'] = '远端新名称';
-    (rows.single as Map)['updatedAt'] = DateTime.now().add(const Duration(days: 1)).toIso8601String();
-    server.rejectUploads = true;
+  test(
+    'downloaded changes still schedule a rebuild when the upload fails',
+    () async {
+      final id = await seedHolding(name: '旧名称');
+      final first = await service.sync();
+      expect(first.ok, isTrue);
+      final rows = server.snapshot['holdings'] as List;
+      (rows.single as Map)['name'] = '远端新名称';
+      (rows.single as Map)['updatedAt'] = DateTime.now()
+          .add(const Duration(days: 1))
+          .toIso8601String();
+      server.rejectUploads = true;
 
-    final result = await service.sync();
-    expect(result.ok, isFalse);
-    expect((await dao.getHolding(id))!.name, '远端新名称');
-    expect(await dao.getSetting(historySyncDirtyKey), historyDirtySet);
-  });
+      final result = await service.sync();
+      expect(result.ok, isFalse);
+      expect((await dao.getHolding(id))!.name, '远端新名称');
+      expect(result.changed, 1);
+      expect(result.dataChanged, isTrue);
+      expect(result.localMerged, isTrue);
+      expect(result.uploaded, isFalse);
+      expect(result.message, contains('HTTP 503'));
+      expect(await dao.getSetting(historySyncDirtyKey), historyDirtySet);
+    },
+  );
 
   test('remote rows are pulled into an empty local database', () async {
     // Seed the server from another device first.

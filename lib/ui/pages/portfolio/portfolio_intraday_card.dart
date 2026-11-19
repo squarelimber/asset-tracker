@@ -167,8 +167,8 @@ class PortfolioIntradayTrend extends ConsumerWidget {
                 formatValue: _signedMoney,
                 formatAxisValue: (v) =>
                     '${v < 0 ? '-' : ''}¥${Formats.num(v.abs())}',
-                color: T.trendFrom,
-                showZeroLine: true,
+                color: const Color(0xFF8EADCA),
+                gridAtBounds: true,
                 height: Responsive.isPhone(context) ? 150 : 210,
               ),
               const SizedBox(height: T.s2),

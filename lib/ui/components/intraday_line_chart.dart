@@ -25,7 +25,7 @@ class IntradayLineChart extends StatelessWidget {
     this.maxGap = 10,
     this.color = T.accent,
     this.height = 175,
-    this.showZeroLine = false,
+    this.gridAtBounds = false,
   });
 
   final List<({int minute, double value})> points;
@@ -37,7 +37,7 @@ class IntradayLineChart extends StatelessWidget {
   final int maxGap;
   final Color color;
   final double height;
-  final bool showZeroLine;
+  final bool gridAtBounds;
 
   @override
   Widget build(BuildContext context) {
@@ -79,8 +79,11 @@ class IntradayLineChart extends StatelessWidget {
       high + padding,
       targetCount: height <= 175 ? 3 : 4,
     );
-    final visibleZero =
-        showZeroLine && ticks.ticks.first <= 0 && ticks.ticks.last >= 0;
+    const gridLine = FlLine(
+      color: T.borderSoft,
+      strokeWidth: 1,
+      dashArray: [4, 4],
+    );
     final labelStyle = T.mono(size: 10, color: T.text3);
     final painter = TextPainter(
       textDirection: Directionality.of(context),
@@ -109,18 +112,23 @@ class IntradayLineChart extends StatelessWidget {
                   minY: ticks.ticks.first,
                   maxY: ticks.ticks.last,
                   gridData: FlGridData(
+                    show: !gridAtBounds,
                     drawVerticalLine: false,
                     horizontalInterval: ticks.step,
-                    getDrawingHorizontalLine: (_) => const FlLine(
-                      color: T.borderSoft,
-                      strokeWidth: 1,
-                      dashArray: [4, 4],
-                    ),
+                    getDrawingHorizontalLine: (_) => gridLine,
                   ),
+                  // fl_chart omits its automatic grid at the axis bounds.
                   extraLinesData: ExtraLinesData(
+                    extraLinesOnTop: false,
                     horizontalLines: [
-                      if (visibleZero)
-                        HorizontalLine(y: 0, color: T.text3, strokeWidth: 1),
+                      if (gridAtBounds)
+                        for (final tick in ticks.ticks)
+                          HorizontalLine(
+                            y: tick,
+                            color: gridLine.color,
+                            strokeWidth: gridLine.strokeWidth,
+                            dashArray: gridLine.dashArray,
+                          ),
                     ],
                   ),
                   borderData: FlBorderData(show: false),

@@ -14,6 +14,63 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
 void main() {
+  testWidgets('failed upload still reports rows applied locally', (
+    tester,
+  ) async {
+    final db = AppDatabase(NativeDatabase.memory());
+    addTearDown(db.close);
+    final dao = AssetDao(db);
+    await dao.setSetting(
+      SyncSettingsKeys.serverUrl,
+      'https://sync.example.test',
+    );
+    final service = SyncService(
+      dao,
+      apiFactory: (url, token) => SyncApi(
+        url,
+        client: MockClient((request) async {
+          if (request.method == 'PUT') return http.Response('offline', 503);
+          return http.Response(
+            jsonEncode({
+              'rev': 1,
+              'snapshot': {
+                'accounts': [
+                  {
+                    'id': 42,
+                    'name': 'Remote account',
+                    'type': 'general',
+                    'currency': 'CNY',
+                    'createdAt': '2026-01-01T00:00:00',
+                    'updatedAt': '2026-01-01T00:00:00',
+                  },
+                ],
+              },
+              'tombstones': [],
+            }),
+            200,
+          );
+        }),
+      ),
+    );
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          databaseProvider.overrideWithValue(db),
+          syncServiceProvider.overrideWithValue(service),
+          historySyncProvider.overrideWith((ref) async => null),
+        ],
+        child: const MaterialApp(home: SyncSettingsPage()),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('立即同步'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('上传失败 (HTTP 503)'), findsOneWidget);
+    expect(find.text('本机已合并 1 条变更'), findsOneWidget);
+    expect(find.text('服务器上传未完成'), findsOneWidget);
+    expect((await dao.getAccounts()).single.name, 'Remote account');
+  });
+
   testWidgets('saving and syncing sends requests to the visible server', (
     tester,
   ) async {

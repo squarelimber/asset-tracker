@@ -1750,6 +1750,17 @@ class $TransactionsTable extends Transactions
     type: DriftSqlType.double,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _externalSellPrincipalMeta =
+      const VerificationMeta('externalSellPrincipal');
+  @override
+  late final GeneratedColumn<double> externalSellPrincipal =
+      GeneratedColumn<double>(
+        'external_sell_principal',
+        aliasedName,
+        true,
+        type: DriftSqlType.double,
+        requiredDuringInsert: false,
+      );
   static const VerificationMeta _internalMoveMeta = const VerificationMeta(
     'internalMove',
   );
@@ -1801,6 +1812,18 @@ class $TransactionsTable extends Transactions
     type: DriftSqlType.int,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _ledgerUpdatedAtMeta = const VerificationMeta(
+    'ledgerUpdatedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> ledgerUpdatedAt =
+      GeneratedColumn<DateTime>(
+        'ledger_updated_at',
+        aliasedName,
+        true,
+        type: DriftSqlType.dateTime,
+        requiredDuringInsert: false,
+      );
   static const VerificationMeta _updatedAtMeta = const VerificationMeta(
     'updatedAt',
   );
@@ -1829,10 +1852,12 @@ class $TransactionsTable extends Transactions
     note,
     costMoved,
     costMovedAmount,
+    externalSellPrincipal,
     internalMove,
     redemptionGroup,
     opensHolding,
     recordedAtMicros,
+    ledgerUpdatedAt,
     updatedAt,
   ];
   @override
@@ -1945,6 +1970,15 @@ class $TransactionsTable extends Transactions
         ),
       );
     }
+    if (data.containsKey('external_sell_principal')) {
+      context.handle(
+        _externalSellPrincipalMeta,
+        externalSellPrincipal.isAcceptableOrUnknown(
+          data['external_sell_principal']!,
+          _externalSellPrincipalMeta,
+        ),
+      );
+    }
     if (data.containsKey('internal_move')) {
       context.handle(
         _internalMoveMeta,
@@ -1978,6 +2012,15 @@ class $TransactionsTable extends Transactions
         recordedAtMicros.isAcceptableOrUnknown(
           data['recorded_at_micros']!,
           _recordedAtMicrosMeta,
+        ),
+      );
+    }
+    if (data.containsKey('ledger_updated_at')) {
+      context.handle(
+        _ledgerUpdatedAtMeta,
+        ledgerUpdatedAt.isAcceptableOrUnknown(
+          data['ledger_updated_at']!,
+          _ledgerUpdatedAtMeta,
         ),
       );
     }
@@ -2056,6 +2099,10 @@ class $TransactionsTable extends Transactions
         DriftSqlType.double,
         data['${effectivePrefix}cost_moved_amount'],
       ),
+      externalSellPrincipal: attachedDatabase.typeMapping.read(
+        DriftSqlType.double,
+        data['${effectivePrefix}external_sell_principal'],
+      ),
       internalMove: attachedDatabase.typeMapping.read(
         DriftSqlType.bool,
         data['${effectivePrefix}internal_move'],
@@ -2071,6 +2118,10 @@ class $TransactionsTable extends Transactions
       recordedAtMicros: attachedDatabase.typeMapping.read(
         DriftSqlType.int,
         data['${effectivePrefix}recorded_at_micros'],
+      ),
+      ledgerUpdatedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}ledger_updated_at'],
       ),
       updatedAt: attachedDatabase.typeMapping.read(
         DriftSqlType.dateTime,
@@ -2120,6 +2171,9 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
   /// never moved a cost); the replay then keeps the legacy behaviour.
   final double? costMovedAmount;
 
+  /// Cost basis of a sale whose proceeds leave the tracked portfolio.
+  final double? externalSellPrincipal;
+
   /// True on the sell leg of an **internal** movement whose proceeds stay in
   /// the portfolio: a redemption funding another holding (「赎回购买」/「由 X
   /// 出资」) or a sell parked in a tracked cash holding (回款到现金). The money
@@ -2131,9 +2185,19 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
   /// False (the default) for ordinary sells, including "回款不入账" ones,
   /// whose proceeds genuinely leave the tracker and do realize.
   final bool internalMove;
+
+  /// Identifier shared by the two legs of a redemption-funded purchase.
   final String? redemptionGroup;
+
+  /// Whether this flow establishes the position's historical start date.
+  /// Null leaves older transactions eligible for legacy identification.
   final bool? opensHolding;
+
+  /// Entry order independent of the editable date and randomized row ID.
   final int? recordedAtMicros;
+
+  /// Actual ledger edit time when a restore gave the row a newer sync version.
+  final DateTime? ledgerUpdatedAt;
   final DateTime updatedAt;
   const TransactionRow({
     required this.id,
@@ -2150,10 +2214,12 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
     this.note,
     required this.costMoved,
     this.costMovedAmount,
+    this.externalSellPrincipal,
     required this.internalMove,
     this.redemptionGroup,
     this.opensHolding,
     this.recordedAtMicros,
+    this.ledgerUpdatedAt,
     required this.updatedAt,
   });
   @override
@@ -2187,6 +2253,9 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
     if (!nullToAbsent || costMovedAmount != null) {
       map['cost_moved_amount'] = Variable<double>(costMovedAmount);
     }
+    if (!nullToAbsent || externalSellPrincipal != null) {
+      map['external_sell_principal'] = Variable<double>(externalSellPrincipal);
+    }
     map['internal_move'] = Variable<bool>(internalMove);
     if (!nullToAbsent || redemptionGroup != null) {
       map['redemption_group'] = Variable<String>(redemptionGroup);
@@ -2196,6 +2265,9 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
     }
     if (!nullToAbsent || recordedAtMicros != null) {
       map['recorded_at_micros'] = Variable<int>(recordedAtMicros);
+    }
+    if (!nullToAbsent || ledgerUpdatedAt != null) {
+      map['ledger_updated_at'] = Variable<DateTime>(ledgerUpdatedAt);
     }
     map['updated_at'] = Variable<DateTime>(updatedAt);
     return map;
@@ -2229,6 +2301,9 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
       costMovedAmount: costMovedAmount == null && nullToAbsent
           ? const Value.absent()
           : Value(costMovedAmount),
+      externalSellPrincipal: externalSellPrincipal == null && nullToAbsent
+          ? const Value.absent()
+          : Value(externalSellPrincipal),
       internalMove: Value(internalMove),
       redemptionGroup: redemptionGroup == null && nullToAbsent
           ? const Value.absent()
@@ -2239,6 +2314,9 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
       recordedAtMicros: recordedAtMicros == null && nullToAbsent
           ? const Value.absent()
           : Value(recordedAtMicros),
+      ledgerUpdatedAt: ledgerUpdatedAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(ledgerUpdatedAt),
       updatedAt: Value(updatedAt),
     );
   }
@@ -2263,10 +2341,14 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
       note: serializer.fromJson<String?>(json['note']),
       costMoved: serializer.fromJson<bool>(json['costMoved']),
       costMovedAmount: serializer.fromJson<double?>(json['costMovedAmount']),
+      externalSellPrincipal: serializer.fromJson<double?>(
+        json['externalSellPrincipal'],
+      ),
       internalMove: serializer.fromJson<bool>(json['internalMove']),
       redemptionGroup: serializer.fromJson<String?>(json['redemptionGroup']),
       opensHolding: serializer.fromJson<bool?>(json['opensHolding']),
       recordedAtMicros: serializer.fromJson<int?>(json['recordedAtMicros']),
+      ledgerUpdatedAt: serializer.fromJson<DateTime?>(json['ledgerUpdatedAt']),
       updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
     );
   }
@@ -2288,10 +2370,14 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
       'note': serializer.toJson<String?>(note),
       'costMoved': serializer.toJson<bool>(costMoved),
       'costMovedAmount': serializer.toJson<double?>(costMovedAmount),
+      'externalSellPrincipal': serializer.toJson<double?>(
+        externalSellPrincipal,
+      ),
       'internalMove': serializer.toJson<bool>(internalMove),
       'redemptionGroup': serializer.toJson<String?>(redemptionGroup),
       'opensHolding': serializer.toJson<bool?>(opensHolding),
       'recordedAtMicros': serializer.toJson<int?>(recordedAtMicros),
+      'ledgerUpdatedAt': serializer.toJson<DateTime?>(ledgerUpdatedAt),
       'updatedAt': serializer.toJson<DateTime>(updatedAt),
     };
   }
@@ -2311,10 +2397,12 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
     Value<String?> note = const Value.absent(),
     bool? costMoved,
     Value<double?> costMovedAmount = const Value.absent(),
+    Value<double?> externalSellPrincipal = const Value.absent(),
     bool? internalMove,
     Value<String?> redemptionGroup = const Value.absent(),
     Value<bool?> opensHolding = const Value.absent(),
     Value<int?> recordedAtMicros = const Value.absent(),
+    Value<DateTime?> ledgerUpdatedAt = const Value.absent(),
     DateTime? updatedAt,
   }) => TransactionRow(
     id: id ?? this.id,
@@ -2333,6 +2421,9 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
     costMovedAmount: costMovedAmount.present
         ? costMovedAmount.value
         : this.costMovedAmount,
+    externalSellPrincipal: externalSellPrincipal.present
+        ? externalSellPrincipal.value
+        : this.externalSellPrincipal,
     internalMove: internalMove ?? this.internalMove,
     redemptionGroup: redemptionGroup.present
         ? redemptionGroup.value
@@ -2341,6 +2432,9 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
     recordedAtMicros: recordedAtMicros.present
         ? recordedAtMicros.value
         : this.recordedAtMicros,
+    ledgerUpdatedAt: ledgerUpdatedAt.present
+        ? ledgerUpdatedAt.value
+        : this.ledgerUpdatedAt,
     updatedAt: updatedAt ?? this.updatedAt,
   );
   TransactionRow copyWithCompanion(TransactionsCompanion data) {
@@ -2367,6 +2461,9 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
       costMovedAmount: data.costMovedAmount.present
           ? data.costMovedAmount.value
           : this.costMovedAmount,
+      externalSellPrincipal: data.externalSellPrincipal.present
+          ? data.externalSellPrincipal.value
+          : this.externalSellPrincipal,
       internalMove: data.internalMove.present
           ? data.internalMove.value
           : this.internalMove,
@@ -2379,6 +2476,9 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
       recordedAtMicros: data.recordedAtMicros.present
           ? data.recordedAtMicros.value
           : this.recordedAtMicros,
+      ledgerUpdatedAt: data.ledgerUpdatedAt.present
+          ? data.ledgerUpdatedAt.value
+          : this.ledgerUpdatedAt,
       updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
     );
   }
@@ -2400,17 +2500,19 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
           ..write('note: $note, ')
           ..write('costMoved: $costMoved, ')
           ..write('costMovedAmount: $costMovedAmount, ')
+          ..write('externalSellPrincipal: $externalSellPrincipal, ')
           ..write('internalMove: $internalMove, ')
           ..write('redemptionGroup: $redemptionGroup, ')
           ..write('opensHolding: $opensHolding, ')
           ..write('recordedAtMicros: $recordedAtMicros, ')
+          ..write('ledgerUpdatedAt: $ledgerUpdatedAt, ')
           ..write('updatedAt: $updatedAt')
           ..write(')'))
         .toString();
   }
 
   @override
-  int get hashCode => Object.hash(
+  int get hashCode => Object.hashAll([
     id,
     accountId,
     holdingId,
@@ -2425,12 +2527,14 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
     note,
     costMoved,
     costMovedAmount,
+    externalSellPrincipal,
     internalMove,
     redemptionGroup,
     opensHolding,
     recordedAtMicros,
+    ledgerUpdatedAt,
     updatedAt,
-  );
+  ]);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -2449,10 +2553,12 @@ class TransactionRow extends DataClass implements Insertable<TransactionRow> {
           other.note == this.note &&
           other.costMoved == this.costMoved &&
           other.costMovedAmount == this.costMovedAmount &&
+          other.externalSellPrincipal == this.externalSellPrincipal &&
           other.internalMove == this.internalMove &&
           other.redemptionGroup == this.redemptionGroup &&
           other.opensHolding == this.opensHolding &&
           other.recordedAtMicros == this.recordedAtMicros &&
+          other.ledgerUpdatedAt == this.ledgerUpdatedAt &&
           other.updatedAt == this.updatedAt);
 }
 
@@ -2471,10 +2577,12 @@ class TransactionsCompanion extends UpdateCompanion<TransactionRow> {
   final Value<String?> note;
   final Value<bool> costMoved;
   final Value<double?> costMovedAmount;
+  final Value<double?> externalSellPrincipal;
   final Value<bool> internalMove;
   final Value<String?> redemptionGroup;
   final Value<bool?> opensHolding;
   final Value<int?> recordedAtMicros;
+  final Value<DateTime?> ledgerUpdatedAt;
   final Value<DateTime> updatedAt;
   const TransactionsCompanion({
     this.id = const Value.absent(),
@@ -2491,10 +2599,12 @@ class TransactionsCompanion extends UpdateCompanion<TransactionRow> {
     this.note = const Value.absent(),
     this.costMoved = const Value.absent(),
     this.costMovedAmount = const Value.absent(),
+    this.externalSellPrincipal = const Value.absent(),
     this.internalMove = const Value.absent(),
     this.redemptionGroup = const Value.absent(),
     this.opensHolding = const Value.absent(),
     this.recordedAtMicros = const Value.absent(),
+    this.ledgerUpdatedAt = const Value.absent(),
     this.updatedAt = const Value.absent(),
   });
   TransactionsCompanion.insert({
@@ -2512,10 +2622,12 @@ class TransactionsCompanion extends UpdateCompanion<TransactionRow> {
     this.note = const Value.absent(),
     this.costMoved = const Value.absent(),
     this.costMovedAmount = const Value.absent(),
+    this.externalSellPrincipal = const Value.absent(),
     this.internalMove = const Value.absent(),
     this.redemptionGroup = const Value.absent(),
     this.opensHolding = const Value.absent(),
     this.recordedAtMicros = const Value.absent(),
+    this.ledgerUpdatedAt = const Value.absent(),
     this.updatedAt = const Value.absent(),
   }) : accountId = Value(accountId),
        type = Value(type),
@@ -2536,10 +2648,12 @@ class TransactionsCompanion extends UpdateCompanion<TransactionRow> {
     Expression<String>? note,
     Expression<bool>? costMoved,
     Expression<double>? costMovedAmount,
+    Expression<double>? externalSellPrincipal,
     Expression<bool>? internalMove,
     Expression<String>? redemptionGroup,
     Expression<bool>? opensHolding,
     Expression<int>? recordedAtMicros,
+    Expression<DateTime>? ledgerUpdatedAt,
     Expression<DateTime>? updatedAt,
   }) {
     return RawValuesInsertable({
@@ -2557,10 +2671,13 @@ class TransactionsCompanion extends UpdateCompanion<TransactionRow> {
       if (note != null) 'note': note,
       if (costMoved != null) 'cost_moved': costMoved,
       if (costMovedAmount != null) 'cost_moved_amount': costMovedAmount,
+      if (externalSellPrincipal != null)
+        'external_sell_principal': externalSellPrincipal,
       if (internalMove != null) 'internal_move': internalMove,
       if (redemptionGroup != null) 'redemption_group': redemptionGroup,
       if (opensHolding != null) 'opens_holding': opensHolding,
       if (recordedAtMicros != null) 'recorded_at_micros': recordedAtMicros,
+      if (ledgerUpdatedAt != null) 'ledger_updated_at': ledgerUpdatedAt,
       if (updatedAt != null) 'updated_at': updatedAt,
     });
   }
@@ -2580,10 +2697,12 @@ class TransactionsCompanion extends UpdateCompanion<TransactionRow> {
     Value<String?>? note,
     Value<bool>? costMoved,
     Value<double?>? costMovedAmount,
+    Value<double?>? externalSellPrincipal,
     Value<bool>? internalMove,
     Value<String?>? redemptionGroup,
     Value<bool?>? opensHolding,
     Value<int?>? recordedAtMicros,
+    Value<DateTime?>? ledgerUpdatedAt,
     Value<DateTime>? updatedAt,
   }) {
     return TransactionsCompanion(
@@ -2601,10 +2720,13 @@ class TransactionsCompanion extends UpdateCompanion<TransactionRow> {
       note: note ?? this.note,
       costMoved: costMoved ?? this.costMoved,
       costMovedAmount: costMovedAmount ?? this.costMovedAmount,
+      externalSellPrincipal:
+          externalSellPrincipal ?? this.externalSellPrincipal,
       internalMove: internalMove ?? this.internalMove,
       redemptionGroup: redemptionGroup ?? this.redemptionGroup,
       opensHolding: opensHolding ?? this.opensHolding,
       recordedAtMicros: recordedAtMicros ?? this.recordedAtMicros,
+      ledgerUpdatedAt: ledgerUpdatedAt ?? this.ledgerUpdatedAt,
       updatedAt: updatedAt ?? this.updatedAt,
     );
   }
@@ -2654,6 +2776,11 @@ class TransactionsCompanion extends UpdateCompanion<TransactionRow> {
     if (costMovedAmount.present) {
       map['cost_moved_amount'] = Variable<double>(costMovedAmount.value);
     }
+    if (externalSellPrincipal.present) {
+      map['external_sell_principal'] = Variable<double>(
+        externalSellPrincipal.value,
+      );
+    }
     if (internalMove.present) {
       map['internal_move'] = Variable<bool>(internalMove.value);
     }
@@ -2665,6 +2792,9 @@ class TransactionsCompanion extends UpdateCompanion<TransactionRow> {
     }
     if (recordedAtMicros.present) {
       map['recorded_at_micros'] = Variable<int>(recordedAtMicros.value);
+    }
+    if (ledgerUpdatedAt.present) {
+      map['ledger_updated_at'] = Variable<DateTime>(ledgerUpdatedAt.value);
     }
     if (updatedAt.present) {
       map['updated_at'] = Variable<DateTime>(updatedAt.value);
@@ -2689,10 +2819,12 @@ class TransactionsCompanion extends UpdateCompanion<TransactionRow> {
           ..write('note: $note, ')
           ..write('costMoved: $costMoved, ')
           ..write('costMovedAmount: $costMovedAmount, ')
+          ..write('externalSellPrincipal: $externalSellPrincipal, ')
           ..write('internalMove: $internalMove, ')
           ..write('redemptionGroup: $redemptionGroup, ')
           ..write('opensHolding: $opensHolding, ')
           ..write('recordedAtMicros: $recordedAtMicros, ')
+          ..write('ledgerUpdatedAt: $ledgerUpdatedAt, ')
           ..write('updatedAt: $updatedAt')
           ..write(')'))
         .toString();
@@ -2797,6 +2929,17 @@ class $PriceCacheTable extends PriceCache
     requiredDuringInsert: false,
     defaultValue: currentDateAndTime,
   );
+  static const VerificationMeta _quoteDateMeta = const VerificationMeta(
+    'quoteDate',
+  );
+  @override
+  late final GeneratedColumn<String> quoteDate = GeneratedColumn<String>(
+    'quote_date',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
   @override
   List<GeneratedColumn> get $columns => [
     symbol,
@@ -2808,6 +2951,7 @@ class $PriceCacheTable extends PriceCache
     change,
     changePct,
     fetchedAt,
+    quoteDate,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -2881,6 +3025,12 @@ class $PriceCacheTable extends PriceCache
         fetchedAt.isAcceptableOrUnknown(data['fetched_at']!, _fetchedAtMeta),
       );
     }
+    if (data.containsKey('quote_date')) {
+      context.handle(
+        _quoteDateMeta,
+        quoteDate.isAcceptableOrUnknown(data['quote_date']!, _quoteDateMeta),
+      );
+    }
     return context;
   }
 
@@ -2926,6 +3076,10 @@ class $PriceCacheTable extends PriceCache
         DriftSqlType.dateTime,
         data['${effectivePrefix}fetched_at'],
       )!,
+      quoteDate: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}quote_date'],
+      ),
     );
   }
 
@@ -2945,6 +3099,7 @@ class PriceCacheRow extends DataClass implements Insertable<PriceCacheRow> {
   final double? change;
   final double? changePct;
   final DateTime fetchedAt;
+  final String? quoteDate;
   const PriceCacheRow({
     required this.symbol,
     required this.source,
@@ -2955,6 +3110,7 @@ class PriceCacheRow extends DataClass implements Insertable<PriceCacheRow> {
     this.change,
     this.changePct,
     required this.fetchedAt,
+    this.quoteDate,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -2974,6 +3130,9 @@ class PriceCacheRow extends DataClass implements Insertable<PriceCacheRow> {
       map['change_pct'] = Variable<double>(changePct);
     }
     map['fetched_at'] = Variable<DateTime>(fetchedAt);
+    if (!nullToAbsent || quoteDate != null) {
+      map['quote_date'] = Variable<String>(quoteDate);
+    }
     return map;
   }
 
@@ -2994,6 +3153,9 @@ class PriceCacheRow extends DataClass implements Insertable<PriceCacheRow> {
           ? const Value.absent()
           : Value(changePct),
       fetchedAt: Value(fetchedAt),
+      quoteDate: quoteDate == null && nullToAbsent
+          ? const Value.absent()
+          : Value(quoteDate),
     );
   }
 
@@ -3012,6 +3174,7 @@ class PriceCacheRow extends DataClass implements Insertable<PriceCacheRow> {
       change: serializer.fromJson<double?>(json['change']),
       changePct: serializer.fromJson<double?>(json['changePct']),
       fetchedAt: serializer.fromJson<DateTime>(json['fetchedAt']),
+      quoteDate: serializer.fromJson<String?>(json['quoteDate']),
     );
   }
   @override
@@ -3027,6 +3190,7 @@ class PriceCacheRow extends DataClass implements Insertable<PriceCacheRow> {
       'change': serializer.toJson<double?>(change),
       'changePct': serializer.toJson<double?>(changePct),
       'fetchedAt': serializer.toJson<DateTime>(fetchedAt),
+      'quoteDate': serializer.toJson<String?>(quoteDate),
     };
   }
 
@@ -3040,6 +3204,7 @@ class PriceCacheRow extends DataClass implements Insertable<PriceCacheRow> {
     Value<double?> change = const Value.absent(),
     Value<double?> changePct = const Value.absent(),
     DateTime? fetchedAt,
+    Value<String?> quoteDate = const Value.absent(),
   }) => PriceCacheRow(
     symbol: symbol ?? this.symbol,
     source: source ?? this.source,
@@ -3050,6 +3215,7 @@ class PriceCacheRow extends DataClass implements Insertable<PriceCacheRow> {
     change: change.present ? change.value : this.change,
     changePct: changePct.present ? changePct.value : this.changePct,
     fetchedAt: fetchedAt ?? this.fetchedAt,
+    quoteDate: quoteDate.present ? quoteDate.value : this.quoteDate,
   );
   PriceCacheRow copyWithCompanion(PriceCacheCompanion data) {
     return PriceCacheRow(
@@ -3062,6 +3228,7 @@ class PriceCacheRow extends DataClass implements Insertable<PriceCacheRow> {
       change: data.change.present ? data.change.value : this.change,
       changePct: data.changePct.present ? data.changePct.value : this.changePct,
       fetchedAt: data.fetchedAt.present ? data.fetchedAt.value : this.fetchedAt,
+      quoteDate: data.quoteDate.present ? data.quoteDate.value : this.quoteDate,
     );
   }
 
@@ -3076,7 +3243,8 @@ class PriceCacheRow extends DataClass implements Insertable<PriceCacheRow> {
           ..write('prevClose: $prevClose, ')
           ..write('change: $change, ')
           ..write('changePct: $changePct, ')
-          ..write('fetchedAt: $fetchedAt')
+          ..write('fetchedAt: $fetchedAt, ')
+          ..write('quoteDate: $quoteDate')
           ..write(')'))
         .toString();
   }
@@ -3092,6 +3260,7 @@ class PriceCacheRow extends DataClass implements Insertable<PriceCacheRow> {
     change,
     changePct,
     fetchedAt,
+    quoteDate,
   );
   @override
   bool operator ==(Object other) =>
@@ -3105,7 +3274,8 @@ class PriceCacheRow extends DataClass implements Insertable<PriceCacheRow> {
           other.prevClose == this.prevClose &&
           other.change == this.change &&
           other.changePct == this.changePct &&
-          other.fetchedAt == this.fetchedAt);
+          other.fetchedAt == this.fetchedAt &&
+          other.quoteDate == this.quoteDate);
 }
 
 class PriceCacheCompanion extends UpdateCompanion<PriceCacheRow> {
@@ -3118,6 +3288,7 @@ class PriceCacheCompanion extends UpdateCompanion<PriceCacheRow> {
   final Value<double?> change;
   final Value<double?> changePct;
   final Value<DateTime> fetchedAt;
+  final Value<String?> quoteDate;
   final Value<int> rowid;
   const PriceCacheCompanion({
     this.symbol = const Value.absent(),
@@ -3129,6 +3300,7 @@ class PriceCacheCompanion extends UpdateCompanion<PriceCacheRow> {
     this.change = const Value.absent(),
     this.changePct = const Value.absent(),
     this.fetchedAt = const Value.absent(),
+    this.quoteDate = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   PriceCacheCompanion.insert({
@@ -3141,6 +3313,7 @@ class PriceCacheCompanion extends UpdateCompanion<PriceCacheRow> {
     this.change = const Value.absent(),
     this.changePct = const Value.absent(),
     this.fetchedAt = const Value.absent(),
+    this.quoteDate = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : symbol = Value(symbol),
        source = Value(source),
@@ -3155,6 +3328,7 @@ class PriceCacheCompanion extends UpdateCompanion<PriceCacheRow> {
     Expression<double>? change,
     Expression<double>? changePct,
     Expression<DateTime>? fetchedAt,
+    Expression<String>? quoteDate,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -3167,6 +3341,7 @@ class PriceCacheCompanion extends UpdateCompanion<PriceCacheRow> {
       if (change != null) 'change': change,
       if (changePct != null) 'change_pct': changePct,
       if (fetchedAt != null) 'fetched_at': fetchedAt,
+      if (quoteDate != null) 'quote_date': quoteDate,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -3181,6 +3356,7 @@ class PriceCacheCompanion extends UpdateCompanion<PriceCacheRow> {
     Value<double?>? change,
     Value<double?>? changePct,
     Value<DateTime>? fetchedAt,
+    Value<String?>? quoteDate,
     Value<int>? rowid,
   }) {
     return PriceCacheCompanion(
@@ -3193,6 +3369,7 @@ class PriceCacheCompanion extends UpdateCompanion<PriceCacheRow> {
       change: change ?? this.change,
       changePct: changePct ?? this.changePct,
       fetchedAt: fetchedAt ?? this.fetchedAt,
+      quoteDate: quoteDate ?? this.quoteDate,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -3227,6 +3404,9 @@ class PriceCacheCompanion extends UpdateCompanion<PriceCacheRow> {
     if (fetchedAt.present) {
       map['fetched_at'] = Variable<DateTime>(fetchedAt.value);
     }
+    if (quoteDate.present) {
+      map['quote_date'] = Variable<String>(quoteDate.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -3245,6 +3425,7 @@ class PriceCacheCompanion extends UpdateCompanion<PriceCacheRow> {
           ..write('change: $change, ')
           ..write('changePct: $changePct, ')
           ..write('fetchedAt: $fetchedAt, ')
+          ..write('quoteDate: $quoteDate, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -3323,6 +3504,17 @@ class $SnapshotsTable extends Snapshots
     type: DriftSqlType.string,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _realizedProfitMeta = const VerificationMeta(
+    'realizedProfit',
+  );
+  @override
+  late final GeneratedColumn<double> realizedProfit = GeneratedColumn<double>(
+    'realized_profit',
+    aliasedName,
+    true,
+    type: DriftSqlType.double,
+    requiredDuringInsert: false,
+  );
   static const VerificationMeta _createdAtMeta = const VerificationMeta(
     'createdAt',
   );
@@ -3343,6 +3535,7 @@ class $SnapshotsTable extends Snapshots
     totalCost,
     liabilities,
     holdingValues,
+    realizedProfit,
     createdAt,
   ];
   @override
@@ -3405,6 +3598,15 @@ class $SnapshotsTable extends Snapshots
         ),
       );
     }
+    if (data.containsKey('realized_profit')) {
+      context.handle(
+        _realizedProfitMeta,
+        realizedProfit.isAcceptableOrUnknown(
+          data['realized_profit']!,
+          _realizedProfitMeta,
+        ),
+      );
+    }
     if (data.containsKey('created_at')) {
       context.handle(
         _createdAtMeta,
@@ -3444,6 +3646,10 @@ class $SnapshotsTable extends Snapshots
         DriftSqlType.string,
         data['${effectivePrefix}holding_values'],
       ),
+      realizedProfit: attachedDatabase.typeMapping.read(
+        DriftSqlType.double,
+        data['${effectivePrefix}realized_profit'],
+      ),
       createdAt: attachedDatabase.typeMapping.read(
         DriftSqlType.dateTime,
         data['${effectivePrefix}created_at'],
@@ -3471,6 +3677,9 @@ class SnapshotRow extends DataClass implements Insertable<SnapshotRow> {
   /// Null on older snapshots; never reconstruct those with today's quotes.
   final String? holdingValues;
 
+  /// Cumulative gains realized by sales outside tracked accounts, in CNY.
+  final double? realizedProfit;
+
   /// Last time this day's value was (re)derived.
   ///
   /// Doubles as the cross-device last-write-wins version for snapshots
@@ -3487,6 +3696,7 @@ class SnapshotRow extends DataClass implements Insertable<SnapshotRow> {
     required this.totalCost,
     required this.liabilities,
     this.holdingValues,
+    this.realizedProfit,
     required this.createdAt,
   });
   @override
@@ -3499,6 +3709,9 @@ class SnapshotRow extends DataClass implements Insertable<SnapshotRow> {
     map['liabilities'] = Variable<double>(liabilities);
     if (!nullToAbsent || holdingValues != null) {
       map['holding_values'] = Variable<String>(holdingValues);
+    }
+    if (!nullToAbsent || realizedProfit != null) {
+      map['realized_profit'] = Variable<double>(realizedProfit);
     }
     map['created_at'] = Variable<DateTime>(createdAt);
     return map;
@@ -3514,6 +3727,9 @@ class SnapshotRow extends DataClass implements Insertable<SnapshotRow> {
       holdingValues: holdingValues == null && nullToAbsent
           ? const Value.absent()
           : Value(holdingValues),
+      realizedProfit: realizedProfit == null && nullToAbsent
+          ? const Value.absent()
+          : Value(realizedProfit),
       createdAt: Value(createdAt),
     );
   }
@@ -3530,6 +3746,7 @@ class SnapshotRow extends DataClass implements Insertable<SnapshotRow> {
       totalCost: serializer.fromJson<double>(json['totalCost']),
       liabilities: serializer.fromJson<double>(json['liabilities']),
       holdingValues: serializer.fromJson<String?>(json['holdingValues']),
+      realizedProfit: serializer.fromJson<double?>(json['realizedProfit']),
       createdAt: serializer.fromJson<DateTime>(json['createdAt']),
     );
   }
@@ -3543,6 +3760,7 @@ class SnapshotRow extends DataClass implements Insertable<SnapshotRow> {
       'totalCost': serializer.toJson<double>(totalCost),
       'liabilities': serializer.toJson<double>(liabilities),
       'holdingValues': serializer.toJson<String?>(holdingValues),
+      'realizedProfit': serializer.toJson<double?>(realizedProfit),
       'createdAt': serializer.toJson<DateTime>(createdAt),
     };
   }
@@ -3554,6 +3772,7 @@ class SnapshotRow extends DataClass implements Insertable<SnapshotRow> {
     double? totalCost,
     double? liabilities,
     Value<String?> holdingValues = const Value.absent(),
+    Value<double?> realizedProfit = const Value.absent(),
     DateTime? createdAt,
   }) => SnapshotRow(
     date: date ?? this.date,
@@ -3564,6 +3783,9 @@ class SnapshotRow extends DataClass implements Insertable<SnapshotRow> {
     holdingValues: holdingValues.present
         ? holdingValues.value
         : this.holdingValues,
+    realizedProfit: realizedProfit.present
+        ? realizedProfit.value
+        : this.realizedProfit,
     createdAt: createdAt ?? this.createdAt,
   );
   SnapshotRow copyWithCompanion(SnapshotsCompanion data) {
@@ -3580,6 +3802,9 @@ class SnapshotRow extends DataClass implements Insertable<SnapshotRow> {
       holdingValues: data.holdingValues.present
           ? data.holdingValues.value
           : this.holdingValues,
+      realizedProfit: data.realizedProfit.present
+          ? data.realizedProfit.value
+          : this.realizedProfit,
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
     );
   }
@@ -3593,6 +3818,7 @@ class SnapshotRow extends DataClass implements Insertable<SnapshotRow> {
           ..write('totalCost: $totalCost, ')
           ..write('liabilities: $liabilities, ')
           ..write('holdingValues: $holdingValues, ')
+          ..write('realizedProfit: $realizedProfit, ')
           ..write('createdAt: $createdAt')
           ..write(')'))
         .toString();
@@ -3606,6 +3832,7 @@ class SnapshotRow extends DataClass implements Insertable<SnapshotRow> {
     totalCost,
     liabilities,
     holdingValues,
+    realizedProfit,
     createdAt,
   );
   @override
@@ -3618,6 +3845,7 @@ class SnapshotRow extends DataClass implements Insertable<SnapshotRow> {
           other.totalCost == this.totalCost &&
           other.liabilities == this.liabilities &&
           other.holdingValues == this.holdingValues &&
+          other.realizedProfit == this.realizedProfit &&
           other.createdAt == this.createdAt);
 }
 
@@ -3628,6 +3856,7 @@ class SnapshotsCompanion extends UpdateCompanion<SnapshotRow> {
   final Value<double> totalCost;
   final Value<double> liabilities;
   final Value<String?> holdingValues;
+  final Value<double?> realizedProfit;
   final Value<DateTime> createdAt;
   final Value<int> rowid;
   const SnapshotsCompanion({
@@ -3637,6 +3866,7 @@ class SnapshotsCompanion extends UpdateCompanion<SnapshotRow> {
     this.totalCost = const Value.absent(),
     this.liabilities = const Value.absent(),
     this.holdingValues = const Value.absent(),
+    this.realizedProfit = const Value.absent(),
     this.createdAt = const Value.absent(),
     this.rowid = const Value.absent(),
   });
@@ -3647,6 +3877,7 @@ class SnapshotsCompanion extends UpdateCompanion<SnapshotRow> {
     required double totalCost,
     this.liabilities = const Value.absent(),
     this.holdingValues = const Value.absent(),
+    this.realizedProfit = const Value.absent(),
     this.createdAt = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : date = Value(date),
@@ -3659,6 +3890,7 @@ class SnapshotsCompanion extends UpdateCompanion<SnapshotRow> {
     Expression<double>? totalCost,
     Expression<double>? liabilities,
     Expression<String>? holdingValues,
+    Expression<double>? realizedProfit,
     Expression<DateTime>? createdAt,
     Expression<int>? rowid,
   }) {
@@ -3669,6 +3901,7 @@ class SnapshotsCompanion extends UpdateCompanion<SnapshotRow> {
       if (totalCost != null) 'total_cost': totalCost,
       if (liabilities != null) 'liabilities': liabilities,
       if (holdingValues != null) 'holding_values': holdingValues,
+      if (realizedProfit != null) 'realized_profit': realizedProfit,
       if (createdAt != null) 'created_at': createdAt,
       if (rowid != null) 'rowid': rowid,
     });
@@ -3681,6 +3914,7 @@ class SnapshotsCompanion extends UpdateCompanion<SnapshotRow> {
     Value<double>? totalCost,
     Value<double>? liabilities,
     Value<String?>? holdingValues,
+    Value<double?>? realizedProfit,
     Value<DateTime>? createdAt,
     Value<int>? rowid,
   }) {
@@ -3691,6 +3925,7 @@ class SnapshotsCompanion extends UpdateCompanion<SnapshotRow> {
       totalCost: totalCost ?? this.totalCost,
       liabilities: liabilities ?? this.liabilities,
       holdingValues: holdingValues ?? this.holdingValues,
+      realizedProfit: realizedProfit ?? this.realizedProfit,
       createdAt: createdAt ?? this.createdAt,
       rowid: rowid ?? this.rowid,
     );
@@ -3717,6 +3952,9 @@ class SnapshotsCompanion extends UpdateCompanion<SnapshotRow> {
     if (holdingValues.present) {
       map['holding_values'] = Variable<String>(holdingValues.value);
     }
+    if (realizedProfit.present) {
+      map['realized_profit'] = Variable<double>(realizedProfit.value);
+    }
     if (createdAt.present) {
       map['created_at'] = Variable<DateTime>(createdAt.value);
     }
@@ -3735,6 +3973,7 @@ class SnapshotsCompanion extends UpdateCompanion<SnapshotRow> {
           ..write('totalCost: $totalCost, ')
           ..write('liabilities: $liabilities, ')
           ..write('holdingValues: $holdingValues, ')
+          ..write('realizedProfit: $realizedProfit, ')
           ..write('createdAt: $createdAt, ')
           ..write('rowid: $rowid')
           ..write(')'))
@@ -6089,10 +6328,12 @@ typedef $$TransactionsTableCreateCompanionBuilder =
       Value<String?> note,
       Value<bool> costMoved,
       Value<double?> costMovedAmount,
+      Value<double?> externalSellPrincipal,
       Value<bool> internalMove,
       Value<String?> redemptionGroup,
       Value<bool?> opensHolding,
       Value<int?> recordedAtMicros,
+      Value<DateTime?> ledgerUpdatedAt,
       Value<DateTime> updatedAt,
     });
 typedef $$TransactionsTableUpdateCompanionBuilder =
@@ -6111,10 +6352,12 @@ typedef $$TransactionsTableUpdateCompanionBuilder =
       Value<String?> note,
       Value<bool> costMoved,
       Value<double?> costMovedAmount,
+      Value<double?> externalSellPrincipal,
       Value<bool> internalMove,
       Value<String?> redemptionGroup,
       Value<bool?> opensHolding,
       Value<int?> recordedAtMicros,
+      Value<DateTime?> ledgerUpdatedAt,
       Value<DateTime> updatedAt,
     });
 
@@ -6250,6 +6493,11 @@ class $$TransactionsTableFilterComposer
     builder: (column) => ColumnFilters(column),
   );
 
+  ColumnFilters<double> get externalSellPrincipal => $composableBuilder(
+    column: $table.externalSellPrincipal,
+    builder: (column) => ColumnFilters(column),
+  );
+
   ColumnFilters<bool> get internalMove => $composableBuilder(
     column: $table.internalMove,
     builder: (column) => ColumnFilters(column),
@@ -6267,6 +6515,11 @@ class $$TransactionsTableFilterComposer
 
   ColumnFilters<int> get recordedAtMicros => $composableBuilder(
     column: $table.recordedAtMicros,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get ledgerUpdatedAt => $composableBuilder(
+    column: $table.ledgerUpdatedAt,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -6427,6 +6680,11 @@ class $$TransactionsTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<double> get externalSellPrincipal => $composableBuilder(
+    column: $table.externalSellPrincipal,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<bool> get internalMove => $composableBuilder(
     column: $table.internalMove,
     builder: (column) => ColumnOrderings(column),
@@ -6444,6 +6702,11 @@ class $$TransactionsTableOrderingComposer
 
   ColumnOrderings<int> get recordedAtMicros => $composableBuilder(
     column: $table.recordedAtMicros,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get ledgerUpdatedAt => $composableBuilder(
+    column: $table.ledgerUpdatedAt,
     builder: (column) => ColumnOrderings(column),
   );
 
@@ -6588,6 +6851,11 @@ class $$TransactionsTableAnnotationComposer
     builder: (column) => column,
   );
 
+  GeneratedColumn<double> get externalSellPrincipal => $composableBuilder(
+    column: $table.externalSellPrincipal,
+    builder: (column) => column,
+  );
+
   GeneratedColumn<bool> get internalMove => $composableBuilder(
     column: $table.internalMove,
     builder: (column) => column,
@@ -6605,6 +6873,11 @@ class $$TransactionsTableAnnotationComposer
 
   GeneratedColumn<int> get recordedAtMicros => $composableBuilder(
     column: $table.recordedAtMicros,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<DateTime> get ledgerUpdatedAt => $composableBuilder(
+    column: $table.ledgerUpdatedAt,
     builder: (column) => column,
   );
 
@@ -6751,10 +7024,12 @@ class $$TransactionsTableTableManager
                 Value<String?> note = const Value.absent(),
                 Value<bool> costMoved = const Value.absent(),
                 Value<double?> costMovedAmount = const Value.absent(),
+                Value<double?> externalSellPrincipal = const Value.absent(),
                 Value<bool> internalMove = const Value.absent(),
                 Value<String?> redemptionGroup = const Value.absent(),
                 Value<bool?> opensHolding = const Value.absent(),
                 Value<int?> recordedAtMicros = const Value.absent(),
+                Value<DateTime?> ledgerUpdatedAt = const Value.absent(),
                 Value<DateTime> updatedAt = const Value.absent(),
               }) => TransactionsCompanion(
                 id: id,
@@ -6771,10 +7046,12 @@ class $$TransactionsTableTableManager
                 note: note,
                 costMoved: costMoved,
                 costMovedAmount: costMovedAmount,
+                externalSellPrincipal: externalSellPrincipal,
                 internalMove: internalMove,
                 redemptionGroup: redemptionGroup,
                 opensHolding: opensHolding,
                 recordedAtMicros: recordedAtMicros,
+                ledgerUpdatedAt: ledgerUpdatedAt,
                 updatedAt: updatedAt,
               ),
           createCompanionCallback:
@@ -6793,10 +7070,12 @@ class $$TransactionsTableTableManager
                 Value<String?> note = const Value.absent(),
                 Value<bool> costMoved = const Value.absent(),
                 Value<double?> costMovedAmount = const Value.absent(),
+                Value<double?> externalSellPrincipal = const Value.absent(),
                 Value<bool> internalMove = const Value.absent(),
                 Value<String?> redemptionGroup = const Value.absent(),
                 Value<bool?> opensHolding = const Value.absent(),
                 Value<int?> recordedAtMicros = const Value.absent(),
+                Value<DateTime?> ledgerUpdatedAt = const Value.absent(),
                 Value<DateTime> updatedAt = const Value.absent(),
               }) => TransactionsCompanion.insert(
                 id: id,
@@ -6813,10 +7092,12 @@ class $$TransactionsTableTableManager
                 note: note,
                 costMoved: costMoved,
                 costMovedAmount: costMovedAmount,
+                externalSellPrincipal: externalSellPrincipal,
                 internalMove: internalMove,
                 redemptionGroup: redemptionGroup,
                 opensHolding: opensHolding,
                 recordedAtMicros: recordedAtMicros,
+                ledgerUpdatedAt: ledgerUpdatedAt,
                 updatedAt: updatedAt,
               ),
           withReferenceMapper: (p0) => p0
@@ -6955,6 +7236,7 @@ typedef $$PriceCacheTableCreateCompanionBuilder =
       Value<double?> change,
       Value<double?> changePct,
       Value<DateTime> fetchedAt,
+      Value<String?> quoteDate,
       Value<int> rowid,
     });
 typedef $$PriceCacheTableUpdateCompanionBuilder =
@@ -6968,6 +7250,7 @@ typedef $$PriceCacheTableUpdateCompanionBuilder =
       Value<double?> change,
       Value<double?> changePct,
       Value<DateTime> fetchedAt,
+      Value<String?> quoteDate,
       Value<int> rowid,
     });
 
@@ -7022,6 +7305,11 @@ class $$PriceCacheTableFilterComposer
 
   ColumnFilters<DateTime> get fetchedAt => $composableBuilder(
     column: $table.fetchedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get quoteDate => $composableBuilder(
+    column: $table.quoteDate,
     builder: (column) => ColumnFilters(column),
   );
 }
@@ -7079,6 +7367,11 @@ class $$PriceCacheTableOrderingComposer
     column: $table.fetchedAt,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<String> get quoteDate => $composableBuilder(
+    column: $table.quoteDate,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
 class $$PriceCacheTableAnnotationComposer
@@ -7116,6 +7409,9 @@ class $$PriceCacheTableAnnotationComposer
 
   GeneratedColumn<DateTime> get fetchedAt =>
       $composableBuilder(column: $table.fetchedAt, builder: (column) => column);
+
+  GeneratedColumn<String> get quoteDate =>
+      $composableBuilder(column: $table.quoteDate, builder: (column) => column);
 }
 
 class $$PriceCacheTableTableManager
@@ -7158,6 +7454,7 @@ class $$PriceCacheTableTableManager
                 Value<double?> change = const Value.absent(),
                 Value<double?> changePct = const Value.absent(),
                 Value<DateTime> fetchedAt = const Value.absent(),
+                Value<String?> quoteDate = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => PriceCacheCompanion(
                 symbol: symbol,
@@ -7169,6 +7466,7 @@ class $$PriceCacheTableTableManager
                 change: change,
                 changePct: changePct,
                 fetchedAt: fetchedAt,
+                quoteDate: quoteDate,
                 rowid: rowid,
               ),
           createCompanionCallback:
@@ -7182,6 +7480,7 @@ class $$PriceCacheTableTableManager
                 Value<double?> change = const Value.absent(),
                 Value<double?> changePct = const Value.absent(),
                 Value<DateTime> fetchedAt = const Value.absent(),
+                Value<String?> quoteDate = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => PriceCacheCompanion.insert(
                 symbol: symbol,
@@ -7193,6 +7492,7 @@ class $$PriceCacheTableTableManager
                 change: change,
                 changePct: changePct,
                 fetchedAt: fetchedAt,
+                quoteDate: quoteDate,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0
@@ -7228,6 +7528,7 @@ typedef $$SnapshotsTableCreateCompanionBuilder =
       required double totalCost,
       Value<double> liabilities,
       Value<String?> holdingValues,
+      Value<double?> realizedProfit,
       Value<DateTime> createdAt,
       Value<int> rowid,
     });
@@ -7239,6 +7540,7 @@ typedef $$SnapshotsTableUpdateCompanionBuilder =
       Value<double> totalCost,
       Value<double> liabilities,
       Value<String?> holdingValues,
+      Value<double?> realizedProfit,
       Value<DateTime> createdAt,
       Value<int> rowid,
     });
@@ -7279,6 +7581,11 @@ class $$SnapshotsTableFilterComposer
 
   ColumnFilters<String> get holdingValues => $composableBuilder(
     column: $table.holdingValues,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<double> get realizedProfit => $composableBuilder(
+    column: $table.realizedProfit,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -7327,6 +7634,11 @@ class $$SnapshotsTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<double> get realizedProfit => $composableBuilder(
+    column: $table.realizedProfit,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<DateTime> get createdAt => $composableBuilder(
     column: $table.createdAt,
     builder: (column) => ColumnOrderings(column),
@@ -7363,6 +7675,11 @@ class $$SnapshotsTableAnnotationComposer
 
   GeneratedColumn<String> get holdingValues => $composableBuilder(
     column: $table.holdingValues,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<double> get realizedProfit => $composableBuilder(
+    column: $table.realizedProfit,
     builder: (column) => column,
   );
 
@@ -7407,6 +7724,7 @@ class $$SnapshotsTableTableManager
                 Value<double> totalCost = const Value.absent(),
                 Value<double> liabilities = const Value.absent(),
                 Value<String?> holdingValues = const Value.absent(),
+                Value<double?> realizedProfit = const Value.absent(),
                 Value<DateTime> createdAt = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => SnapshotsCompanion(
@@ -7416,6 +7734,7 @@ class $$SnapshotsTableTableManager
                 totalCost: totalCost,
                 liabilities: liabilities,
                 holdingValues: holdingValues,
+                realizedProfit: realizedProfit,
                 createdAt: createdAt,
                 rowid: rowid,
               ),
@@ -7427,6 +7746,7 @@ class $$SnapshotsTableTableManager
                 required double totalCost,
                 Value<double> liabilities = const Value.absent(),
                 Value<String?> holdingValues = const Value.absent(),
+                Value<double?> realizedProfit = const Value.absent(),
                 Value<DateTime> createdAt = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => SnapshotsCompanion.insert(
@@ -7436,6 +7756,7 @@ class $$SnapshotsTableTableManager
                 totalCost: totalCost,
                 liabilities: liabilities,
                 holdingValues: holdingValues,
+                realizedProfit: realizedProfit,
                 createdAt: createdAt,
                 rowid: rowid,
               ),

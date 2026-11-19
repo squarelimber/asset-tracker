@@ -57,6 +57,7 @@ class FallbackSource extends MarketDataSource {
         change: q.change,
         changePct: q.changePct,
         fetchedAt: q.fetchedAt,
+        quoteDate: q.quoteDate,
       );
     }
     return bySymbol.values.toList();

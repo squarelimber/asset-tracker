@@ -11,6 +11,7 @@ import '../../../core/formats.dart';
 import '../../../core/market_session.dart';
 import '../../../core/responsive.dart';
 import '../../../core/symbols.dart';
+import '../../../data/database.dart';
 import '../../../domain/portfolio_calculator.dart';
 import '../../../domain/portfolio_intraday.dart';
 import '../../../services/history_backfill_service.dart';
@@ -22,6 +23,7 @@ import '../../components/key_shortcuts.dart';
 import '../../components/rotating_spotlight_card.dart';
 import '../../components/session_chip.dart';
 import '../../tokens.dart';
+import '../holdings/open_holding_details.dart';
 import 'day_detail_sheet.dart';
 import 'portfolio_intraday.dart';
 import 'portfolio_intraday_card.dart';
@@ -41,9 +43,12 @@ final summaryProvider = FutureProvider<PortfolioSummary>((ref) async {
   final now = DateTime.now();
   final prev = <int, double>{
     for (final h in holdings)
-      if (cachedQuoteForHolding(cache, h)?.prevClose != null &&
-          quoteChangeIsToday(now, MarketSource.fromStorage(h.marketSource)))
-        h.id: cachedQuoteForHolding(cache, h)!.prevClose!,
+      if (cachedQuoteForHolding(cache, h) case final quote?)
+        if (quote.prevClose != null && quoteObservationIsToday(
+          now, fetchedAt: quote.fetchedAt, quoteDate: quote.quoteDate,
+          source: MarketSource.fromStorage(h.marketSource),
+        ))
+          h.id: quote.prevClose!,
   };
   // Convert non-CNY holdings into CNY using the shared FX rates.
   final cnyRates = await ref.watch(cnyRatesProvider.future);
@@ -338,6 +343,18 @@ class _PortfolioPageState extends ConsumerState<PortfolioPage> {
             ),
           ),
           const SizedBox(height: T.s2),
+          if (s.missingCurrencies.isNotEmpty)
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                onPressed: () => _showPendingConversions(s.missingCurrencies),
+                icon: const Icon(Icons.info_outline, size: 16, color: T.warning),
+                label: Text(
+                  '部分资产待折算 · ${(s.missingCurrencies.toList()..sort()).join('、')}',
+                  style: T.label(color: T.warning),
+                ),
+              ),
+            ),
           _KpiRow(summary: s),
           const SizedBox(height: T.s3),
           const PortfolioIntradayCard(),
@@ -370,6 +387,78 @@ class _PortfolioPageState extends ConsumerState<PortfolioPage> {
       ),
     );
   }
+
+  Future<void> _showPendingConversions(Set<String> currencies) async {
+    final holdings =
+        ref.read(holdingsProvider).valueOrNull ?? const <HoldingRow>[];
+    final rates =
+        ref.read(cnyRatesProvider).valueOrNull ?? const <String, double>{};
+    final hide = ref.read(hideAmountsProvider);
+    final pending = holdings
+        .where(
+          (row) =>
+              row.quantity != 0 &&
+              currencies.contains(row.currency.toUpperCase()) &&
+              valueRateOfOrNull(row, rates) == null,
+        )
+        .toList();
+    final unlisted =
+        currencies
+            .difference(
+              pending.map((row) => row.currency.toUpperCase()).toSet(),
+            )
+            .toList()
+          ..sort();
+    final selected = await showModalBottomSheet<int>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (sheetContext) => SafeArea(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.sizeOf(sheetContext).height * .75,
+          ),
+          child: ListView(
+            shrinkWrap: true,
+            padding: const EdgeInsets.fromLTRB(T.s4, 0, T.s4, T.s4),
+            children: [
+              Text(
+                '待折算资产',
+                style: Theme.of(sheetContext).textTheme.titleMedium,
+              ),
+              const SizedBox(height: T.s2),
+              const Text('人民币汇总仅包含已有汇率的金额。'),
+              for (final row in pending)
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: Text(row.name),
+                  subtitle: Text('缺少 ${row.currency} 汇率'),
+                  trailing: Text(
+                    hide
+                        ? Formats.masked()
+                        : Formats.money(
+                            AssetType.fromStorage(row.assetType)
+                                        .isAmountBased ||
+                                    AssetType.fromStorage(row.assetType) ==
+                                        AssetType.liability
+                                ? row.quantity
+                                : row.quantity * row.latestPrice,
+                            row.currency,
+                          ),
+                  ),
+                  onTap: () => Navigator.pop(sheetContext, row.id),
+                ),
+              if (unlisted.isNotEmpty)
+                Text('${unlisted.join('、')} 的历史收益或成本也有待折算。'),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (selected != null && mounted) {
+      await openHoldingDetails(context, selected);
+    }
+  }
 }
 
 class _KpiRow extends ConsumerWidget {
@@ -389,7 +478,7 @@ class _KpiRow extends ConsumerWidget {
       todayPct: todayEarning?.pct,
       todayLabel: '今日快照收益',
       todaySource: todayEarning == null
-          ? '暂无今日快照'
+          ? '缺少可比较的快照'
           : '快照更新 ${Formats.dateTime(todayEarning.updatedAt.toLocal())}',
       onOpenEarnings: () => context.push(
         '/earnings-calendar?date=${Formats.date(DateTime.now())}',

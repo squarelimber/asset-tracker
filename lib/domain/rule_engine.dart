@@ -87,7 +87,7 @@ class ConcentrationEvaluator extends RuleEvaluator {
     final params = paramsOf(rule);
     final threshold = (params['threshold'] as num?)?.toDouble() ?? 0.3;
     final total = ctx.summary.totalAssets;
-    if (total <= 0) return const [];
+    if (total <= 0 || ctx.summary.missingCurrencies.isNotEmpty) return const [];
 
     final results = <AlertResult>[];
     for (final h in ctx.holdings) {
@@ -136,7 +136,7 @@ class AssetRatioEvaluator extends RuleEvaluator {
         : (params['target'] as num?)?.toDouble() ?? 0.6;
     final tolerance = (params['tolerance'] as num?)?.toDouble() ?? 0.15;
     final total = ctx.summary.totalAssets;
-    if (total <= 0) return const [];
+    if (total <= 0 || ctx.summary.missingCurrencies.isNotEmpty) return const [];
 
     // Equity = every holding whose *effective* allocation category is 权益
     // (single source of truth; do not keep a local type set that can drift).
@@ -184,7 +184,11 @@ class DrawdownEvaluator extends RuleEvaluator {
     final params = paramsOf(rule);
     final threshold = (params['threshold'] as num?)?.toDouble() ?? 0.03;
     final changePct = ctx.summary.todayChangePct;
-    if (changePct == null || changePct >= 0) return const [];
+    if (changePct == null ||
+        changePct >= 0 ||
+        ctx.summary.missingCurrencies.isNotEmpty) {
+      return const [];
+    }
     final drop = -changePct;
     if (drop > threshold) {
       return [

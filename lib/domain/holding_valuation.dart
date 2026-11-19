@@ -12,6 +12,7 @@ class DayHoldingValue {
     required this.value,
     required this.cost,
     required this.liability,
+    this.realizedProfit = 0,
   });
 
   final int holdingId;
@@ -20,6 +21,12 @@ class DayHoldingValue {
   final double value;
   final double cost;
   final bool liability;
+  final double realizedProfit;
+
+  DayHoldingValue withRealizedProfit(double profit) => DayHoldingValue(
+    holdingId: holdingId, name: name, type: type, value: value,
+    cost: cost, liability: liability, realizedProfit: profit,
+  );
 }
 
 String encodeHoldingValues(List<DayHoldingValue> values) => jsonEncode([
@@ -31,6 +38,7 @@ String encodeHoldingValues(List<DayHoldingValue> values) => jsonEncode([
       'value': h.value,
       'cost': h.cost,
       'liability': h.liability,
+      if (h.realizedProfit != 0) 'realizedProfit': h.realizedProfit,
     },
 ]);
 
@@ -56,7 +64,9 @@ List<DayHoldingValue>? snapshotHoldingValues(SnapshotRow snapshot) {
       }
       final value = (item['value'] as num).toDouble();
       final cost = (item['cost'] as num).toDouble();
-      if (!value.isFinite || !cost.isFinite || !ids.add(item['id'] as int)) {
+      final realized = (item['realizedProfit'] as num?)?.toDouble() ?? 0;
+      if (!value.isFinite || !cost.isFinite || !realized.isFinite ||
+          !ids.add(item['id'] as int)) {
         return null;
       }
       final type = AssetType.values
@@ -73,6 +83,7 @@ List<DayHoldingValue>? snapshotHoldingValues(SnapshotRow snapshot) {
           value: value,
           cost: cost,
           liability: item['liability'] as bool,
+          realizedProfit: realized,
         ),
       );
     }
@@ -85,9 +96,11 @@ List<DayHoldingValue>? snapshotHoldingValues(SnapshotRow snapshot) {
     final debt = values
         .where((v) => v.liability)
         .fold(0.0, (s, v) => s + v.value);
+    final realized = values.fold(0.0, (s, v) => s + v.realizedProfit);
     if ((assets - debt - snapshot.totalValue).abs() > 0.000001 ||
         (cost - snapshot.totalCost).abs() > 0.000001 ||
-        (debt - snapshot.liabilities).abs() > 0.000001) {
+        (debt - snapshot.liabilities).abs() > 0.000001 ||
+        (realized - (snapshot.realizedProfit ?? 0)).abs() > 0.000001) {
       return null;
     }
     return values;

@@ -1,7 +1,11 @@
 import 'package:asset_tracker/app/providers.dart';
+import 'package:asset_tracker/core/enums.dart';
+import 'package:asset_tracker/data/asset_dao.dart';
 import 'package:asset_tracker/data/database.dart';
+import 'package:asset_tracker/domain/transaction_service.dart';
 import 'package:asset_tracker/ui/components/transaction_details.dart';
 import 'package:drift/drift.dart' show Value;
+import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -164,5 +168,57 @@ void main() {
     expect(find.text('去向'), findsOneWidget);
     expect(find.text('甲账户 / 现金'), findsOneWidget);
     expect(find.text('乙账户 / 现金'), findsOneWidget);
+  });
+
+  testWidgets('详情可预览并确认更正原流水', (tester) async {
+    final db = AppDatabase(NativeDatabase.memory());
+    addTearDown(db.close);
+    final dao = AssetDao(db);
+    final accountId = await dao.createAccount(
+      AccountsCompanion.insert(name: '账户', type: 'general'),
+    );
+    final holdingId = await dao.createHolding(
+      HoldingsCompanion.insert(
+        accountId: accountId,
+        name: '现金',
+        assetType: 'cash',
+        quantity: const Value(200),
+        costPrice: const Value(200),
+      ),
+    );
+    final service = TransactionService(dao);
+    expect(
+      (await service.record(
+        accountId: accountId,
+        holdingId: holdingId,
+        type: TransactionType.income,
+        amount: 100,
+        cashTargetId: holdingId,
+      )).ok,
+      isTrue,
+    );
+    final row = (await dao.getTransactions()).single;
+    final c = ProviderContainer(
+      overrides: [
+        databaseProvider.overrideWithValue(db),
+        historySyncProvider.overrideWith((ref) async => null),
+      ],
+    );
+    addTearDown(c.dispose);
+    await open(tester, c, row);
+    await tester.tap(find.text('更正交易'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), '150');
+    await tester.tap(find.text('预览变更'));
+    await tester.pumpAndSettle();
+    expect(find.text('核对更正影响'), findsOneWidget);
+    expect(find.text('余额 ¥300.00 → ¥350.00'), findsOneWidget);
+    expect((await dao.getTransaction(row.id))!.amount, 100);
+    await tester.ensureVisible(find.text('确认更正'));
+    await tester.tap(find.text('确认更正'));
+    await tester.pumpAndSettle();
+    expect(find.text('交易已更正'), findsOneWidget);
+    expect((await dao.getTransaction(row.id))!.amount, 150);
+    expect((await dao.getHolding(holdingId))!.quantity, 350);
   });
 }

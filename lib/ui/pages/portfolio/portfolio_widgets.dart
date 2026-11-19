@@ -607,10 +607,13 @@ class _NetWorthChartState extends ConsumerState<NetWorthChart> {
               final isRate = _view == _TrendView.returnRate;
               final showBenchmarks =
                   isRate && _benchSelected.any(_benchData.containsKey);
-              final rates = const RateSeriesCalculator().ratesOf(list);
-              final rateDelta = const RateSeriesCalculator().rangeRatePct(list);
-              final rateAnnualized = const RateSeriesCalculator()
-                  .annualizedFromRange(list);
+              const rateCalculator = RateSeriesCalculator();
+              final rates = rateCalculator.ratesOf(list);
+              final rateDelta = list.length < 2 ? null : rates.last;
+              final rateAnnualized = rateCalculator.annualizedRangeRate(
+                list,
+                rateDelta,
+              );
               final mainValue = isRate
                   ? (rateDelta ?? 0)
                   : (stats?.profit ?? 0);
@@ -646,8 +649,7 @@ class _NetWorthChartState extends ConsumerState<NetWorthChart> {
                                   const SizedBox(width: 4),
                                   Tooltip(
                                     message:
-                                        '收益率自区间首日归零，与指数同起点对比；'
-                                        '已剔除转入资金影响（成本口径近似）',
+                                        '按每段期初资产和扣除本金后的盈亏估算，逐段复利，与指数同起点对比。',
                                     child: InkWell(
                                       borderRadius: BorderRadius.circular(
                                         T.rPill,
@@ -657,8 +659,8 @@ class _NetWorthChartState extends ConsumerState<NetWorthChart> {
                                         builder: (context) => AlertDialog(
                                           title: const Text('收益率口径'),
                                           content: const Text(
-                                            '收益率自区间首日归零，与指数同起点对比；'
-                                            '已剔除转入资金影响（成本口径近似）',
+                                            '用相邻快照之间的盈亏除以该段期初资产，再逐段复利。'
+                                            '收益率估算将本金变化视为发生在每段期末。',
                                           ),
                                           actions: [
                                             TextButton(

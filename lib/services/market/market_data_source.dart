@@ -15,6 +15,7 @@ class MarketQuote {
     this.prevClose,
     this.change,
     this.changePct,
+    this.quoteDate,
     required this.fetchedAt,
   });
 
@@ -26,9 +27,16 @@ class MarketQuote {
   final double? prevClose;
   final double? change;
   final double? changePct;
+
+  /// Market or NAV date supplied by the source (yyyy-MM-dd).
+  final String? quoteDate;
   final DateTime fetchedAt;
 
-  factory MarketQuote.failure(String symbol, MarketSource source, String reason) {
+  factory MarketQuote.failure(
+    String symbol,
+    MarketSource source,
+    String reason,
+  ) {
     return MarketQuote(
       symbol: symbol,
       source: source,
@@ -39,6 +47,16 @@ class MarketQuote {
   }
 
   bool get isSuccess => price > 0;
+}
+
+String? parseMarketQuoteDate(Object? raw) {
+  final match = RegExp(
+    r'^(\d{4})-?(\d{2})-?(\d{2})',
+  ).firstMatch(raw?.toString().trim() ?? '');
+  if (match == null) return null;
+  final key = '${match[1]}-${match[2]}-${match[3]}';
+  final date = DateTime.tryParse(key);
+  return date != null && date.toIso8601String().startsWith(key) ? key : null;
 }
 
 /// Unified market data source interface.
@@ -61,7 +79,9 @@ class MarketFetchHelper {
   static List<List<String>> chunk(List<String> items, int size) {
     final out = <List<String>>[];
     for (var i = 0; i < items.length; i += size) {
-      out.add(items.sublist(i, i + size > items.length ? items.length : i + size));
+      out.add(
+        items.sublist(i, i + size > items.length ? items.length : i + size),
+      );
     }
     return out;
   }

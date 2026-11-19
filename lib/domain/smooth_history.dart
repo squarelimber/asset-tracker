@@ -2,6 +2,7 @@ import 'dart:math';
 
 import '../core/enums.dart';
 import '../core/formats.dart';
+import '../core/nav_history.dart';
 import '../data/database.dart';
 import 'transaction_identity.dart';
 import 'holding_cost.dart';
@@ -122,17 +123,50 @@ class SmoothHistoryCalculator {
     return result;
   }
 
-  /// Daily price for a share-based bank wealth holding: geometric
-  /// interpolation from cost price to the latest price.
-  double sharePrice(HoldingRow h, DateTime day, DateTime from, DateTime to) {
-    if (h.latestPrice <= 0) return 0;
-    final totalDays = to.difference(from).inDays;
-    final index = day.difference(from).inDays;
-    // Share-based price: the fallback is the latest price (a flat line), NOT
-    // the balance — deliberately different from effectiveCostOf(). Leave it.
-    final start = h.costPrice > 0 ? h.costPrice : h.latestPrice;
-    return geometricInterpolate(start, h.latestPrice, index, totalDays);
+  /// Interpolates only between known prices. A manually dated NAV replaces
+  /// the estimate on its own date and anchors the surrounding intervals.
+  double Function(DateTime) sharePriceSeries(HoldingRow h, DateTime from, DateTime to) {
+    final nav = decodeNavHistory(h.manualNavHistory);
+    if (nav.isEmpty) {
+      final start = h.costPrice > 0 ? h.costPrice : h.latestPrice;
+      return (day) => h.latestPrice <= 0 ? 0 : geometricInterpolate(
+        start, h.latestPrice, day.difference(from).inDays, to.difference(from).inDays,
+      );
+    }
+    DateTime calendarDay(DateTime day) => DateTime.utc(day.year, day.month, day.day);
+    final start = calendarDay(h.purchaseDate ?? h.createdAt);
+    final end = calendarDay(to);
+    final points = <DateTime, double>{
+      if (h.costPrice > 0) start: h.costPrice,
+      if (h.latestPrice > 0) end: h.latestPrice,
+      for (final entry in nav.entries)
+        DateTime.parse('${entry.key}T00:00:00Z'): entry.value,
+    };
+    final dates = points.keys.toList()..sort();
+    return (day) {
+      final target = calendarDay(day);
+      if (points[target] case final exact?) return exact;
+      var lo = 0;
+      var hi = dates.length;
+      while (lo < hi) {
+        final mid = (lo + hi) ~/ 2;
+        if (dates[mid].isBefore(target)) {
+          lo = mid + 1;
+        } else {
+          hi = mid;
+        }
+      }
+      if (lo == 0) return points[dates.first]!;
+      if (lo == dates.length) return points[dates.last]!;
+      final previous = dates[lo - 1];
+      final next = dates[lo];
+      return geometricInterpolate(points[previous]!, points[next]!,
+        target.difference(previous).inDays, next.difference(previous).inDays);
+    };
   }
+
+  double sharePrice(HoldingRow h, DateTime day, DateTime from, DateTime to) =>
+      sharePriceSeries(h, from, to)(day);
 
   /// Daily principal (invested amount, yyyy-MM-dd -> value) for an
   /// amount-based holding, replayed from the flows. Cost moves with the
