@@ -12,8 +12,7 @@ import '../../data/asset_dao.dart';
 /// inherently reflected) and cached locally per year.
 ///
 /// Two rules keep the cache honest:
-///  * it is refreshed at most once a day, because a fetch made *before* a
-///    trading day simply cannot contain it;
+///  * once a year's cache exists, it refreshes at most once a day;
 ///  * it only answers for the window it covers — see [coverageEndDay]. Past
 ///    that window [isTradingDay] falls back to the static weekday + holiday
 ///    table ([session.isHoliday]) instead of asserting "closed", which would
@@ -56,19 +55,10 @@ class TradingCalendarService {
     return !session.isWeekend(day) && !session.isHoliday(day);
   }
 
-  /// Newest date the cached fetch can speak for ('yyyy-MM-dd'): the later of
-  /// the fetch date and the newest stored trading day. Null when nothing was
-  /// ever fetched.
-  ///
-  /// Callers installing the calendar into [session.setLiveTradingDays] must
-  /// pass this as `coverageEnd` so dates past the fetch are not judged by a
-  /// calendar that cannot know about them.
+  /// Newest observed trading day ('yyyy-MM-dd'). A request made before
+  /// today's bar is published leaves today outside the covered window.
   Future<String?> coverageEndDay() async {
     String? end;
-    final ms = int.tryParse(await _dao.getSetting(_settingsKeyFetched) ?? '');
-    if (ms != null) {
-      end = todayKey(DateTime.fromMillisecondsSinceEpoch(ms));
-    }
     final all = await _loadAll();
     for (final list in all.values) {
       for (final d in list) {

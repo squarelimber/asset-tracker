@@ -32,6 +32,7 @@ class BackfillResult {
 
   final bool ok;
   final int days;
+  int get historicalDays => days - (wroteToday ? 1 : 0);
   final int holdings;
   final String? message;
 
@@ -717,12 +718,19 @@ class HistoryBackfillService {
         message: '账本在重建期间发生变化，需用最新数据重试');
     }
 
+    final wroteToday = rows.any((r) => r.date == todayKey(todayDate));
+    final historicalDays = rows.length - (wroteToday ? 1 : 0);
+    final message = historicalDays > 0
+        ? '已回填 $historicalDays 天历史净值'
+        : wroteToday
+        ? '今日净值已更新'
+        : '历史净值已是最新';
     return BackfillResult(
       ok: true,
       days: rows.length,
       holdings: coveredHoldings,
-      wroteToday: rows.any((r) => r.date == todayKey(todayDate)),
-      message: rows.isEmpty ? '历史净值已是最新' : '已回填 ${rows.length} 天历史净值',
+      wroteToday: wroteToday,
+      message: message,
     );
   }
 

@@ -125,8 +125,8 @@ final marketServiceProvider = Provider<MarketService>(
 /// cached set immediately; re-fetches on the Dec 1 rollover (next year), when
 /// the current year's entry is missing, or when the cache is not from today.
 ///
-/// The installed set is paired with its coverage end ([coverageEndDay]) so a
-/// calendar fetched *before* a later trading day cannot mark that day 休市.
+/// Coverage stops at the newest observed trading day, so a pre-open fetch
+/// cannot mark today's still-unpublished session as 休市.
 final tradingCalendarProvider = FutureProvider<void>((ref) async {
   final calendar = TradingCalendarService(ref.watch(daoProvider));
   final now = DateTime.now();
@@ -137,10 +137,7 @@ final tradingCalendarProvider = FutureProvider<void>((ref) async {
     await calendar.isTradingDay(DateTime(now.year + 1, 1, 1));
   }
   final all = await calendar.allTradingDays();
-  setLiveTradingDays(
-    all.isEmpty ? null : all,
-    coverageEnd: await calendar.coverageEndDay(),
-  );
+  setLiveTradingDays(all.isEmpty ? null : all);
   return;
 });
 

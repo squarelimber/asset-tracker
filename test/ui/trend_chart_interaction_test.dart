@@ -1,6 +1,7 @@
 import 'package:asset_tracker/app/providers.dart';
 import 'package:asset_tracker/data/database.dart';
 import 'package:asset_tracker/core/formats.dart';
+import 'package:asset_tracker/core/market_session.dart';
 import 'package:asset_tracker/domain/earnings_breakdown.dart';
 import 'package:asset_tracker/ui/pages/portfolio/portfolio_intraday.dart';
 import 'package:asset_tracker/ui/pages/portfolio/portfolio_intraday_card.dart';
@@ -137,7 +138,9 @@ void main() {
   testWidgets('live card closes independently of the historical chart range', (
     tester,
   ) async {
-    var now = DateTime.utc(2026, 11, 18, 6, 59);
+    final now = DateTime.utc(2026, 11, 18, 6, 59);
+    final session = ValueNotifier(MarketSession.open);
+    addTearDown(session.dispose);
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
@@ -161,7 +164,11 @@ void main() {
           home: Scaffold(
             body: ListView(
               children: [
-                PortfolioIntradayCard(clock: () => now),
+                ValueListenableBuilder(
+                  valueListenable: session,
+                  builder: (context, value, _) =>
+                      PortfolioIntradayCard(day: '2026-11-18', session: value),
+                ),
                 NetWorthChart(clock: () => now),
               ],
             ),
@@ -182,8 +189,8 @@ void main() {
     await tester.tap(find.text('全部'));
     await tester.pumpAndSettle();
 
-    now = DateTime.utc(2026, 11, 18, 7);
-    await tester.pump(const Duration(seconds: 15));
+    session.value = MarketSession.closed;
+    await tester.pump();
     expect(find.text('净值趋势'), findsOneWidget);
     expect(find.text('今日盈亏走势'), findsNothing);
     expect(selected('全部'), isTrue);

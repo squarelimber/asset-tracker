@@ -45,12 +45,26 @@ void main() {
     await seedHolidayFetch();
     final service = TradingCalendarService(dao, client: _offline());
 
-    expect(await service.coverageEndDay(), '2026-10-01');
+    expect(await service.coverageEndDay(), '2026-09-30');
     // 10-08 sits past the fetched window -> it must NOT be asserted closed.
     expect(await service.isTradingDay(DateTime(2026, 10, 8)), isTrue);
     // Inside the window the fetched set stays authoritative.
     expect(await service.isTradingDay(DateTime(2026, 9, 30)), isTrue);
     expect(await service.isTradingDay(DateTime(2026, 9, 25)), isFalse);
+  });
+
+  test('a pre-open fetch may omit a weekday that is about to trade', () async {
+    final beforeOpen = DateTime(2026, 11, 20, 8, 45);
+    await dao.setSetting('a_share_calendar', '{"2026":["2026-11-19"]}');
+    await dao.setSetting(
+      'a_share_calendar_fetched_at',
+      '${beforeOpen.millisecondsSinceEpoch}',
+    );
+    final service = TradingCalendarService(dao, client: _offline());
+
+    expect(await service.coverageEndDay(), '2026-11-19');
+    expect(await service.isTradingDay(beforeOpen), isTrue);
+    expect(await service.isTradingDay(DateTime(2026, 11, 20, 9, 30)), isTrue);
   });
 
   test('an empty cache falls back to weekday + static holidays', () async {

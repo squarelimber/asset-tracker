@@ -1,77 +1,32 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../app/providers.dart';
 import '../../../core/formats.dart';
+import '../../../core/market_session.dart';
 import '../../../core/responsive.dart';
-import '../../../domain/portfolio_intraday.dart';
 import '../../components/intraday_line_chart.dart';
 import '../../components/terminal_card.dart';
 import '../../tokens.dart';
 import 'portfolio_intraday.dart';
 
 /// Keeps the live chart close to the balance sheet during the market session.
-class PortfolioIntradayCard extends ConsumerStatefulWidget {
-  const PortfolioIntradayCard({super.key, this.clock = DateTime.now});
+class PortfolioIntradayCard extends StatelessWidget {
+  const PortfolioIntradayCard({
+    super.key,
+    required this.day,
+    required this.session,
+  });
 
-  final DateTime Function() clock;
-
-  @override
-  ConsumerState<PortfolioIntradayCard> createState() =>
-      _PortfolioIntradayCardState();
-}
-
-class _PortfolioIntradayCardState extends ConsumerState<PortfolioIntradayCard> {
-  late String _marketDay;
-  late bool _inSession;
-  late final Timer _sessionTimer;
-  late final AppLifecycleListener _lifecycle;
-
-  @override
-  void initState() {
-    super.initState();
-    final now = widget.clock();
-    _marketDay = todayKey(chinaMarketTime(now));
-    _inSession = prefersTodayTrend(now);
-    _sessionTimer = Timer.periodic(
-      const Duration(seconds: 15),
-      (_) => _update(),
-    );
-    _lifecycle = AppLifecycleListener(
-      onResume: () {
-        _update();
-        ref.invalidate(portfolioIntradayHistoryProvider(_marketDay));
-      },
-    );
-  }
-
-  void _update() {
-    final now = widget.clock();
-    final day = todayKey(chinaMarketTime(now));
-    final inSession = prefersTodayTrend(now);
-    if (day != _marketDay || inSession != _inSession) {
-      setState(() {
-        _marketDay = day;
-        _inSession = inSession;
-      });
-    }
-  }
-
-  @override
-  void dispose() {
-    _lifecycle.dispose();
-    _sessionTimer.cancel();
-    super.dispose();
-  }
+  final String day;
+  final MarketSession session;
 
   @override
   Widget build(BuildContext context) {
-    if (!_inSession) return const SizedBox.shrink();
+    if (!session.showsIntradayTrend) return const SizedBox.shrink();
     return Padding(
       padding: const EdgeInsets.only(bottom: T.s3),
-      child: PortfolioIntradayTrend(day: _marketDay),
+      child: PortfolioIntradayTrend(day: day),
     );
   }
 }

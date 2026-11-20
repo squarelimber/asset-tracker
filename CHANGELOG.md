@@ -2,6 +2,14 @@
 
 All notable changes to Asset Tracker. Entries are condensed from the commit history; dates follow the release tags.
 
+## [0.11.12] - 2026-11-20
+
+### Fixed
+
+- 总览按北京时间切换 A 股交易状态。开盘、午休后复盘或交易中回到前台时，自动刷新行情和今日分时走势。
+- 交易日历以最近一根实际日线为覆盖终点，开盘前缺少当天日线时按交易日和时段判断。
+- 总览刷新行情时静默更新今日净值快照。补算过去日期或回填失败时再显示历史回填提示。
+
 ## [0.11.11] - 2026-11-19
 
 ### Added

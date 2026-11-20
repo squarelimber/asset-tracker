@@ -65,7 +65,9 @@ final summaryProvider = FutureProvider<PortfolioSummary>((ref) async {
 });
 
 class PortfolioPage extends ConsumerStatefulWidget {
-  const PortfolioPage({super.key});
+  const PortfolioPage({super.key, this.clock = DateTime.now});
+
+  final DateTime Function() clock;
 
   @override
   ConsumerState<PortfolioPage> createState() => _PortfolioPageState();
@@ -73,7 +75,12 @@ class PortfolioPage extends ConsumerStatefulWidget {
 
 class _PortfolioPageState extends ConsumerState<PortfolioPage> {
   final _refreshing = ValueNotifier<bool>(false);
-  Timer? _intradayTimer;
+  static const _intradayRefreshInterval = Duration(minutes: 5);
+  late final Timer _sessionTimer;
+  late final AppLifecycleListener _lifecycle;
+  late MarketSession _session;
+  late String _marketDay;
+  DateTime? _nextIntradayRefresh;
   String? _closingSampleDay;
   DateTime? _lastRefreshAt;
   String? _refreshIssue;
@@ -81,30 +88,63 @@ class _PortfolioPageState extends ConsumerState<PortfolioPage> {
   @override
   void initState() {
     super.initState();
+    final time = chinaMarketTime(widget.clock());
+    _session = aShareSession(time);
+    _marketDay = todayKey(time);
+    _lifecycle = AppLifecycleListener(
+      onResume: () => _updateMarketSession(resumed: true),
+    );
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _refreshPrices(showSnack: false);
+      if (!mounted) return;
+      _nextIntradayRefresh = widget.clock().add(_intradayRefreshInterval);
+      unawaited(_refreshPrices(showSnack: false));
     });
-    _intradayTimer = Timer.periodic(const Duration(minutes: 5), (_) {
-      if (!(ModalRoute.of(context)?.isCurrent ?? true)) return;
-      final lifecycle = WidgetsBinding.instance.lifecycleState;
-      if (lifecycle != null && lifecycle != AppLifecycleState.resumed) return;
-      final time = chinaMarketTime(DateTime.now());
-      final session = aShareSession(time);
-      final closing =
-          session == MarketSession.closed &&
-          time.hour == 15 &&
-          time.minute < 5 &&
-          _closingSampleDay != todayKey(time);
-      if (session == MarketSession.open || closing) {
-        ref.invalidate(portfolioIntradayHistoryProvider(todayKey(time)));
-        unawaited(_refreshPrices(showSnack: false, intradayOnly: true));
-      }
-    });
+    _sessionTimer = Timer.periodic(
+      const Duration(seconds: 15),
+      (_) => _updateMarketSession(),
+    );
+  }
+
+  void _updateMarketSession({bool resumed = false}) {
+    final lifecycle = WidgetsBinding.instance.lifecycleState;
+    if (lifecycle != null && lifecycle != AppLifecycleState.resumed) return;
+    final now = widget.clock();
+    final time = chinaMarketTime(now);
+    final day = todayKey(time);
+    final session = aShareSession(time);
+    if (session != _session || day != _marketDay) {
+      setState(() {
+        _session = session;
+        _marketDay = day;
+      });
+      _nextIntradayRefresh = null;
+    }
+    if (resumed) _nextIntradayRefresh = null;
+
+    if (!(ModalRoute.isCurrentOf(context) ?? true)) return;
+    if (resumed && session == MarketSession.lunch) {
+      ref.invalidate(portfolioIntradayHistoryProvider(day));
+    }
+    final closing =
+        session == MarketSession.closed &&
+        time.hour == 15 &&
+        time.minute < 5 &&
+        _closingSampleDay != day;
+    if ((session != MarketSession.open && !closing) ||
+        _refreshing.value ||
+        (_nextIntradayRefresh?.isAfter(now) ?? false)) {
+      return;
+    }
+
+    _nextIntradayRefresh = now.add(_intradayRefreshInterval);
+    ref.invalidate(portfolioIntradayHistoryProvider(day));
+    unawaited(_refreshPrices(showSnack: false, intradayOnly: true));
   }
 
   @override
   void dispose() {
-    _intradayTimer?.cancel();
+    _sessionTimer.cancel();
+    _lifecycle.dispose();
     _refreshing.dispose();
     super.dispose();
   }
@@ -118,7 +158,7 @@ class _PortfolioPageState extends ConsumerState<PortfolioPage> {
     if (showSnack) {
       ref.invalidate(
         portfolioIntradayHistoryProvider(
-          todayKey(chinaMarketTime(DateTime.now())),
+          todayKey(chinaMarketTime(widget.clock())),
         ),
       );
     }
@@ -198,14 +238,18 @@ class _PortfolioPageState extends ConsumerState<PortfolioPage> {
   Widget build(BuildContext context) {
     final summary = ref.watch(summaryProvider);
     final holdings = ref.watch(holdingsProvider);
-    // Trigger the shared history sync (backfill + today's snapshot) and
-    // surface its message once, like the previous page-local backfill.
+    // Updating today's snapshot is part of the regular quote refresh.
     ref.watch(historySyncProvider);
     ref.listen<AsyncValue<BackfillResult?>>(historySyncProvider, (prev, next) {
-      final result = next.value;
-      if (result == null || (!result.ok && !result.historyUnavailable)) return;
+      if (next.isLoading) return;
+      final result = next.asData?.value;
+      if (result == null ||
+          (!result.historyUnavailable &&
+              (!result.ok || result.historicalDays == 0))) {
+        return;
+      }
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted) return;
+        if (!mounted || !(ModalRoute.isCurrentOf(context) ?? true)) return;
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(
@@ -327,7 +371,7 @@ class _PortfolioPageState extends ConsumerState<PortfolioPage> {
               runSpacing: T.s1,
               crossAxisAlignment: WrapCrossAlignment.center,
               children: [
-                const SessionChip(),
+                SessionChip(session: _session),
                 if (refreshing)
                   Text('正在刷新行情…', style: T.label())
                 else ...[
@@ -357,7 +401,7 @@ class _PortfolioPageState extends ConsumerState<PortfolioPage> {
             ),
           _KpiRow(summary: s),
           const SizedBox(height: T.s3),
-          const PortfolioIntradayCard(),
+          PortfolioIntradayCard(day: _marketDay, session: _session),
           // 轮动焦点卡：今日最佳 / 今日最差 / 本月最佳（自动切换）。
           const RotatingSpotlightCard(),
           const SizedBox(height: T.s3),

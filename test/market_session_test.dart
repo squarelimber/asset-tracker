@@ -143,7 +143,6 @@ void main() {
       // Cache as left by a 10-01 fetch during the break (newest bar 09-30).
       setLiveTradingDays(
         {'2026-09-24', '2026-09-28', '2026-09-29', '2026-09-30'},
-        coverageEnd: '2026-10-01',
       );
       expect(isTradingDay(firstDayBack), isTrue,
           reason: 'a date past the fetched window must not be asserted closed');
@@ -154,17 +153,14 @@ void main() {
 
     test('inside the covered window the live calendar is authoritative', () {
       // 09-25 is inside the window but absent => a genuine closure.
-      setLiveTradingDays(
-        {'2026-09-24', '2026-09-28'},
-        coverageEnd: '2026-09-30',
-      );
+      setLiveTradingDays({'2026-09-24', '2026-09-28', '2026-09-30'});
       expect(isTradingDay(DateTime(2026, 9, 25, 14)), isFalse);
       expect(aShareSession(DateTime(2026, 9, 25, 14)), MarketSession.weekend);
       expect(isTradingDay(DateTime(2026, 9, 28, 14)), isTrue);
     });
 
     test('a live calendar that covers 10-08 keeps it open', () {
-      setLiveTradingDays({'2026-10-08'}, coverageEnd: '2026-10-08');
+      setLiveTradingDays({'2026-10-08'});
       expect(isTradingDay(firstDayBack), isTrue);
       expect(aShareSession(firstDayBack), MarketSession.open);
     });

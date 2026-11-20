@@ -1,3 +1,4 @@
+import 'package:asset_tracker/core/market_session.dart';
 import 'package:asset_tracker/data/database.dart';
 import 'package:asset_tracker/domain/portfolio_intraday.dart';
 import 'package:asset_tracker/services/market/kline_source.dart';
@@ -6,11 +7,13 @@ import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   test('默认分时覆盖 A 股交易与午休，收盘及休市回到长期趋势', () {
-    expect(prefersTodayTrend(DateTime.utc(2026, 11, 18, 1, 29)), isFalse);
-    expect(prefersTodayTrend(DateTime.utc(2026, 11, 18, 1, 30)), isTrue);
-    expect(prefersTodayTrend(DateTime.utc(2026, 11, 18, 4)), isTrue);
-    expect(prefersTodayTrend(DateTime.utc(2026, 11, 18, 7)), isFalse);
-    expect(prefersTodayTrend(DateTime.utc(2026, 11, 21, 2)), isFalse);
+    bool showsTrend(DateTime instant) =>
+        aShareSession(chinaMarketTime(instant)).showsIntradayTrend;
+    expect(showsTrend(DateTime.utc(2026, 11, 18, 1, 29)), isFalse);
+    expect(showsTrend(DateTime.utc(2026, 11, 18, 1, 30)), isTrue);
+    expect(showsTrend(DateTime.utc(2026, 11, 18, 4)), isTrue);
+    expect(showsTrend(DateTime.utc(2026, 11, 18, 7)), isFalse);
+    expect(showsTrend(DateTime.utc(2026, 11, 21, 2)), isFalse);
   });
 
   test('买入、还款和充值不形成收益，成交后的跌幅仍保留', () {

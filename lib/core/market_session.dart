@@ -15,7 +15,11 @@ import 'formats.dart';
 /// (休市). Sources that keep quoting outside the A-share calendar — gold,
 /// FX, crypto — are *not* gated by this: they price around the clock, so
 /// their moves still show on holidays (see [quoteChangeIsToday]).
-enum MarketSession { preOpen, open, lunch, closed, weekend }
+enum MarketSession {
+  preOpen, open, lunch, closed, weekend;
+
+  bool get showsIntradayTrend => this == open || this == lunch;
+}
 
 /// A-share statutory market closures that fall on weekdays, as calendar dates
 /// (yyyy-MM-dd). Weekends are handled separately by [isWeekend]; note that a
@@ -53,31 +57,21 @@ bool isHoliday(DateTime day) => _aShareHolidayDates.contains(todayKey(day));
 /// approximation for exact 调休 handling.
 Set<String>? _liveTradingDays;
 
-/// Newest date the live calendar can legitimately speak for ('yyyy-MM-dd').
-///
-/// The fetched calendar is *history*: a fetch made on 10-01 knows nothing
-/// about 10-08. Past this date the set must not be used to assert "closed" —
-/// otherwise every trading day after the last fetch reads as 休市. That is
-/// exactly the 2026-10-08 regression: the calendar had been fetched during
-/// the National Day break, so its newest bar was 09-30.
+/// Date of the newest observed bar ('yyyy-MM-dd'). The index history can
+/// omit the current trading day even after opening.
 String? _liveCalendarCoverageEnd;
 
 /// Installs the fetched A-share trading-day set (yyyy-MM-dd) so
 /// [aShareSession] / [isTradingDay] use the authoritative calendar *within the
 /// window it actually covers*. Pass null to clear (revert to the static
 /// fallback).
-///
-/// [coverageEnd] is the newest date the fetch can speak for — normally the
-/// fetch date. It defaults to the newest date in [days].
-void setLiveTradingDays(Set<String>? days, {String? coverageEnd}) {
+void setLiveTradingDays(Set<String>? days) {
   _liveTradingDays = days;
   if (days == null || days.isEmpty) {
     _liveCalendarCoverageEnd = null;
     return;
   }
-  var end = days.reduce((a, b) => a.compareTo(b) >= 0 ? a : b);
-  if (coverageEnd != null && coverageEnd.compareTo(end) > 0) end = coverageEnd;
-  _liveCalendarCoverageEnd = end;
+  _liveCalendarCoverageEnd = days.reduce((a, b) => a.compareTo(b) >= 0 ? a : b);
 }
 
 /// Whether [day] is covered by the installed live calendar. Only then may the

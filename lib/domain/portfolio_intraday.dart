@@ -1,6 +1,5 @@
 import '../core/enums.dart';
 import '../core/formats.dart';
-import '../core/market_session.dart';
 import '../core/symbols.dart';
 import '../data/database.dart';
 import 'transaction_identity.dart';
@@ -17,11 +16,6 @@ typedef PortfolioIntradayHistory = ({
 /// Treat the clock fields as China market time regardless of device zone.
 DateTime chinaMarketTime(DateTime instant) =>
     instant.toUtc().add(const Duration(hours: 8));
-
-bool prefersTodayTrend(DateTime instant) {
-  final session = aShareSession(chinaMarketTime(instant));
-  return session == MarketSession.open || session == MarketSession.lunch;
-}
 
 /// Share-based holdings needing a price, including ones fully sold today.
 /// Cash and liabilities have no exchange price, and their transfers net out.

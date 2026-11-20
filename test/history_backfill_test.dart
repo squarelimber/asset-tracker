@@ -124,6 +124,8 @@ void main() {
     expect(result.days, 8);
     // The run owns today, so callers may skip the live-quote fallback writer.
     expect(result.wroteToday, isTrue);
+    expect(result.historicalDays, 7);
+    expect(result.message, '已回填 7 天历史净值');
 
     final snapshots = await dao.getSnapshots();
     expect(snapshots, hasLength(8));
