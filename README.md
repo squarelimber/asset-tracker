@@ -30,6 +30,7 @@ Most portfolio apps force a choice: a cloud service that wants your financial da
 
 - **Dashboard** — historical portfolio trends, estimated intraday portfolio P&L for covered holdings, per-holding daily P&L, and allocation by type and category
 - **Earnings calendars** — review daily portfolio profit or monthly profit by product. Daily details show each holding's contribution, including realized gains on sales whose proceeds leave the tracked portfolio.
+- **Category earnings** — compare profit and return by allocation category for this month, this year, or a custom period; expand a category to inspect its products, including closed positions.
 - **Risk statistics** — estimated Sharpe ratio and annualized volatility from consecutive usable daily snapshots, with an adjustable risk-free rate
 - **Multi-currency cost basis** — record the purchase-time FX rate per holding; currency gains and FX gains are accounted separately
 - **CSV export** — holdings, transactions, snapshots

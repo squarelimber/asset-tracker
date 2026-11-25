@@ -2,6 +2,7 @@ import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../../app/providers.dart';
 import '../../../core/enums.dart';
@@ -43,6 +44,10 @@ class AllocationCard extends ConsumerWidget {
             Row(
               children: [
                 const Expanded(child: SectionHeader(label: '资产配置')),
+                TextButton(
+                  onPressed: () => context.push('/category-earnings'),
+                  child: const Text('查看收益'),
+                ),
                 TextButton(
                   onPressed: () => showDialog<void>(
                     context: context,
@@ -102,6 +107,10 @@ class AllocationCard extends ConsumerWidget {
           Row(
             children: [
               const Expanded(child: SectionHeader(label: '资产配置')),
+              TextButton(
+                onPressed: () => context.push('/category-earnings'),
+                child: const Text('查看收益'),
+              ),
               TextButton(
                 onPressed: () => showDialog<void>(
                   context: context,

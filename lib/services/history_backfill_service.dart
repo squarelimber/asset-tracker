@@ -6,6 +6,7 @@ import '../core/history_sync.dart';
 import '../core/symbols.dart';
 import '../data/asset_dao.dart';
 import '../data/database.dart';
+import '../domain/cash_flow_adjustments.dart';
 import '../domain/external_sale_gains.dart';
 import '../domain/holding_cost.dart';
 import '../domain/holding_valuation.dart';
@@ -164,7 +165,10 @@ class HistoryBackfillService {
   static const _tencentGatewayMarker = 'backfill_v11_tencent_history_gateway';
   static const _valuationMarker = 'backfill_v12_recorded_holding_values';
   static const _transactionReplayMarker = 'backfill_v13_transaction_replay';
-  static const _manualNavAndRealizedMarker = 'backfill_v14_manual_nav_and_realized';
+  static const _manualNavAndRealizedMarker =
+      'backfill_v14_manual_nav_and_realized';
+  static const _cashFlowAdjustmentMarker =
+      'backfill_v15_cash_flow_profit_adjustments';
 
   /// Date (yyyy-MM-dd) of the previous successful run. A light run re-derives
   /// every day from this date through today, because any of them may have
@@ -215,13 +219,16 @@ class HistoryBackfillService {
     final current = (now ?? DateTime.now());
     final todayDate = DateTime(current.year, current.month, current.day);
 
-    final inputs = await _dao.transaction(() async => (
-      holdings: await _dao.getHoldings(),
-      transactions: await _dao.getTransactions(),
-      dirty: await _dao.getSetting(historySyncDirtyKey),
-      full: await _dao.getSetting(historyFullRebuildKey),
-      latestSnapshot: await _dao.getLatestSnapshot('CNY'),
-    ));
+    final inputs = await _dao.transaction(
+      () async => (
+        holdings: await _dao.getHoldings(),
+        transactions: await _dao.getTransactions(),
+        dirty: await _dao.getSetting(historySyncDirtyKey),
+        full: await _dao.getSetting(historyFullRebuildKey),
+        latestSnapshot: await _dao.getLatestSnapshot('CNY'),
+        snapshots: await _dao.getSnapshots(),
+      ),
+    );
     final holdings = inputs.holdings;
     if (holdings.isEmpty) {
       return const BackfillResult(
@@ -286,7 +293,8 @@ class HistoryBackfillService {
     }
     final smoothSharePrices = <int, double Function(DateTime)>{
       for (final h in holdings)
-        if (isSmoothedHolding(h) && !AssetType.fromStorage(h.assetType).isAmountBased)
+        if (isSmoothedHolding(h) &&
+            !AssetType.fromStorage(h.assetType).isAmountBased)
           h.id: smoothCalc.sharePriceSeries(h, windowStart, current),
     };
     final smoothValues = <int, Map<String, double>>{};
@@ -441,7 +449,8 @@ class HistoryBackfillService {
         await _dao.getSetting(_tencentGatewayMarker) == null ||
         await _dao.getSetting(_valuationMarker) == null ||
         await _dao.getSetting(_transactionReplayMarker) == null ||
-        await _dao.getSetting(_manualNavAndRealizedMarker) == null;
+        await _dao.getSetting(_manualNavAndRealizedMarker) == null ||
+        await _dao.getSetting(_cashFlowAdjustmentMarker) == null;
     // A type switch that crossed the amount-based boundary changes the
     // *meaning* of the stored numbers (see holding_type_conversion.dart); the
     // days written under the old semantics must not survive a light run (a
@@ -457,7 +466,9 @@ class HistoryBackfillService {
     // run, which is also when the fixed fallback window below applies.
     DateTime? lastRun;
     if (!needFullRebuild) {
-      existingDates.addAll((await _dao.getSnapshots()).map((s) => s.date));
+      existingDates.addAll(
+        inputs.snapshots.where((s) => s.currency == 'CNY').map((s) => s.date),
+      );
       // Re-derive today and everything since the previous run. Today is the
       // day the live path wrote first; the earlier days are the ones it wrote
       // on previous launches and may have frozen mid-session (see the class
@@ -494,9 +505,15 @@ class HistoryBackfillService {
     );
     var day = DateTime(earliest.year, earliest.month, earliest.day);
     final rows = <SnapshotRow>[];
+    final recorded = {
+      for (final snapshot in inputs.snapshots)
+        if (snapshot.currency == 'CNY') snapshot.date: snapshot,
+    };
+    SnapshotRow? previous;
     while (!day.isAfter(todayDate)) {
       final key = todayKey(day);
       if (existingDates.contains(key)) {
+        previous = recorded[key];
         day = day.add(const Duration(days: 1));
         continue;
       }
@@ -611,18 +628,33 @@ class HistoryBackfillService {
         }
       }
       if (hasPrice) {
-        rows.add(
-          SnapshotRow(
-            date: key,
-            currency: 'CNY',
-            totalValue: assets - liabilities,
-            totalCost: cost,
-            liabilities: liabilities,
-            realizedProfit: realized.total,
-            holdingValues: encodeHoldingValues(holdingValues),
-            createdAt: current,
-          ),
+        final rawSnapshot = SnapshotRow(
+          date: key,
+          currency: 'CNY',
+          totalValue: assets - liabilities,
+          totalCost: cost,
+          liabilities: liabilities,
+          realizedProfit: realized.total,
+          holdingValues: encodeHoldingValues(holdingValues),
+          createdAt: current,
         );
+        final adjustment = cashFlowAdjustmentsBetween(
+          previous,
+          rawSnapshot,
+          transactions: inputs.transactions,
+          replayedPrincipal: soldPrincipalById,
+        );
+        if (!adjustment.verified) {
+          return BackfillResult(
+            ok: false,
+            days: 0,
+            holdings: 0,
+            historyUnavailable: true,
+            message: '$key ${adjustment.issue} 本次未写入快照，请核对流水后重试。',
+          );
+        }
+        previous = adjustment.applyTo(rawSnapshot);
+        rows.add(previous);
       }
       day = day.add(const Duration(days: 1));
     }
@@ -633,6 +665,7 @@ class HistoryBackfillService {
           !listEquals(inputs.transactions, await _dao.getTransactions()) ||
           inputs.dirty != await _dao.getSetting(historySyncDirtyKey) ||
           inputs.full != await _dao.getSetting(historyFullRebuildKey) ||
+          !listEquals(inputs.snapshots, await _dao.getSnapshots()) ||
           inputs.latestSnapshot != await _dao.getLatestSnapshot('CNY')) {
         return false;
       }
@@ -687,6 +720,10 @@ class HistoryBackfillService {
           _manualNavAndRealizedMarker,
           '${current.millisecondsSinceEpoch}',
         );
+        await _dao.setSetting(
+          _cashFlowAdjustmentMarker,
+          '${current.millisecondsSinceEpoch}',
+        );
       }
       // Clear the forced-full-rebuild marker only after the swap succeeded,
       // so a run aborted by a network failure retries the full rebuild next
@@ -713,9 +750,14 @@ class HistoryBackfillService {
       return true;
     });
     if (!committed) {
-      return const BackfillResult(ok: false, days: 0, holdings: 0,
-        historyUnavailable: true, inputsChanged: true,
-        message: '账本在重建期间发生变化，需用最新数据重试');
+      return const BackfillResult(
+        ok: false,
+        days: 0,
+        holdings: 0,
+        historyUnavailable: true,
+        inputsChanged: true,
+        message: '账本在重建期间发生变化，需用最新数据重试',
+      );
     }
 
     final wroteToday = rows.any((r) => r.date == todayKey(todayDate));

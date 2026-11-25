@@ -115,7 +115,10 @@ class YearlyEarnings {
 double snapshotAssets(SnapshotRow row) => row.totalValue + row.liabilities;
 
 double snapshotAssetProfit(SnapshotRow row) =>
-    snapshotAssets(row) - row.totalCost + (row.realizedProfit ?? 0);
+    snapshotAssets(row) -
+    row.totalCost +
+    (row.realizedProfit ?? 0) +
+    (row.profitAdjustment ?? 0);
 
 DateTime? snapshotCalendarDate(String day) {
   final parsed = DateTime.tryParse(day);

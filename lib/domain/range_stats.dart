@@ -50,6 +50,8 @@ class RangeStats {
     required this.days,
     this.startRealized = 0,
     this.endRealized = 0,
+    this.startAdjustment = 0,
+    this.endAdjustment = 0,
   });
 
   final double startValue;
@@ -59,12 +61,15 @@ class RangeStats {
   final int days;
   final double startRealized;
   final double endRealized;
+  final double startAdjustment;
+  final double endAdjustment;
 
   /// Profit at range start (market value - cost).
-  double get startProfit => startValue - startCost + startRealized;
+  double get startProfit =>
+      startValue - startCost + startRealized + startAdjustment;
 
   /// Profit at range end (market value - cost).
-  double get endProfit => endValue - endCost + endRealized;
+  double get endProfit => endValue - endCost + endRealized + endAdjustment;
 
   /// Gain realized over the range, independent of new investments.
   double get profit => endProfit - startProfit;
@@ -102,6 +107,8 @@ class RangeStatsCalculator {
       endCost: last.totalCost,
       startRealized: first.realizedProfit ?? 0,
       endRealized: last.realizedProfit ?? 0,
+      startAdjustment: first.profitAdjustment ?? 0,
+      endAdjustment: last.profitAdjustment ?? 0,
       days: days,
     );
   }

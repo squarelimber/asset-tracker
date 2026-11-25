@@ -315,6 +315,9 @@ void main() {
     expectNoOverflow(tester);
     await pumpPage(tester, const StatsPage(), const Size(1280, 800), overrides: overrides);
     expectNoOverflow(tester);
+    // The classification summary disposes its range provider on unmount.
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(milliseconds: 1));
   });
 
   testWidgets('alerts: no overflow', (tester) async {

@@ -48,7 +48,11 @@ class ShellPage extends StatelessWidget {
   ];
 
   static const _secondaryPaths = {'/transactions', '/alerts', '/settings'};
-  static const _calendarPaths = {'/earnings-calendar', '/product-earnings'};
+  static const _analysisPaths = {
+    '/earnings-calendar',
+    '/product-earnings',
+    '/category-earnings',
+  };
 
   static void _openDestination(BuildContext context, String path) {
     final router = GoRouter.of(context);
@@ -60,7 +64,7 @@ class ShellPage extends StatelessWidget {
     final currentPath = GoRouterState.of(context).uri.path;
     final fallback = switch (currentPath) {
       '/portfolio' => null,
-      _ when _calendarPaths.contains(currentPath) => '/stats',
+      _ when _analysisPaths.contains(currentPath) => '/stats',
       _ => '/portfolio',
     };
     final router = GoRouter.of(context);
@@ -117,7 +121,7 @@ class _PhoneShell extends StatelessWidget {
     final path = GoRouterState.of(context).uri.path;
     final hideNavigation =
         ShellPage._secondaryPaths.contains(path) ||
-        ShellPage._calendarPaths.contains(path);
+        ShellPage._analysisPaths.contains(path);
     return Scaffold(
       body: child,
       bottomNavigationBar: hideNavigation
@@ -169,7 +173,7 @@ class _DesktopShell extends StatelessWidget {
     return Scaffold(
       body: Row(
         children: [
-          if (!ShellPage._calendarPaths.contains(path))
+          if (!ShellPage._analysisPaths.contains(path))
             Container(
               width: MediaQuery.sizeOf(context).width < 1280 ? 184 : 196,
               decoration: const BoxDecoration(

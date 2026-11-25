@@ -3515,6 +3515,17 @@ class $SnapshotsTable extends Snapshots
     type: DriftSqlType.double,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _profitAdjustmentMeta = const VerificationMeta(
+    'profitAdjustment',
+  );
+  @override
+  late final GeneratedColumn<double> profitAdjustment = GeneratedColumn<double>(
+    'profit_adjustment',
+    aliasedName,
+    true,
+    type: DriftSqlType.double,
+    requiredDuringInsert: false,
+  );
   static const VerificationMeta _createdAtMeta = const VerificationMeta(
     'createdAt',
   );
@@ -3536,6 +3547,7 @@ class $SnapshotsTable extends Snapshots
     liabilities,
     holdingValues,
     realizedProfit,
+    profitAdjustment,
     createdAt,
   ];
   @override
@@ -3607,6 +3619,15 @@ class $SnapshotsTable extends Snapshots
         ),
       );
     }
+    if (data.containsKey('profit_adjustment')) {
+      context.handle(
+        _profitAdjustmentMeta,
+        profitAdjustment.isAcceptableOrUnknown(
+          data['profit_adjustment']!,
+          _profitAdjustmentMeta,
+        ),
+      );
+    }
     if (data.containsKey('created_at')) {
       context.handle(
         _createdAtMeta,
@@ -3650,6 +3671,10 @@ class $SnapshotsTable extends Snapshots
         DriftSqlType.double,
         data['${effectivePrefix}realized_profit'],
       ),
+      profitAdjustment: attachedDatabase.typeMapping.read(
+        DriftSqlType.double,
+        data['${effectivePrefix}profit_adjustment'],
+      ),
       createdAt: attachedDatabase.typeMapping.read(
         DriftSqlType.dateTime,
         data['${effectivePrefix}created_at'],
@@ -3680,6 +3705,11 @@ class SnapshotRow extends DataClass implements Insertable<SnapshotRow> {
   /// Cumulative gains realized by sales outside tracked accounts, in CNY.
   final double? realizedProfit;
 
+  /// Cumulative cash-flow corrections in CNY: retain gains distributed by
+  /// withdrawals and remove dividends counted both in cash and reduced cost.
+  /// Null identifies snapshots written before these corrections were recorded.
+  final double? profitAdjustment;
+
   /// Last time this day's value was (re)derived.
   ///
   /// Doubles as the cross-device last-write-wins version for snapshots
@@ -3697,6 +3727,7 @@ class SnapshotRow extends DataClass implements Insertable<SnapshotRow> {
     required this.liabilities,
     this.holdingValues,
     this.realizedProfit,
+    this.profitAdjustment,
     required this.createdAt,
   });
   @override
@@ -3712,6 +3743,9 @@ class SnapshotRow extends DataClass implements Insertable<SnapshotRow> {
     }
     if (!nullToAbsent || realizedProfit != null) {
       map['realized_profit'] = Variable<double>(realizedProfit);
+    }
+    if (!nullToAbsent || profitAdjustment != null) {
+      map['profit_adjustment'] = Variable<double>(profitAdjustment);
     }
     map['created_at'] = Variable<DateTime>(createdAt);
     return map;
@@ -3730,6 +3764,9 @@ class SnapshotRow extends DataClass implements Insertable<SnapshotRow> {
       realizedProfit: realizedProfit == null && nullToAbsent
           ? const Value.absent()
           : Value(realizedProfit),
+      profitAdjustment: profitAdjustment == null && nullToAbsent
+          ? const Value.absent()
+          : Value(profitAdjustment),
       createdAt: Value(createdAt),
     );
   }
@@ -3747,6 +3784,7 @@ class SnapshotRow extends DataClass implements Insertable<SnapshotRow> {
       liabilities: serializer.fromJson<double>(json['liabilities']),
       holdingValues: serializer.fromJson<String?>(json['holdingValues']),
       realizedProfit: serializer.fromJson<double?>(json['realizedProfit']),
+      profitAdjustment: serializer.fromJson<double?>(json['profitAdjustment']),
       createdAt: serializer.fromJson<DateTime>(json['createdAt']),
     );
   }
@@ -3761,6 +3799,7 @@ class SnapshotRow extends DataClass implements Insertable<SnapshotRow> {
       'liabilities': serializer.toJson<double>(liabilities),
       'holdingValues': serializer.toJson<String?>(holdingValues),
       'realizedProfit': serializer.toJson<double?>(realizedProfit),
+      'profitAdjustment': serializer.toJson<double?>(profitAdjustment),
       'createdAt': serializer.toJson<DateTime>(createdAt),
     };
   }
@@ -3773,6 +3812,7 @@ class SnapshotRow extends DataClass implements Insertable<SnapshotRow> {
     double? liabilities,
     Value<String?> holdingValues = const Value.absent(),
     Value<double?> realizedProfit = const Value.absent(),
+    Value<double?> profitAdjustment = const Value.absent(),
     DateTime? createdAt,
   }) => SnapshotRow(
     date: date ?? this.date,
@@ -3786,6 +3826,9 @@ class SnapshotRow extends DataClass implements Insertable<SnapshotRow> {
     realizedProfit: realizedProfit.present
         ? realizedProfit.value
         : this.realizedProfit,
+    profitAdjustment: profitAdjustment.present
+        ? profitAdjustment.value
+        : this.profitAdjustment,
     createdAt: createdAt ?? this.createdAt,
   );
   SnapshotRow copyWithCompanion(SnapshotsCompanion data) {
@@ -3805,6 +3848,9 @@ class SnapshotRow extends DataClass implements Insertable<SnapshotRow> {
       realizedProfit: data.realizedProfit.present
           ? data.realizedProfit.value
           : this.realizedProfit,
+      profitAdjustment: data.profitAdjustment.present
+          ? data.profitAdjustment.value
+          : this.profitAdjustment,
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
     );
   }
@@ -3819,6 +3865,7 @@ class SnapshotRow extends DataClass implements Insertable<SnapshotRow> {
           ..write('liabilities: $liabilities, ')
           ..write('holdingValues: $holdingValues, ')
           ..write('realizedProfit: $realizedProfit, ')
+          ..write('profitAdjustment: $profitAdjustment, ')
           ..write('createdAt: $createdAt')
           ..write(')'))
         .toString();
@@ -3833,6 +3880,7 @@ class SnapshotRow extends DataClass implements Insertable<SnapshotRow> {
     liabilities,
     holdingValues,
     realizedProfit,
+    profitAdjustment,
     createdAt,
   );
   @override
@@ -3846,6 +3894,7 @@ class SnapshotRow extends DataClass implements Insertable<SnapshotRow> {
           other.liabilities == this.liabilities &&
           other.holdingValues == this.holdingValues &&
           other.realizedProfit == this.realizedProfit &&
+          other.profitAdjustment == this.profitAdjustment &&
           other.createdAt == this.createdAt);
 }
 
@@ -3857,6 +3906,7 @@ class SnapshotsCompanion extends UpdateCompanion<SnapshotRow> {
   final Value<double> liabilities;
   final Value<String?> holdingValues;
   final Value<double?> realizedProfit;
+  final Value<double?> profitAdjustment;
   final Value<DateTime> createdAt;
   final Value<int> rowid;
   const SnapshotsCompanion({
@@ -3867,6 +3917,7 @@ class SnapshotsCompanion extends UpdateCompanion<SnapshotRow> {
     this.liabilities = const Value.absent(),
     this.holdingValues = const Value.absent(),
     this.realizedProfit = const Value.absent(),
+    this.profitAdjustment = const Value.absent(),
     this.createdAt = const Value.absent(),
     this.rowid = const Value.absent(),
   });
@@ -3878,6 +3929,7 @@ class SnapshotsCompanion extends UpdateCompanion<SnapshotRow> {
     this.liabilities = const Value.absent(),
     this.holdingValues = const Value.absent(),
     this.realizedProfit = const Value.absent(),
+    this.profitAdjustment = const Value.absent(),
     this.createdAt = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : date = Value(date),
@@ -3891,6 +3943,7 @@ class SnapshotsCompanion extends UpdateCompanion<SnapshotRow> {
     Expression<double>? liabilities,
     Expression<String>? holdingValues,
     Expression<double>? realizedProfit,
+    Expression<double>? profitAdjustment,
     Expression<DateTime>? createdAt,
     Expression<int>? rowid,
   }) {
@@ -3902,6 +3955,7 @@ class SnapshotsCompanion extends UpdateCompanion<SnapshotRow> {
       if (liabilities != null) 'liabilities': liabilities,
       if (holdingValues != null) 'holding_values': holdingValues,
       if (realizedProfit != null) 'realized_profit': realizedProfit,
+      if (profitAdjustment != null) 'profit_adjustment': profitAdjustment,
       if (createdAt != null) 'created_at': createdAt,
       if (rowid != null) 'rowid': rowid,
     });
@@ -3915,6 +3969,7 @@ class SnapshotsCompanion extends UpdateCompanion<SnapshotRow> {
     Value<double>? liabilities,
     Value<String?>? holdingValues,
     Value<double?>? realizedProfit,
+    Value<double?>? profitAdjustment,
     Value<DateTime>? createdAt,
     Value<int>? rowid,
   }) {
@@ -3926,6 +3981,7 @@ class SnapshotsCompanion extends UpdateCompanion<SnapshotRow> {
       liabilities: liabilities ?? this.liabilities,
       holdingValues: holdingValues ?? this.holdingValues,
       realizedProfit: realizedProfit ?? this.realizedProfit,
+      profitAdjustment: profitAdjustment ?? this.profitAdjustment,
       createdAt: createdAt ?? this.createdAt,
       rowid: rowid ?? this.rowid,
     );
@@ -3955,6 +4011,9 @@ class SnapshotsCompanion extends UpdateCompanion<SnapshotRow> {
     if (realizedProfit.present) {
       map['realized_profit'] = Variable<double>(realizedProfit.value);
     }
+    if (profitAdjustment.present) {
+      map['profit_adjustment'] = Variable<double>(profitAdjustment.value);
+    }
     if (createdAt.present) {
       map['created_at'] = Variable<DateTime>(createdAt.value);
     }
@@ -3974,6 +4033,7 @@ class SnapshotsCompanion extends UpdateCompanion<SnapshotRow> {
           ..write('liabilities: $liabilities, ')
           ..write('holdingValues: $holdingValues, ')
           ..write('realizedProfit: $realizedProfit, ')
+          ..write('profitAdjustment: $profitAdjustment, ')
           ..write('createdAt: $createdAt, ')
           ..write('rowid: $rowid')
           ..write(')'))
@@ -7529,6 +7589,7 @@ typedef $$SnapshotsTableCreateCompanionBuilder =
       Value<double> liabilities,
       Value<String?> holdingValues,
       Value<double?> realizedProfit,
+      Value<double?> profitAdjustment,
       Value<DateTime> createdAt,
       Value<int> rowid,
     });
@@ -7541,6 +7602,7 @@ typedef $$SnapshotsTableUpdateCompanionBuilder =
       Value<double> liabilities,
       Value<String?> holdingValues,
       Value<double?> realizedProfit,
+      Value<double?> profitAdjustment,
       Value<DateTime> createdAt,
       Value<int> rowid,
     });
@@ -7586,6 +7648,11 @@ class $$SnapshotsTableFilterComposer
 
   ColumnFilters<double> get realizedProfit => $composableBuilder(
     column: $table.realizedProfit,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<double> get profitAdjustment => $composableBuilder(
+    column: $table.profitAdjustment,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -7639,6 +7706,11 @@ class $$SnapshotsTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<double> get profitAdjustment => $composableBuilder(
+    column: $table.profitAdjustment,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<DateTime> get createdAt => $composableBuilder(
     column: $table.createdAt,
     builder: (column) => ColumnOrderings(column),
@@ -7680,6 +7752,11 @@ class $$SnapshotsTableAnnotationComposer
 
   GeneratedColumn<double> get realizedProfit => $composableBuilder(
     column: $table.realizedProfit,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<double> get profitAdjustment => $composableBuilder(
+    column: $table.profitAdjustment,
     builder: (column) => column,
   );
 
@@ -7725,6 +7802,7 @@ class $$SnapshotsTableTableManager
                 Value<double> liabilities = const Value.absent(),
                 Value<String?> holdingValues = const Value.absent(),
                 Value<double?> realizedProfit = const Value.absent(),
+                Value<double?> profitAdjustment = const Value.absent(),
                 Value<DateTime> createdAt = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => SnapshotsCompanion(
@@ -7735,6 +7813,7 @@ class $$SnapshotsTableTableManager
                 liabilities: liabilities,
                 holdingValues: holdingValues,
                 realizedProfit: realizedProfit,
+                profitAdjustment: profitAdjustment,
                 createdAt: createdAt,
                 rowid: rowid,
               ),
@@ -7747,6 +7826,7 @@ class $$SnapshotsTableTableManager
                 Value<double> liabilities = const Value.absent(),
                 Value<String?> holdingValues = const Value.absent(),
                 Value<double?> realizedProfit = const Value.absent(),
+                Value<double?> profitAdjustment = const Value.absent(),
                 Value<DateTime> createdAt = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => SnapshotsCompanion.insert(
@@ -7757,6 +7837,7 @@ class $$SnapshotsTableTableManager
                 liabilities: liabilities,
                 holdingValues: holdingValues,
                 realizedProfit: realizedProfit,
+                profitAdjustment: profitAdjustment,
                 createdAt: createdAt,
                 rowid: rowid,
               ),

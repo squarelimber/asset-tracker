@@ -1,6 +1,6 @@
 import 'dart:convert';
 
-import 'package:drift/drift.dart';
+import 'package:drift/drift.dart' hide isNotNull;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -11,6 +11,7 @@ import 'package:asset_tracker/core/history_sync.dart';
 import 'package:asset_tracker/data/asset_dao.dart';
 import 'package:asset_tracker/data/database.dart';
 import 'package:asset_tracker/domain/transaction_service.dart';
+import 'package:asset_tracker/domain/holding_valuation.dart';
 import 'package:asset_tracker/sync/sync_api.dart';
 import 'package:asset_tracker/sync/sync_service.dart';
 
@@ -235,6 +236,21 @@ void main() {
         cashTargetId: const Value(1), type: 'income',
         amount: day * 100.0, occurredAt: date,
       ));
+      await device.upsertSnapshot(SnapshotsCompanion.insert(
+        date: date.toIso8601String().substring(0, 10),
+        totalValue: day * 100.0,
+        totalCost: day * 100.0,
+        realizedProfit: const Value(4.25),
+        profitAdjustment: const Value(-3.5),
+        holdingValues: Value(encodeHoldingValues([
+          DayHoldingValue(
+            holdingId: 1, name: label, type: AssetType.cash,
+            value: day * 100.0, cost: day * 100.0, liability: false,
+            realizedProfit: 4.25, profitAdjustment: -3.5,
+          ),
+        ])),
+        createdAt: Value(date),
+      ));
     }
     await seed(dao, 'First device', 2);
     await seed(secondDao, 'Second device', 3);
@@ -247,6 +263,15 @@ void main() {
       expect(accounts.values.map((row) => row.name).toSet(),
           {'First device', 'Second device'});
       expect(holdings, hasLength(2));
+      for (final snapshot in await device.getSnapshots()) {
+        final detail = snapshotHoldingValues(snapshot);
+        expect(detail, isNotNull);
+        expect(detail!.single.holdingId, holdings.values.singleWhere(
+          (holding) => holding.name == detail.single.name,
+        ).id);
+        expect(detail.single.realizedProfit, 4.25);
+        expect(detail.single.profitAdjustment, -3.5);
+      }
       final rows = await device.getTransactions();
       expect(rows, hasLength(2));
       for (final row in rows) {

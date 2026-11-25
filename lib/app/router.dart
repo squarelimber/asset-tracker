@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../core/enums.dart';
 import '../ui/pages/accounts/account_detail_page.dart';
 import '../ui/pages/accounts/accounts_page.dart';
 import '../ui/pages/alerts/alerts_page.dart';
@@ -16,6 +17,7 @@ import '../ui/pages/portfolio/portfolio_page.dart';
 import '../ui/pages/settings/settings_page.dart';
 import '../ui/shell/shell_page.dart';
 import '../ui/pages/stats/stats_page.dart';
+import '../ui/pages/stats/category_earnings_page.dart';
 import '../ui/pages/transactions/transactions_page.dart';
 
 final routerProvider = Provider<GoRouter>((ref) {
@@ -91,6 +93,14 @@ final routerProvider = Provider<GoRouter>((ref) {
             builder: (context, state) => const StatsPage(),
           ),
           GoRoute(
+            path: '/category-earnings',
+            builder: (context, state) => CategoryEarningsPage(
+              initialCategory: AssetCategory.fromStorageOrNull(
+                state.uri.queryParameters['category'],
+              ),
+            ),
+          ),
+          GoRoute(
             path: '/earnings-calendar',
             builder: (context, state) => EarningsCalendarPage(
               initialDate: DateTime.tryParse(
@@ -113,7 +123,9 @@ final routerProvider = Provider<GoRouter>((ref) {
             path: '/transactions',
             builder: (context, state) => TransactionsPage(
               initialDate: state.uri.queryParameters['date'],
-              initialTransactionId: int.tryParse(state.uri.queryParameters['id'] ?? ''),
+              initialTransactionId: int.tryParse(
+                state.uri.queryParameters['id'] ?? '',
+              ),
             ),
           ),
           GoRoute(

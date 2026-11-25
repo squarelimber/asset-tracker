@@ -96,7 +96,8 @@ EarningsBreakdown earningsBreakdownOf(
       : snapshotHoldingValues(previous);
   if (currentValues == null || previousValues == null) {
     final missing = _snapshotIssue(
-      date, currentValues == null ? current.date : previous!.date,
+      date,
+      currentValues == null ? current.date : previous!.date,
     );
     return EarningsBreakdown(
       date: date,
@@ -145,7 +146,8 @@ EarningsBreakdown earningsBreakdownOf(
         (a?.cost ?? 0) == 0 &&
         (b?.value ?? 0) == 0 &&
         (b?.cost ?? 0) == 0 &&
-        (a?.realizedProfit ?? 0) == (b?.realizedProfit ?? 0)) {
+        (a?.realizedProfit ?? 0) == (b?.realizedProfit ?? 0) &&
+        (a?.profitAdjustment ?? 0) == (b?.profitAdjustment ?? 0)) {
       continue;
     }
     final identity = a ?? b!;
@@ -153,7 +155,10 @@ EarningsBreakdown earningsBreakdownOf(
         ? 0.0
         : ((a?.value ?? 0) - (a?.cost ?? 0)) -
               ((b?.value ?? 0) - (b?.cost ?? 0)) +
-              (a?.realizedProfit ?? 0) - (b?.realizedProfit ?? 0) +
+              (a?.realizedProfit ?? 0) -
+              (b?.realizedProfit ?? 0) +
+              (a?.profitAdjustment ?? 0) -
+              (b?.profitAdjustment ?? 0) +
               (adjustments[id] ?? 0);
     rows.add(
       HoldingDayEarning(
@@ -217,7 +222,8 @@ Map<int, double> internalTransferProfitAdjustments(
     if (day.compareTo(previousDate) <= 0 ||
         day.compareTo(currentDate) > 0 ||
         t.currency.toUpperCase() != 'CNY' ||
-        (snapshotCreatedAt != null && t.historyUpdatedAt.isAfter(snapshotCreatedAt))) {
+        (snapshotCreatedAt != null &&
+            t.historyUpdatedAt.isAfter(snapshotCreatedAt))) {
       continue;
     }
     final type = TransactionType.fromStorage(t.type);
@@ -307,13 +313,16 @@ EarningsAttributionIssue? _incompleteAttribution(
   }).toList();
 
   for (final t in interval) {
-    EarningsAttributionIssue issue(String reason, {bool canRebuild = false}) =>
-        EarningsAttributionIssue(
-          date: currentDate,
-          message: '${todayKey(t.occurredAt.toLocal())} 的${TransactionType.fromStorage(t.type).label}流水$reason',
-          transactionId: t.id,
-          canRebuild: canRebuild,
-        );
+    EarningsAttributionIssue issue(
+      String reason, {
+      bool canRebuild = false,
+    }) => EarningsAttributionIssue(
+      date: currentDate,
+      message:
+          '${todayKey(t.occurredAt.toLocal())} 的${TransactionType.fromStorage(t.type).label}流水$reason',
+      transactionId: t.id,
+      canRebuild: canRebuild,
+    );
     final type = TransactionType.fromStorage(t.type);
     final isBuy = type == TransactionType.buy;
     final isSell = type == TransactionType.sell;
@@ -423,17 +432,36 @@ List<ProductEarnings> productsFromSnapshots(
   List<TransactionRow> transactions = const [],
   String? attributionRequiredFrom,
   void Function(EarningsAttributionIssue)? onIssue,
+}) => const ProductEarningsCalculator().compute(
+  holdingSeriesFromSnapshots(
+    snapshots,
+    transactions: transactions,
+    attributionRequiredFrom: attributionRequiredFrom,
+    onIssue: onIssue,
+  ),
+);
+
+/// Recorded per-holding series before products are merged by name. Keeping
+/// identities here lets other views group holdings (for example by their
+/// allocation category) without merging identically named products first.
+List<HoldingSeries> holdingSeriesFromSnapshots(
+  List<SnapshotRow> snapshots, {
+  List<TransactionRow> transactions = const [],
+  String? attributionRequiredFrom,
+  void Function(EarningsAttributionIssue)? onIssue,
 }) {
   final ordered = snapshots.where((s) => s.currency == 'CNY').toList()
     ..sort((a, b) => a.date.compareTo(b.date));
   final decoded = <String, List<DayHoldingValue>>{};
   final identities = <int, DayHoldingValue>{};
   bool inWindow(String day) =>
-      attributionRequiredFrom == null || day.compareTo(attributionRequiredFrom) >= 0;
+      attributionRequiredFrom == null ||
+      day.compareTo(attributionRequiredFrom) >= 0;
   void report(EarningsAttributionIssue issue) {
     if (onIssue == null) throw StateError(issue.message);
     if (inWindow(issue.date)) onIssue(issue);
   }
+
   for (final snapshot in ordered) {
     final values = snapshotHoldingValues(snapshot);
     if (values == null) {
@@ -492,12 +520,19 @@ List<ProductEarnings> productsFromSnapshots(
     final adjustments = adjustmentsByDate.putIfAbsent(entry.key, () => {});
     final current = {
       for (final value in entry.value)
-        if (!value.liability) value.holdingId: value.realizedProfit,
+        if (!value.liability)
+          value.holdingId: value.realizedProfit + value.profitAdjustment,
     };
     if (entry.key != decoded.keys.first) {
       for (final id in {...realizedByHolding.keys, ...current.keys}) {
         final delta = (current[id] ?? 0) - (realizedByHolding[id] ?? 0);
-        if (delta != 0) adjustments.update(id, (value) => value + delta, ifAbsent: () => delta);
+        if (delta != 0) {
+          adjustments.update(
+            id,
+            (value) => value + delta,
+            ifAbsent: () => delta,
+          );
+        }
       }
     }
     realizedByHolding
@@ -505,7 +540,7 @@ List<ProductEarnings> productsFromSnapshots(
       ..addAll(current);
   }
   final latestValues = ordered.isEmpty ? null : decoded[ordered.last.date];
-  return const ProductEarningsCalculator().compute([
+  return [
     for (final entry in identities.entries)
       HoldingSeries(
         holdingId: entry.key,
@@ -529,7 +564,7 @@ List<ProductEarnings> productsFromSnapshots(
             ),
         ],
       ),
-  ]);
+  ];
 }
 
 HoldingDay _holdingDay(

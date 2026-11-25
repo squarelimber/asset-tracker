@@ -13,6 +13,7 @@ class DayHoldingValue {
     required this.cost,
     required this.liability,
     this.realizedProfit = 0,
+    this.profitAdjustment = 0,
   });
 
   final int holdingId;
@@ -22,10 +23,28 @@ class DayHoldingValue {
   final double cost;
   final bool liability;
   final double realizedProfit;
+  final double profitAdjustment;
 
   DayHoldingValue withRealizedProfit(double profit) => DayHoldingValue(
-    holdingId: holdingId, name: name, type: type, value: value,
-    cost: cost, liability: liability, realizedProfit: profit,
+    holdingId: holdingId,
+    name: name,
+    type: type,
+    value: value,
+    cost: cost,
+    liability: liability,
+    realizedProfit: profit,
+    profitAdjustment: profitAdjustment,
+  );
+
+  DayHoldingValue withProfitAdjustment(double adjustment) => DayHoldingValue(
+    holdingId: holdingId,
+    name: name,
+    type: type,
+    value: value,
+    cost: cost,
+    liability: liability,
+    realizedProfit: realizedProfit,
+    profitAdjustment: adjustment,
   );
 }
 
@@ -39,6 +58,7 @@ String encodeHoldingValues(List<DayHoldingValue> values) => jsonEncode([
       'cost': h.cost,
       'liability': h.liability,
       if (h.realizedProfit != 0) 'realizedProfit': h.realizedProfit,
+      if (h.profitAdjustment != 0) 'profitAdjustment': h.profitAdjustment,
     },
 ]);
 
@@ -65,7 +85,11 @@ List<DayHoldingValue>? snapshotHoldingValues(SnapshotRow snapshot) {
       final value = (item['value'] as num).toDouble();
       final cost = (item['cost'] as num).toDouble();
       final realized = (item['realizedProfit'] as num?)?.toDouble() ?? 0;
-      if (!value.isFinite || !cost.isFinite || !realized.isFinite ||
+      final adjustment = (item['profitAdjustment'] as num?)?.toDouble() ?? 0;
+      if (!value.isFinite ||
+          !cost.isFinite ||
+          !realized.isFinite ||
+          !adjustment.isFinite ||
           !ids.add(item['id'] as int)) {
         return null;
       }
@@ -84,6 +108,7 @@ List<DayHoldingValue>? snapshotHoldingValues(SnapshotRow snapshot) {
           cost: cost,
           liability: item['liability'] as bool,
           realizedProfit: realized,
+          profitAdjustment: adjustment,
         ),
       );
     }
@@ -97,10 +122,12 @@ List<DayHoldingValue>? snapshotHoldingValues(SnapshotRow snapshot) {
         .where((v) => v.liability)
         .fold(0.0, (s, v) => s + v.value);
     final realized = values.fold(0.0, (s, v) => s + v.realizedProfit);
+    final adjustment = values.fold(0.0, (s, v) => s + v.profitAdjustment);
     if ((assets - debt - snapshot.totalValue).abs() > 0.000001 ||
         (cost - snapshot.totalCost).abs() > 0.000001 ||
         (debt - snapshot.liabilities).abs() > 0.000001 ||
-        (realized - (snapshot.realizedProfit ?? 0)).abs() > 0.000001) {
+        (realized - (snapshot.realizedProfit ?? 0)).abs() > 0.000001 ||
+        (adjustment - (snapshot.profitAdjustment ?? 0)).abs() > 0.000001) {
       return null;
     }
     return values;

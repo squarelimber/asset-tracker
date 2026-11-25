@@ -98,11 +98,15 @@ final cnyRatesProvider = FutureProvider<Map<String, double>>((ref) async {
 });
 
 /// Ledger currencies may outlive the holdings using them.
-final transactionCnyRatesProvider = FutureProvider<Map<String, double>>((ref) async {
+final transactionCnyRatesProvider = FutureProvider<Map<String, double>>((
+  ref,
+) async {
   final txns = ref.watch(transactionsProvider.future);
   final holdingRates = ref.watch(cnyRatesProvider.future);
   final market = ref.watch(marketServiceProvider);
-  final currencies = (await txns).map((row) => row.currency.toUpperCase()).toSet();
+  final currencies = (await txns)
+      .map((row) => row.currency.toUpperCase())
+      .toSet();
   final rates = Map<String, double>.of(await holdingRates);
   final missing = currencies.where((code) {
     final rate = rates[code];
@@ -218,7 +222,11 @@ final todayEarningProvider =
       final value = todayEarningOf(list, now: DateTime.now());
       return value == null
           ? null
-          : (profit: value.profit, pct: value.pct, updatedAt: list.last.createdAt);
+          : (
+              profit: value.profit,
+              pct: value.pct,
+              updatedAt: list.last.createdAt,
+            );
     });
 
 /// Emits whenever the history dirty flag flips (settings row watch), so
@@ -226,6 +234,15 @@ final todayEarningProvider =
 /// merged source rows.
 final historyDirtyFlagProvider = StreamProvider<String?>(
   (ref) => ref.watch(daoProvider).watchSetting(historySyncDirtyKey),
+);
+
+final historyFullRebuildFlagProvider = StreamProvider<String?>(
+  (ref) => ref.watch(daoProvider).watchSetting(historyFullRebuildKey),
+);
+
+/// Deletions also invalidate risk history after their source row is gone.
+final riskHistoryTombstonesProvider = StreamProvider<List<SyncTombstoneRow>>(
+  (ref) => ref.watch(daoProvider).watchTombstones(),
 );
 
 /// Shared history sync: backfills historical snapshots when dirty (or on
@@ -252,7 +269,9 @@ final historySyncProvider = FutureProvider<BackfillResult?>((ref) async {
   // cached quote / history series, and the fetch-failure abort below leaves
   // any pre-existing today row alone.)
   await market.refreshAll();
-  var result = await backfill.backfill(forceRebuild: dirty == historyDirtySet || firstRun);
+  var result = await backfill.backfill(
+    forceRebuild: dirty == historyDirtySet || firstRun,
+  );
   if (result.inputsChanged) {
     result = await backfill.backfill(forceRebuild: true);
   }
@@ -291,7 +310,8 @@ final productEarningsServiceProvider = Provider<ProductEarningsService>(
 
 /// Per-product earnings through [year], with the prior baseline retained.
 final _productEarningsInputsProvider = FutureProvider.autoDispose.family((
-  ref, int year,
+  ref,
+  int year,
 ) async {
   ref.watch(historySyncProvider);
   final snapshots = ref.watch(snapshotsProvider.future);
@@ -307,7 +327,9 @@ final _productEarningsInputsProvider = FutureProvider.autoDispose.family((
 
 final productEarningsProvider = FutureProvider.autoDispose
     .family<List<ProductEarnings>, int>((ref, year) async {
-      final inputs = await ref.watch(_productEarningsInputsProvider(year).future);
+      final inputs = await ref.watch(
+        _productEarningsInputsProvider(year).future,
+      );
       return productsFromSnapshots(
         inputs.snapshots,
         transactions: inputs.transactions,
@@ -317,7 +339,9 @@ final productEarningsProvider = FutureProvider.autoDispose
 
 final productEarningsReportProvider = FutureProvider.autoDispose
     .family<ProductEarningsReport, int>((ref, year) async {
-      final inputs = await ref.watch(_productEarningsInputsProvider(year).future);
+      final inputs = await ref.watch(
+        _productEarningsInputsProvider(year).future,
+      );
       final issues = <EarningsAttributionIssue>[];
       final products = productsFromSnapshots(
         inputs.snapshots,
@@ -414,14 +438,19 @@ final snapshotsProvider = StreamProvider<List<SnapshotRow>>(
   (ref) {
     final stream = ref.watch(daoProvider).watchSnapshots(currency: 'CNY');
     final transactions = ref.watch(transactionsProvider).valueOrNull;
-    if (transactions == null || !transactions.any(isExternalSale)) return stream;
+    if (transactions == null || !transactions.any(isExternalSale)) {
+      return stream;
+    }
     final holdings = ref.watch(holdingsProvider).valueOrNull;
     if (holdings == null) return stream;
-    final rates = transactions.any((t) => isExternalSale(t) && t.currency != 'CNY')
+    final rates =
+        transactions.any((t) => isExternalSale(t) && t.currency != 'CNY')
         ? ref.watch(cnyRatesProvider).valueOrNull ?? const <String, double>{}
         : const <String, double>{};
-    return stream.map((rows) =>
-        ExternalSaleGains(holdings, transactions, rates).fillLegacy(rows));
+    return stream.map(
+      (rows) =>
+          ExternalSaleGains(holdings, transactions, rates).fillLegacy(rows),
+    );
   },
 );
 

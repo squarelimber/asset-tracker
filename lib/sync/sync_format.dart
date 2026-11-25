@@ -107,6 +107,7 @@ class SyncFormatter {
     'liabilities': s.liabilities,
     if (s.holdingValues != null) 'holdingValues': s.holdingValues,
     if (s.realizedProfit != null) 'realizedProfit': s.realizedProfit,
+    if (s.profitAdjustment != null) 'profitAdjustment': s.profitAdjustment,
     'createdAt': s.createdAt.toIso8601String(),
     // Snapshots have no separate updatedAt column; `createdAt` is
     // rewritten on every recompute (see the Snapshots table) and is

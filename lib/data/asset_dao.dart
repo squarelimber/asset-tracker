@@ -42,8 +42,11 @@ class AssetDao {
     )..where((t) => t.id.equals(id))).getSingleOrNull();
   }
 
-  Future<int> createAccount(AccountsCompanion entry) => _db.into(_db.accounts)
-      .insert(entry.id.present ? entry : entry.copyWith(id: Value(newSyncId())));
+  Future<int> createAccount(AccountsCompanion entry) => _db
+      .into(_db.accounts)
+      .insert(
+        entry.id.present ? entry : entry.copyWith(id: Value(newSyncId())),
+      );
 
   Future<int> updateAccount(AccountRow account, {DateTime? now}) async {
     final stmt = _db.update(_db.accounts)
@@ -88,11 +91,15 @@ class AssetDao {
         initial: localTransactions,
       );
       final holdingIds = holdings.map((h) => h.id).toSet();
-      if (related.values.any((row) =>
-          row.accountId != id ||
-          [row.holdingId, row.cashSourceId, row.cashTargetId]
-              .whereType<int>()
-              .any((ref) => !holdingIds.contains(ref)))) {
+      if (related.values.any(
+        (row) =>
+            row.accountId != id ||
+            [
+              row.holdingId,
+              row.cashSourceId,
+              row.cashTargetId,
+            ].whereType<int>().any((ref) => !holdingIds.contains(ref)),
+      )) {
         throw ArgumentError('此账户仍有关联的跨账户流水，请先撤销关联流水，或归档持仓');
       }
       for (final t in related.values) {
@@ -115,40 +122,50 @@ class AssetDao {
   /// Moves a legacy row out of a colliding local sequence slot. References
   /// are moved in the same SQLite transaction as the subsequent merge.
   Future<void> rekeySyncAccount(int oldId, int newId) async {
-    await (_db.update(_db.accounts)..where((t) => t.id.equals(oldId)))
-        .write(AccountsCompanion(id: Value(newId)));
+    await (_db.update(_db.accounts)..where((t) => t.id.equals(oldId))).write(
+      AccountsCompanion(id: Value(newId)),
+    );
     await (_db.update(_db.holdings)..where((t) => t.accountId.equals(oldId)))
         .write(HoldingsCompanion(accountId: Value(newId)));
-    await (_db.update(_db.transactions)..where((t) => t.accountId.equals(oldId)))
+    await (_db.update(_db.transactions)
+          ..where((t) => t.accountId.equals(oldId)))
         .write(TransactionsCompanion(accountId: Value(newId)));
   }
 
   Future<void> rekeySyncHolding(int oldId, int newId) async {
-    await (_db.update(_db.holdings)..where((t) => t.id.equals(oldId)))
-        .write(HoldingsCompanion(id: Value(newId)));
-    await (_db.update(_db.transactions)..where((t) => t.holdingId.equals(oldId)))
+    await (_db.update(_db.holdings)..where((t) => t.id.equals(oldId))).write(
+      HoldingsCompanion(id: Value(newId)),
+    );
+    await (_db.update(_db.transactions)
+          ..where((t) => t.holdingId.equals(oldId)))
         .write(TransactionsCompanion(holdingId: Value(newId)));
-    await (_db.update(_db.transactions)..where((t) => t.cashSourceId.equals(oldId)))
+    await (_db.update(_db.transactions)
+          ..where((t) => t.cashSourceId.equals(oldId)))
         .write(TransactionsCompanion(cashSourceId: Value(newId)));
-    await (_db.update(_db.transactions)..where((t) => t.cashTargetId.equals(oldId)))
+    await (_db.update(_db.transactions)
+          ..where((t) => t.cashTargetId.equals(oldId)))
         .write(TransactionsCompanion(cashTargetId: Value(newId)));
   }
 
   Future<void> rekeySyncTransaction(int oldId, int newId) async {
     final row = await getTransaction(oldId);
     if (row == null) return;
-    await (_db.update(_db.transactions)..where((t) => t.id.equals(oldId)))
-        .write(TransactionsCompanion(
-          id: Value(newId),
-          recordedAtMicros: Value(
-            row.recordedAtMicros ?? legacyTransactionEntryOrder(oldId),
-          ),
-        ));
+    await (_db.update(
+      _db.transactions,
+    )..where((t) => t.id.equals(oldId))).write(
+      TransactionsCompanion(
+        id: Value(newId),
+        recordedAtMicros: Value(
+          row.recordedAtMicros ?? legacyTransactionEntryOrder(oldId),
+        ),
+      ),
+    );
   }
 
   Future<void> rekeySyncAlertRule(int oldId, int newId) async {
-    await (_db.update(_db.alertRules)..where((t) => t.id.equals(oldId)))
-        .write(AlertRulesCompanion(id: Value(newId)));
+    await (_db.update(_db.alertRules)..where((t) => t.id.equals(oldId))).write(
+      AlertRulesCompanion(id: Value(newId)),
+    );
     await (_db.update(_db.alertEvents)..where((t) => t.ruleId.equals(oldId)))
         .write(AlertEventsCompanion(ruleId: Value(newId)));
   }
@@ -159,20 +176,28 @@ class AssetDao {
 
   Stream<List<HoldingRow>> watchHoldings() {
     return (_db.select(_db.holdings)..orderBy([
-      (t) => OrderingTerm.asc(t.createdAt),
-      (t) => OrderingTerm.asc(t.id),
-    ])).watch();
+          (t) => OrderingTerm.asc(t.createdAt),
+          (t) => OrderingTerm.asc(t.id),
+        ]))
+        .watch();
   }
 
   Stream<List<HoldingRow>> watchHoldingsByAccount(int accountId) {
-    return (_db.select(
-      _db.holdings,
-    )..where((t) => t.accountId.equals(accountId))
-      ..orderBy([(t) => OrderingTerm.asc(t.createdAt), (t) => OrderingTerm.asc(t.id)])).watch();
+    return (_db.select(_db.holdings)
+          ..where((t) => t.accountId.equals(accountId))
+          ..orderBy([
+            (t) => OrderingTerm.asc(t.createdAt),
+            (t) => OrderingTerm.asc(t.id),
+          ]))
+        .watch();
   }
 
-  Future<List<HoldingRow>> getHoldings() => (_db.select(_db.holdings)
-    ..orderBy([(t) => OrderingTerm.asc(t.createdAt), (t) => OrderingTerm.asc(t.id)])).get();
+  Future<List<HoldingRow>> getHoldings() =>
+      (_db.select(_db.holdings)..orderBy([
+            (t) => OrderingTerm.asc(t.createdAt),
+            (t) => OrderingTerm.asc(t.id),
+          ]))
+          .get();
 
   Future<HoldingRow?> getHolding(int id) {
     return (_db.select(
@@ -186,8 +211,11 @@ class AssetDao {
     )..where((t) => t.symbol.equals(symbol))).getSingleOrNull();
   }
 
-  Future<int> createHolding(HoldingsCompanion entry) => _db.into(_db.holdings)
-      .insert(entry.id.present ? entry : entry.copyWith(id: Value(newSyncId())));
+  Future<int> createHolding(HoldingsCompanion entry) => _db
+      .into(_db.holdings)
+      .insert(
+        entry.id.present ? entry : entry.copyWith(id: Value(newSyncId())),
+      );
 
   Future<void> updateHolding(HoldingRow holding, {DateTime? now}) async {
     final stmt = _db.update(_db.holdings)
@@ -248,11 +276,14 @@ class AssetDao {
   }) async {
     final related = {for (final row in initial) row.id: row};
     if (holdingIds.isNotEmpty) {
-      final rows = await (_db.select(_db.transactions)..where(
-        (t) => t.holdingId.isIn(holdingIds) |
-            t.cashSourceId.isIn(holdingIds) |
-            t.cashTargetId.isIn(holdingIds),
-      )).get();
+      final rows =
+          await (_db.select(_db.transactions)..where(
+                (t) =>
+                    t.holdingId.isIn(holdingIds) |
+                    t.cashSourceId.isIn(holdingIds) |
+                    t.cashTargetId.isIn(holdingIds),
+              ))
+              .get();
       related.addEntries(rows.map((row) => MapEntry(row.id, row)));
     }
     for (final row in related.values.toList()) {
@@ -285,7 +316,12 @@ class AssetDao {
 
   /// Keeps actual bank NAV observations separate from ledger transactions.
   /// A backdated point changes the chart without repricing today's holding.
-  Future<void> recordManualNav(int id, DateTime date, double price, {DateTime? now}) async {
+  Future<void> recordManualNav(
+    int id,
+    DateTime date,
+    double price, {
+    DateTime? now,
+  }) async {
     final recordedAt = now ?? DateTime.now();
     final today = todayKey(recordedAt);
     final day = todayKey(date);
@@ -339,8 +375,8 @@ class AssetDao {
     );
     query.orderBy([OrderingTerm.desc(transactions.occurredAt)]);
     return query.watch().map(
-          (rows) => rows.map((row) => row.readTable(transactions)).toList(),
-        );
+      (rows) => rows.map((row) => row.readTable(transactions)).toList(),
+    );
   }
 
   /// Transactions where the holding is the subject (holdingId) or a transfer
@@ -361,31 +397,37 @@ class AssetDao {
   /// One-shot variant of [watchTransactionsByHolding].
   Future<List<TransactionRow>> getTransactionsForHolding(int holdingId) async {
     return (await (_db.select(_db.transactions)..where(
-          (t) =>
-              t.holdingId.equals(holdingId) |
-              t.cashSourceId.equals(holdingId) |
-              t.cashTargetId.equals(holdingId),
-        )).get())..sort(compareTransactionEntryOrder);
+            (t) =>
+                t.holdingId.equals(holdingId) |
+                t.cashSourceId.equals(holdingId) |
+                t.cashTargetId.equals(holdingId),
+          ))
+          .get())
+      ..sort(compareTransactionEntryOrder);
   }
 
   Future<List<TransactionRow>> getTransactions() async =>
-      (await _db.select(_db.transactions).get())..sort(compareTransactionEntryOrder);
+      (await _db.select(_db.transactions).get())
+        ..sort(compareTransactionEntryOrder);
 
   Future<TransactionRow?> getRedemptionPartner(TransactionRow row) async {
     if (!isRedemptionLeg(row)) return null;
     final group = row.redemptionGroup;
-    final candidates = await (_db.select(_db.transactions)..where(
-      (t) => group != null
-          ? t.redemptionGroup.equals(group)
-          : t.occurredAt.equals(row.occurredAt) & t.redemptionGroup.isNull(),
-    )).get();
+    final candidates =
+        await (_db.select(_db.transactions)..where(
+              (t) => group != null
+                  ? t.redemptionGroup.equals(group)
+                  : t.occurredAt.equals(row.occurredAt) &
+                        t.redemptionGroup.isNull(),
+            ))
+            .get();
     return redemptionPartner(row, candidates);
   }
 
   Future<List<TransactionRow>> getTransactionsSince(DateTime start) =>
-      (_db.select(_db.transactions)
-            ..where((t) => t.occurredAt.isBiggerOrEqualValue(start)))
-          .get();
+      (_db.select(
+        _db.transactions,
+      )..where((t) => t.occurredAt.isBiggerOrEqualValue(start))).get();
 
   Future<int> createTransaction(TransactionsCompanion entry) {
     if (!entry.id.present) {
@@ -411,9 +453,11 @@ class AssetDao {
   /// Whether a position changed after the original mutation was recorded.
   Future<bool> hasNewerTransaction(int holdingId, TransactionRow row) async {
     final rows = await getTransactionsForHolding(holdingId);
-    return rows.any((other) =>
-        other.holdingId == holdingId &&
-        compareTransactionEntryOrder(other, row) > 0);
+    return rows.any(
+      (other) =>
+          other.holdingId == holdingId &&
+          compareTransactionEntryOrder(other, row) > 0,
+    );
   }
 
   Future<int> deleteTransaction(int id) async {
@@ -501,9 +545,10 @@ class AssetDao {
 
   Future<SnapshotRow?> getLatestSnapshot(String currency) =>
       (_db.select(_db.snapshots)
-        ..where((row) => row.currency.equals(currency))
-        ..orderBy([(row) => OrderingTerm.desc(row.date)])
-        ..limit(1)).getSingleOrNull();
+            ..where((row) => row.currency.equals(currency))
+            ..orderBy([(row) => OrderingTerm.desc(row.date)])
+            ..limit(1))
+          .getSingleOrNull();
 
   Stream<List<SnapshotRow>> watchSnapshots({String? currency}) {
     final query = _db.select(_db.snapshots)
@@ -526,6 +571,9 @@ class AssetDao {
                 : const Value(null),
             realizedProfit: entry.realizedProfit.present
                 ? entry.realizedProfit
+                : const Value(null),
+            profitAdjustment: entry.profitAdjustment.present
+                ? entry.profitAdjustment
                 : const Value(null),
           ),
         );
@@ -657,8 +705,11 @@ class AssetDao {
     )..where((t) => t.id.equals(id))).getSingleOrNull();
   }
 
-  Future<int> createAlertRule(AlertRulesCompanion entry) => _db.into(_db.alertRules)
-      .insert(entry.id.present ? entry : entry.copyWith(id: Value(newSyncId())));
+  Future<int> createAlertRule(AlertRulesCompanion entry) => _db
+      .into(_db.alertRules)
+      .insert(
+        entry.id.present ? entry : entry.copyWith(id: Value(newSyncId())),
+      );
 
   Future<void> updateAlertRule(AlertRuleRow rule, {DateTime? now}) async {
     final stmt = _db.update(_db.alertRules)..where((t) => t.id.equals(rule.id));
@@ -697,11 +748,16 @@ class AssetDao {
   }
 
   Future<List<AlertEventRow>> getAlertEventsForDay(
-      int ruleId, DateTime dayStart, DateTime dayEnd) {
-    return (_db.select(_db.alertEvents)
-          ..where((t) => t.ruleId.equals(ruleId) &
+    int ruleId,
+    DateTime dayStart,
+    DateTime dayEnd,
+  ) {
+    return (_db.select(_db.alertEvents)..where(
+          (t) =>
+              t.ruleId.equals(ruleId) &
               t.triggeredAt.isBiggerOrEqualValue(dayStart) &
-              t.triggeredAt.isSmallerThanValue(dayEnd)))
+              t.triggeredAt.isSmallerThanValue(dayEnd),
+        ))
         .get();
   }
 

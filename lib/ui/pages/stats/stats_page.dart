@@ -14,6 +14,7 @@ import '../../components/monthly_profit_chart.dart';
 import '../../components/section_header.dart';
 import '../../components/terminal_card.dart';
 import '../../tokens.dart';
+import 'category_earnings_summary_card.dart';
 import 'risk_metrics_card.dart';
 
 final statsProvider = FutureProvider<TradeStats>((ref) async {
@@ -65,6 +66,14 @@ class StatsPage extends ConsumerWidget {
                     icon: const Icon(Icons.table_chart_outlined, size: 18),
                     label: const Text('产品收益日历'),
                   ),
+                  OutlinedButton.icon(
+                    onPressed: () => context.push('/category-earnings'),
+                    icon: const Icon(
+                      Icons.stacked_bar_chart_outlined,
+                      size: 18,
+                    ),
+                    label: const Text('分类收益'),
+                  ),
                 ],
               ),
               const SizedBox(height: T.s4),
@@ -78,8 +87,7 @@ class StatsPage extends ConsumerWidget {
                     );
                   }
                   final verifiedMonths = <String, double>{
-                    for (final entry in months.entries)
-                      entry.key: ?entry.value,
+                    for (final entry in months.entries) entry.key: ?entry.value,
                   };
                   return Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -93,10 +101,12 @@ class StatsPage extends ConsumerWidget {
                             MonthlyProfitChart(
                               months: months,
                               hideAmounts: hide,
-                              onOpenCalendar: (month) =>
-                                  context.push('/earnings-calendar?month=$month'),
-                              onOpenProducts: (month) =>
-                                  context.push('/product-earnings?month=$month'),
+                              onOpenCalendar: (month) => context.push(
+                                '/earnings-calendar?month=$month',
+                              ),
+                              onOpenProducts: (month) => context.push(
+                                '/product-earnings?month=$month',
+                              ),
                             ),
                           ],
                         ),
@@ -126,6 +136,8 @@ class StatsPage extends ConsumerWidget {
                   ),
                 ),
               ),
+              const SizedBox(height: T.s3),
+              const CategoryEarningsSummaryCard(),
               const SizedBox(height: T.s3),
               const SectionHeader(label: '风险与收益'),
               const RiskMetricsCard(),

@@ -179,6 +179,11 @@ class Snapshots extends Table {
   /// Cumulative gains realized by sales outside tracked accounts, in CNY.
   RealColumn get realizedProfit => real().nullable()();
 
+  /// Cumulative cash-flow corrections in CNY: retain gains distributed by
+  /// withdrawals and remove dividends counted both in cash and reduced cost.
+  /// Null identifies snapshots written before these corrections were recorded.
+  RealColumn get profitAdjustment => real().nullable()();
+
   /// Last time this day's value was (re)derived.
   ///
   /// Doubles as the cross-device last-write-wins version for snapshots

@@ -304,6 +304,7 @@ class BackupService {
               liabilities: Value((s['liabilities'] as num?)?.toDouble() ?? 0),
               holdingValues: Value(s['holdingValues'] as String?),
               realizedProfit: Value((s['realizedProfit'] as num?)?.toDouble()),
+              profitAdjustment: Value((s['profitAdjustment'] as num?)?.toDouble()),
               createdAt: Value(_parseDate(s['createdAt']) ?? DateTime.now()),
             ),
           );
@@ -479,6 +480,7 @@ class BackupService {
     'liabilities': s.liabilities,
     if (s.holdingValues != null) 'holdingValues': s.holdingValues,
     if (s.realizedProfit != null) 'realizedProfit': s.realizedProfit,
+    if (s.profitAdjustment != null) 'profitAdjustment': s.profitAdjustment,
     'createdAt': s.createdAt.toIso8601String(),
   };
 

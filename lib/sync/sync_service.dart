@@ -348,6 +348,8 @@ class SyncService {
               value: value.value,
               cost: value.cost,
               liability: value.liability,
+              realizedProfit: value.realizedProfit,
+              profitAdjustment: value.profitAdjustment,
             ),
         ]);
         await _dao.upsertSnapshot(
@@ -595,6 +597,7 @@ class SyncService {
             liabilities: Value((row['liabilities'] as num?)?.toDouble() ?? 0),
             holdingValues: Value(row['holdingValues'] as String?),
             realizedProfit: Value((row['realizedProfit'] as num?)?.toDouble()),
+            profitAdjustment: Value((row['profitAdjustment'] as num?)?.toDouble()),
             createdAt: Value(parseIso(row['createdAt']) ?? DateTime.now()),
           ),
         );

@@ -620,7 +620,7 @@ void main() {
           purchaseDate: Value(DateTime(2026, 7, 1)),
         ),
       );
-      await dao.createHolding(
+      final debtId = await dao.createHolding(
         HoldingsCompanion.insert(
           accountId: accountId,
           name: '信用卡',
@@ -637,12 +637,14 @@ void main() {
           accountId: accountId,
           holdingId: const Value.absent(),
           cashSourceId: Value(cashId),
-          cashTargetId: Value(cashId + 1),
+          cashTargetId: Value(debtId),
           type: 'transfer_out',
           amount: 5514,
           currency: const Value('CNY'),
           occurredAt: DateTime(2026, 7, 2, 12),
           costMoved: const Value(true),
+          costMovedAmount: const Value(5514),
+          updatedAt: Value(DateTime(2026, 7, 2, 12)),
         ),
       );
 
@@ -934,6 +936,7 @@ void main() {
         await dao.setSetting('backfill_v12_recorded_holding_values', '1');
         await dao.setSetting('backfill_v13_transaction_replay', '1');
         await dao.setSetting('backfill_v14_manual_nav_and_realized', '1');
+        await dao.setSetting('backfill_v15_cash_flow_profit_adjustments', '1');
         await seedFundHolding(purchaseDate: DateTime(2026, 7, 1), latest: 2.9);
         final fake = _FakeHistorySource();
         fake.data['110022'] = {
@@ -999,6 +1002,7 @@ void main() {
     await dao.setSetting('backfill_v12_recorded_holding_values', '1');
     await dao.setSetting('backfill_v13_transaction_replay', '1');
     await dao.setSetting('backfill_v14_manual_nav_and_realized', '1');
+    await dao.setSetting('backfill_v15_cash_flow_profit_adjustments', '1');
     await dao.setSetting('backfill_last_run', '2026-07-16');
     await seedFundHolding(purchaseDate: DateTime(2026, 7, 1), latest: 2.9);
     final fake = _FakeHistorySource();

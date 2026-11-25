@@ -2,16 +2,21 @@ import 'dart:math' as math;
 
 import '../core/formats.dart';
 import '../data/database.dart';
+import 'daily_earnings.dart';
+import 'risk_snapshot_validation.dart';
 import 'transaction_identity.dart';
 
 /// Estimates risk-adjusted return from a recent, uninterrupted series of
 /// daily CNY snapshots. This is not a time-weighted return: intraday cash
 /// flows and their exact valuation times cannot be reconstructed reliably.
+/// Verified flows are treated as occurring at the end of each day: the
+/// change in (assets - principal + cumulative realized gains) is divided
+/// by the previous day's assets. This is an estimate, not exact TWR.
 /// Manually smoothed asset values and approximated historical FX rates can
-/// also understate or distort volatility. All days with any recorded flow
-/// are excluded, and flows, missing dates and unexplained cost changes break
-/// the series. In particular, mixed vintages of foreign-exchange conversions
-/// cannot safely be mistaken for a return.
+/// also understate or distort volatility. Missing dates, stale snapshots
+/// and unexplained per-holding principal changes break the series. A flow
+/// day requires recorded holding details and independently verifiable
+/// principal movements; unsupported historical FX is never guessed.
 class RiskMetricsEstimate {
   const RiskMetricsEstimate({
     required this.sharpe,
@@ -45,9 +50,10 @@ RiskMetricsEstimate estimateRiskMetrics(
   DateTime? now,
 }) {
   final today = todayKey(now ?? DateTime.now());
-  final flows = transactions
-      .map((t) => todayKey(t.occurredAt.toLocal()))
-      .toSet();
+  final flows = <String, List<TransactionRow>>{};
+  for (final transaction in transactions) {
+    (flows[todayKey(transaction.occurredAt.toLocal())] ??= []).add(transaction);
+  }
   final ordered =
       snapshots
           .where(
@@ -98,14 +104,6 @@ RiskMetricsEstimate estimateRiskMetrics(
     final after = parseDay(current.date);
     final previousAssets = previous.totalValue + previous.liabilities;
     final currentAssets = current.totalValue + current.liabilities;
-    // Without an observed transaction, a cost-basis change can come from a
-    // manual edit, an unrecorded opening or a different fallback FX rate.
-    // None can safely be attributed to investment performance. Allow only
-    // numerical rounding noise in the otherwise unchanged principal.
-    final costTolerance = math.max(
-      1e-6,
-      math.max(previous.totalCost.abs(), current.totalCost.abs()) * 1e-10,
-    );
     String? interruption;
     var interruptionDay = current.date;
     if (before == null || after == null) {
@@ -113,19 +111,28 @@ RiskMetricsEstimate estimateRiskMetrics(
     } else if (after.difference(before).inDays != 1) {
       interruption = '缺少每日快照';
       interruptionDay = todayKey(after.subtract(const Duration(days: 1)));
-    } else if (flows.contains(current.date)) {
-      interruption = '当天存在交易流水';
     } else if (stale[i - 1] || stale[i]) {
       interruption = '流水更新后尚未重建快照';
     } else if (!previousAssets.isFinite ||
         previousAssets <= 0 ||
         !currentAssets.isFinite ||
-        currentAssets <= 0) {
+        currentAssets < 0) {
       interruption = '资产估值无效';
     } else if (!previous.totalCost.isFinite ||
+        previous.totalCost < 0 ||
         !current.totalCost.isFinite ||
-        (current.totalCost - previous.totalCost).abs() > costTolerance) {
-      interruption = '本金变化缺少可核对的流水';
+        current.totalCost < 0 ||
+        !(previous.realizedProfit ?? 0).isFinite ||
+        !(current.realizedProfit ?? 0).isFinite ||
+        !(previous.profitAdjustment ?? 0).isFinite ||
+        !(current.profitAdjustment ?? 0).isFinite) {
+      interruption = '本金或已实现收益无效';
+    } else {
+      interruption = riskSnapshotValidationIssue(
+        previous,
+        current,
+        flows[current.date] ?? const [],
+      );
     }
     if (interruption != null) {
       interruptedDate = interruptionDay;
@@ -136,8 +143,7 @@ RiskMetricsEstimate estimateRiskMetrics(
       continue;
     }
     final r =
-        ((currentAssets - current.totalCost + (current.realizedProfit ?? 0)) -
-            (previousAssets - previous.totalCost + (previous.realizedProfit ?? 0))) /
+        (snapshotAssetProfit(current) - snapshotAssetProfit(previous)) /
         previousAssets;
     if (!r.isFinite) {
       interruptedDate = current.date;

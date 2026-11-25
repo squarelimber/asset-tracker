@@ -3,6 +3,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../app/providers.dart';
 import '../../../core/formats.dart';
+import '../../../core/history_sync.dart';
+import '../../../data/database.dart';
+import '../../../domain/risk_history_status.dart';
 import '../../../domain/risk_metrics.dart';
 import '../../components/terminal_card.dart';
 import '../../tokens.dart';
@@ -28,22 +31,77 @@ class RiskMetricsCard extends ConsumerWidget {
     final snapshots = ref.watch(snapshotsProvider);
     final transactions = ref.watch(transactionsProvider);
     final rate = ref.watch(riskFreeRateProvider);
+    final dirty = ref.watch(historyDirtyFlagProvider);
+    final fullRebuild = ref.watch(historyFullRebuildFlagProvider);
+    final historyPending =
+        dirty.valueOrNull == historyDirtySet || fullRebuild.valueOrNull == '1';
     final hidden = ref.watch(hideAmountsProvider);
+    AsyncValue<List<HoldingRow>>? pendingHoldings;
+    AsyncValue<List<SyncTombstoneRow>>? pendingTombstones;
+    var coveredBySyncedHistory = false;
+    if (historyPending) {
+      final currentHoldings = ref.watch(holdingsProvider);
+      final currentTombstones = ref.watch(riskHistoryTombstonesProvider);
+      pendingHoldings = currentHoldings;
+      pendingTombstones = currentTombstones;
+      if (!snapshots.isLoading &&
+          !snapshots.hasError &&
+          snapshots.hasValue &&
+          !transactions.isLoading &&
+          !transactions.hasError &&
+          transactions.hasValue &&
+          !currentHoldings.isLoading &&
+          !currentHoldings.hasError &&
+          currentHoldings.hasValue &&
+          !currentTombstones.isLoading &&
+          !currentTombstones.hasError &&
+          currentTombstones.hasValue) {
+        coveredBySyncedHistory = riskHistoryCoversLedger(
+          snapshots.valueOrNull!,
+          currentHoldings.valueOrNull!,
+          transactions.valueOrNull!,
+          currentTombstones.valueOrNull!,
+        );
+      }
+    }
+    final historyBlocked = historyPending && !coveredBySyncedHistory;
+    final loading =
+        snapshots.isLoading ||
+        transactions.isLoading ||
+        rate.isLoading ||
+        dirty.isLoading ||
+        fullRebuild.isLoading ||
+        (pendingHoldings?.isLoading ?? false) ||
+        (pendingTombstones?.isLoading ?? false);
+    final failed =
+        snapshots.hasError ||
+        transactions.hasError ||
+        rate.hasError ||
+        dirty.hasError ||
+        fullRebuild.hasError ||
+        (pendingHoldings?.hasError ?? false) ||
+        (pendingTombstones?.hasError ?? false);
     RiskMetricsEstimate? estimate;
-    if (snapshots.hasValue && transactions.hasValue && rate.hasValue) {
+    if (!loading &&
+        !failed &&
+        !historyBlocked &&
+        snapshots.hasValue &&
+        transactions.hasValue &&
+        rate.hasValue &&
+        dirty.hasValue &&
+        fullRebuild.hasValue) {
       estimate = estimateRiskMetrics(
         snapshots.valueOrNull!,
         transactions.valueOrNull!,
         annualRiskFreeRate: rate.valueOrNull!,
       );
     }
-    final loading =
-        snapshots.isLoading || transactions.isLoading || rate.isLoading;
-    final failed = snapshots.hasError || transactions.hasError || rate.hasError;
     final reason = failed
         ? '风险数据加载失败，请重试'
         : loading
         ? '正在计算风险指标…'
+        : historyBlocked
+        ? '流水已更新，历史快照待重建后计算'
         : estimate?.unavailableReason;
     final sample = estimate;
     final period = sample == null
@@ -113,12 +171,18 @@ class RiskMetricsCard extends ConsumerWidget {
                 ref.invalidate(snapshotsProvider);
                 ref.invalidate(transactionsProvider);
                 ref.invalidate(riskFreeRateProvider);
+                ref.invalidate(historyDirtyFlagProvider);
+                ref.invalidate(historyFullRebuildFlagProvider);
+                if (historyPending) {
+                  ref.invalidate(holdingsProvider);
+                  ref.invalidate(riskHistoryTombstonesProvider);
+                }
               },
               child: const Text('重试'),
             ),
           const SizedBox(height: T.s2),
           Text(
-            '使用最近可用的连续区间，最多 365 个自然日，按 365 天年化。交易流水日被剔除，本金口径异常变化会中断样本。手动平滑和历史汇率近似可能影响结果。',
+            '使用最近可用的连续区间，最多 365 个自然日，按 365 天年化。可核对的交易日参与计算；本金进出按期末发生估算，缺少快照、流水待重建或本金变化无法核对时中断。手动平滑和历史汇率近似可能影响结果。',
             style: T.label(),
           ),
         ],

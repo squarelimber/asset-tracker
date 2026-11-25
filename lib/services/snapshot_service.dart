@@ -1,4 +1,3 @@
-import 'package:drift/drift.dart';
 import 'package:flutter/foundation.dart' show listEquals;
 
 import '../core/formats.dart';
@@ -6,6 +5,7 @@ import '../core/enums.dart';
 import '../core/symbols.dart';
 import '../data/asset_dao.dart';
 import '../data/database.dart';
+import '../domain/cash_flow_adjustments.dart';
 import '../domain/external_sale_gains.dart';
 import '../domain/portfolio_calculator.dart';
 import '../domain/holding_cost.dart';
@@ -42,8 +42,12 @@ class SnapshotService {
     final existing = await _dao.getSnapshot(dateKey, 'CNY');
     if (existing != null && !force) return;
 
-    final (holdings, transactions) = await _dao.transaction(
-      () async => (await _dao.getHoldings(), await _dao.getTransactions()),
+    final (holdings, transactions, history) = await _dao.transaction(
+      () async => (
+        await _dao.getHoldings(),
+        await _dao.getTransactions(),
+        await _dao.getSnapshots(),
+      ),
     );
     // A fresh install (or a device that hasn't received its first sync yet)
     // has no holdings. Recording a zero-valued snapshot here would corrupt
@@ -77,49 +81,65 @@ class SnapshotService {
 
     final realized = ExternalSaleGains(holdings, transactions, rates)
       ..advanceTo(dateKey);
-    final snapshot = SnapshotsCompanion.insert(
+    final snapshot = SnapshotRow(
       date: dateKey,
-      currency: const Value('CNY'),
+      currency: 'CNY',
       totalValue: summary.netWorth,
       totalCost: summary.totalCost,
-      liabilities: Value(summary.totalLiabilities),
-      realizedProfit: Value(realized.total),
-      holdingValues: Value(
-        encodeHoldingValues([
-          for (final h in holdings)
-            DayHoldingValue(
-              holdingId: h.id,
-              name: h.name,
-              type: AssetType.fromStorage(h.assetType),
-              value:
-                  (AssetType.fromStorage(h.assetType).isAmountBased
-                      ? h.quantity
-                      : h.quantity * h.latestPrice) *
-                  valueRateOf(h, rates),
-              cost: h.assetType == 'liability'
-                  ? 0
-                  : (AssetType.fromStorage(h.assetType).isAmountBased
-                            ? effectiveCostOf(h)
-                            : h.quantity * h.costPrice) *
-                        costRateOf(h, rates),
-              liability: h.assetType == 'liability',
-              realizedProfit: realized.forHolding(h.id),
-            ),
-        ]),
-      ),
+      liabilities: summary.totalLiabilities,
+      realizedProfit: realized.total,
+      holdingValues: encodeHoldingValues([
+        for (final h in holdings)
+          DayHoldingValue(
+            holdingId: h.id,
+            name: h.name,
+            type: AssetType.fromStorage(h.assetType),
+            value:
+                (AssetType.fromStorage(h.assetType).isAmountBased
+                    ? h.quantity
+                    : h.quantity * h.latestPrice) *
+                valueRateOf(h, rates),
+            cost: h.assetType == 'liability'
+                ? 0
+                : (AssetType.fromStorage(h.assetType).isAmountBased
+                          ? effectiveCostOf(h)
+                          : h.quantity * h.costPrice) *
+                      costRateOf(h, rates),
+            liability: h.assetType == 'liability',
+            realizedProfit: realized.forHolding(h.id),
+          ),
+      ]),
       // Written explicitly, even though the column has a DB default: the
       // column doubles as the cross-device last-write-wins version (see
       // SyncFormatter.snapshotToRow) and `insertOnConflictUpdate` only
       // updates the columns a companion actually carries. Leaving it
       // implicit froze the version at the day's first write, so a corrected
       // rewrite could never win the merge on another device.
-      createdAt: Value(now),
+      createdAt: now,
     );
+    // A forced rewrite of today must replay from an earlier date, never from
+    // today's already-adjusted row (which would apply each payout twice).
+    final earlier =
+        history
+            .where(
+              (row) => row.currency == 'CNY' && row.date.compareTo(dateKey) < 0,
+            )
+            .toList()
+          ..sort((a, b) => a.date.compareTo(b.date));
+    final prior = earlier.lastOrNull;
+    final adjustment = cashFlowAdjustmentsBetween(
+      prior,
+      snapshot,
+      transactions: transactions,
+    );
+    if (!adjustment.verified) return;
+    final corrected = adjustment.applyTo(snapshot);
     await _dao.transaction(() async {
       if (listEquals(holdings, await _dao.getHoldings()) &&
           listEquals(transactions, await _dao.getTransactions()) &&
+          listEquals(history, await _dao.getSnapshots()) &&
           existing == await _dao.getSnapshot(dateKey, 'CNY')) {
-        await _dao.upsertSnapshot(snapshot);
+        await _dao.upsertSnapshot(corrected.toCompanion(true));
       }
     });
   }
