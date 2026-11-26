@@ -170,6 +170,104 @@ void main() {
     expect(find.text('乙账户 / 现金'), findsOneWidget);
   });
 
+  testWidgets('清仓后份额与价格颠倒可预览、取消并确认更正', (tester) async {
+    final db = AppDatabase(NativeDatabase.memory());
+    addTearDown(db.close);
+    final dao = AssetDao(db);
+    final accountId = await dao.createAccount(
+      AccountsCompanion.insert(name: '账户', type: 'general'),
+    );
+    final cash = await dao.createHolding(
+      HoldingsCompanion.insert(
+        accountId: accountId,
+        name: '现金',
+        assetType: AssetType.cash.storageName,
+        quantity: const Value(1000),
+        costPrice: const Value(1000),
+        costRecorded: const Value(true),
+      ),
+    );
+    final stock = await dao.createHolding(
+      HoldingsCompanion.insert(
+        accountId: accountId,
+        name: 'ETF',
+        assetType: AssetType.etf.storageName,
+        latestPrice: const Value(2),
+      ),
+    );
+    final service = TransactionService(dao);
+    for (final event in [
+      (TransactionType.buy, 20.0, 2.0, 40.0),
+      (TransactionType.sell, 1.5, 10.0, 15.0),
+      (TransactionType.sell, 6.0, 2.0, 12.0),
+      (TransactionType.sell, 4.0, 2.0, 8.0),
+    ].indexed) {
+      final (type, quantity, price, amount) = event.$2;
+      expect(
+        (await service.record(
+          accountId: accountId,
+          holdingId: stock,
+          type: type,
+          quantity: quantity,
+          price: price,
+          amount: amount,
+          cashSourceId: type == TransactionType.buy ? cash : null,
+          cashTargetId: type == TransactionType.sell ? cash : null,
+          occurredAt: DateTime(2026, 7, event.$1 + 1),
+        )).ok,
+        isTrue,
+      );
+    }
+    await dao.updateHolding(
+      (await dao.getHolding(stock))!.copyWith(quantity: 0),
+    );
+    final rows = await dao.getTransactions();
+    final before = await dao.getHoldings();
+    final row = rows[1];
+    final c = ProviderContainer(
+      overrides: [
+        databaseProvider.overrideWithValue(db),
+        historySyncProvider.overrideWith((ref) async => null),
+      ],
+    );
+    addTearDown(c.dispose);
+    await open(tester, c, row);
+    Future<void> preview() async {
+      await tester.tap(find.text('更正交易'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField).at(0), '10');
+      await tester.enterText(find.byType(TextField).at(1), '1.5');
+      await tester.ensureVisible(find.text('预览变更'));
+      await tester.tap(find.text('预览变更'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('1.5 份 × 10'), findsOneWidget);
+      expect(find.textContaining('10 份 × 1.5'), findsOneWidget);
+      expect(find.textContaining('当前持仓仍为 0'), findsOneWidget);
+      expect(find.text('持仓份额 0 份 → 0 份'), findsOneWidget);
+      expect(await dao.getTransactions(), rows);
+      expect(await dao.getHoldings(), before);
+      expect(tester.takeException(), isNull);
+    }
+
+    await preview();
+    await tester.ensureVisible(find.text('取消'));
+    await tester.tap(find.text('取消'));
+    await tester.pumpAndSettle();
+    expect(await dao.getTransactions(), rows);
+    expect(await dao.getHoldings(), before);
+    await tester.tap(find.text('查看'));
+    await tester.pumpAndSettle();
+    await preview();
+    await tester.ensureVisible(find.text('确认更正'));
+    await tester.tap(find.text('确认更正'));
+    await tester.pumpAndSettle();
+    expect(find.text('交易已更正'), findsOneWidget);
+    expect((await dao.getTransaction(row.id))!.quantity, 10);
+    expect((await dao.getTransaction(row.id))!.price, 1.5);
+    expect((await dao.getHolding(stock))!.quantity, 0);
+    expect((await dao.getHolding(cash))!.quantity, 995);
+  });
+
   testWidgets('详情可预览并确认更正原流水', (tester) async {
     final db = AppDatabase(NativeDatabase.memory());
     addTearDown(db.close);

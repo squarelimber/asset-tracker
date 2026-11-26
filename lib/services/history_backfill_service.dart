@@ -10,6 +10,7 @@ import '../domain/cash_flow_adjustments.dart';
 import '../domain/external_sale_gains.dart';
 import '../domain/holding_cost.dart';
 import '../domain/holding_valuation.dart';
+import '../domain/legacy_transfer_principal.dart';
 import '../domain/product_monthly_earnings.dart';
 import '../domain/smooth_history.dart';
 import 'market/history_lookup.dart';
@@ -169,6 +170,8 @@ class HistoryBackfillService {
       'backfill_v14_manual_nav_and_realized';
   static const _cashFlowAdjustmentMarker =
       'backfill_v15_cash_flow_profit_adjustments';
+  static const _legacyCostBasisMarker =
+      'backfill_v16_legacy_principal_and_cost_basis';
 
   /// Date (yyyy-MM-dd) of the previous successful run. A light run re-derives
   /// every day from this date through today, because any of them may have
@@ -230,6 +233,12 @@ class HistoryBackfillService {
       ),
     );
     final holdings = inputs.holdings;
+    // Keep raw inputs for the atomic write guard. Compatibility values are
+    // calculation-only and must never overwrite the user's ledger.
+    final historyTransactions = resolveLegacyTransferPrincipal(
+      inputs.snapshots,
+      inputs.transactions,
+    );
     if (holdings.isEmpty) {
       return const BackfillResult(
         ok: false,
@@ -286,7 +295,7 @@ class HistoryBackfillService {
     // history instead of a fetched price series.
     final smoothCalc = const SmoothHistoryCalculator();
     final flowsByHolding = <int, List<TransactionRow>>{};
-    for (final row in inputs.transactions) {
+    for (final row in historyTransactions) {
       for (final id in {?row.holdingId, ?row.cashSourceId, ?row.cashTargetId}) {
         (flowsByHolding[id] ??= []).add(row);
       }
@@ -450,7 +459,8 @@ class HistoryBackfillService {
         await _dao.getSetting(_valuationMarker) == null ||
         await _dao.getSetting(_transactionReplayMarker) == null ||
         await _dao.getSetting(_manualNavAndRealizedMarker) == null ||
-        await _dao.getSetting(_cashFlowAdjustmentMarker) == null;
+        await _dao.getSetting(_cashFlowAdjustmentMarker) == null ||
+        await _dao.getSetting(_legacyCostBasisMarker) == null;
     // A type switch that crossed the amount-based boundary changes the
     // *meaning* of the stored numbers (see holding_type_conversion.dart); the
     // days written under the old semantics must not survive a light run (a
@@ -499,7 +509,7 @@ class HistoryBackfillService {
     // Compute the full window day by day, today included.
     final realized = ExternalSaleGains(
       holdings,
-      inputs.transactions,
+      historyTransactions,
       cnyRates,
       replayedPrincipal: soldPrincipalById,
     );
@@ -641,7 +651,7 @@ class HistoryBackfillService {
         final adjustment = cashFlowAdjustmentsBetween(
           previous,
           rawSnapshot,
-          transactions: inputs.transactions,
+          transactions: historyTransactions,
           replayedPrincipal: soldPrincipalById,
         );
         if (!adjustment.verified) {
@@ -722,6 +732,10 @@ class HistoryBackfillService {
         );
         await _dao.setSetting(
           _cashFlowAdjustmentMarker,
+          '${current.millisecondsSinceEpoch}',
+        );
+        await _dao.setSetting(
+          _legacyCostBasisMarker,
           '${current.millisecondsSinceEpoch}',
         );
       }

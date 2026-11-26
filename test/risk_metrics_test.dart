@@ -512,15 +512,25 @@ void main() {
   );
 
   test(
-    'an external sale requires recorded principal and matching realized gains',
+    'a legacy external sale can reconcile cost but still requires matching realized gains',
     () {
       final values = [
         _snapshot(0, [_value(1, 110, 100)]),
         _snapshot(1, [_value(1, 0, 0, realized: 15)]),
       ];
       final missing = _estimate(values, [_transaction(1, 'sell', amount: 115)]);
-      expect(missing.sampleCount, 0);
-      expect(missing.interruptionReason, '交易流水的本金或关联持仓无法核对');
+      expect(missing.sampleCount, 1);
+      expect(missing.usesSnapshotPrincipal, isTrue);
+      expect(missing.interruptionReason, isNull);
+      final inconsistentLegacy = _estimate(
+        [
+          values.first,
+          _snapshot(1, [_value(1, 0, 0, realized: 20)]),
+        ],
+        [_transaction(1, 'sell', amount: 115)],
+      );
+      expect(inconsistentLegacy.sampleCount, 0);
+      expect(inconsistentLegacy.interruptionReason, '已实现收益变化与卖出流水不一致');
       final wrong = _estimate(
         [
           values.first,

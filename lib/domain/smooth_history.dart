@@ -432,7 +432,7 @@ class SmoothHistoryCalculator {
         if (t.internalMove && t.holdingId == h.id) return gain;
       case TransactionType.sell:
         if (t.cashTargetId == h.id) return gain;
-        if (t.internalMove && t.holdingId == h.id) return -gain;
+        if (t.holdingId == h.id) return -gain;
       case TransactionType.income:
         if (t.cashTargetId == h.id) return gain;
       case TransactionType.expense:

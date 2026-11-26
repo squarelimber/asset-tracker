@@ -1,7 +1,8 @@
 part of 'transaction_service.dart';
 
 class TransactionCorrectionPreview {
-  TransactionCorrectionPreview._({
+  TransactionCorrectionPreview._(
+    this._closedPosition, {
     required this.original,
     required this.revised,
     required this.historyFrom,
@@ -17,7 +18,33 @@ class TransactionCorrectionPreview {
   final ({String date, double before, double after})? historicalGain;
   final List<({HoldingRow before, HoldingRow after})> holdings;
   final List<TransactionRow> _rows;
+  final _ClosedPositionCorrection? _closedPosition;
   int get replayedRows => _rows.length;
+  double get reconciledClosedQuantity => _closedPosition?.quantity ?? 0;
+  bool get usesSnapshotPrincipal =>
+      _closedPosition?.proofSnapshots.isNotEmpty ?? false;
+}
+
+/// A narrow reconciliation for a confirmed quantity/price transposition.
+/// The corrected, complete share ledger must start and finish at zero.
+/// Proof inputs are retained so save cannot use a stale preview.
+class _ClosedPositionCorrection {
+  _ClosedPositionCorrection({
+    required this.holdingId,
+    required this.quantity,
+    required this.openingQuantity,
+    required this.openingCost,
+    required List<TransactionRow> proofRows,
+    required List<SnapshotRow> proofSnapshots,
+  }) : proofRows = List.unmodifiable(proofRows),
+       proofSnapshots = List.unmodifiable(proofSnapshots);
+
+  final int holdingId;
+  final double quantity;
+  final double openingQuantity;
+  final double openingCost;
+  final List<TransactionRow> proofRows;
+  final List<SnapshotRow> proofSnapshots;
 }
 
 class _CorrectionPreviewRollback implements Exception {
@@ -155,6 +182,9 @@ extension TransactionCorrection on TransactionService {
     }
     final rows = operations.expand((operation) => operation).toList();
     final before = [for (final id in affected) await _getHolding(id)];
+    final closedPosition = group == null
+        ? await _closedPositionCorrection(original, revised, all)
+        : null;
     if (confirmed != null &&
         (confirmed._rows.length != rows.length ||
             rows.indexed.any(
@@ -163,8 +193,29 @@ extension TransactionCorrection on TransactionService {
             confirmed.holdings.length != before.length ||
             before.indexed.any(
               (entry) => entry.$2 != confirmed.holdings[entry.$1].before,
+            ) ||
+            !_sameClosedPositionProof(
+              confirmed._closedPosition,
+              closedPosition,
             ))) {
       throw ArgumentError('关联流水或持仓已变化，请重新预览');
+    }
+
+    // A bad historical quantity may already have been manually closed out.
+    // Restore its proven old-ledger residual only inside this transaction,
+    // so the ordinary reverse/replay validation still checks every old cost.
+    final baseline = [
+      for (final holding in before)
+        holding.id == closedPosition?.holdingId
+            ? holding.copyWith(
+                quantity: holding.quantity + closedPosition!.quantity,
+              )
+            : holding,
+    ];
+    if (closedPosition != null) {
+      await _dao.updateHolding(
+        baseline.singleWhere((h) => h.id == closedPosition.holdingId),
+      );
     }
 
     final uncertainBasis = <int>{};
@@ -181,14 +232,17 @@ extension TransactionCorrection on TransactionService {
     if (rows.any(
       (row) =>
           (row.costMovedAmount != null &&
-          replayedOriginal[row.id]!.costMovedAmount != row.costMovedAmount) ||
+              replayedOriginal[row.id]!.costMovedAmount !=
+                  row.costMovedAmount) ||
           (row.externalSellPrincipal != null &&
-          !_correctionClose(replayedOriginal[row.id]!.externalSellPrincipal ?? double.nan,
-              row.externalSellPrincipal!)),
+              !_correctionClose(
+                replayedOriginal[row.id]!.externalSellPrincipal ?? double.nan,
+                row.externalSellPrincipal!,
+              )),
     )) {
       throw ArgumentError('原流水的资金成本无法核对，请检查关联流水');
     }
-    for (final old in before) {
+    for (final old in baseline) {
       final restored = await _getHolding(old.id);
       final amountBased = AssetType.fromStorage(old.assetType).isAmountBased;
       if (!_correctionClose(old.quantity, restored.quantity) ||
@@ -200,7 +254,15 @@ extension TransactionCorrection on TransactionService {
       }
     }
     for (final holding in opening) {
-      await _dao.updateHolding(holding);
+      await _dao.updateHolding(
+        holding.id == closedPosition?.holdingId
+            ? holding.copyWith(
+                quantity: closedPosition!.openingQuantity,
+                costPrice:
+                    closedPosition.openingCost / closedPosition.openingQuantity,
+              )
+            : holding,
+      );
     }
 
     final edits = <int, TransactionRow>{original.id: revised};
@@ -224,6 +286,13 @@ extension TransactionCorrection on TransactionService {
     }
     final updated = await _replayCorrection(operations, edits);
     final after = [for (final old in before) await _getHolding(old.id)];
+    if (closedPosition != null &&
+        before.indexed.any(
+          (entry) =>
+              !_correctionClose(entry.$2.quantity, after[entry.$1].quantity),
+        )) {
+      throw ArgumentError('清仓流水更正后的持仓或现金余额无法核对，账本未修改');
+    }
     final impacts = [
       for (final (index, previous) in before.indexed)
         (before: previous, after: after[index]),
@@ -240,7 +309,8 @@ extension TransactionCorrection on TransactionService {
       final next = updated[row.id]!;
       if (row != next) {
         await _dao.updateTransaction(
-          next.copyWith(ledgerUpdatedAt: const Value(null)), now: now,
+          next.copyWith(ledgerUpdatedAt: const Value(null)),
+          now: now,
         );
       }
     }
@@ -255,12 +325,126 @@ extension TransactionCorrection on TransactionService {
       await _dao.setSetting(historySyncDirtyKey, historyDirtySet);
     }
     return TransactionCorrectionPreview._(
+      closedPosition,
       original: original,
       revised: revised,
       historyFrom: historyFrom,
       historicalGain: historicalGain,
       rows: rows,
       holdings: impacts,
+    );
+  }
+
+  Future<_ClosedPositionCorrection?> _closedPositionCorrection(
+    TransactionRow original,
+    TransactionRow revised,
+    List<TransactionRow> all,
+  ) async {
+    final id = original.holdingId;
+    if (original.type != 'sell' ||
+        id == null ||
+        isRedemptionLeg(original) ||
+        original.quantity == null ||
+        original.price == null ||
+        revised.quantity == null ||
+        revised.price == null ||
+        original.quantity! <= 0 ||
+        original.price! <= original.quantity! ||
+        !_correctionClose(revised.quantity!, original.price!) ||
+        !_correctionClose(revised.price!, original.quantity!) ||
+        !_correctionClose(original.amount, revised.amount) ||
+        !_correctionClose(
+          original.quantity! * original.price!,
+          original.amount,
+        )) {
+      return null;
+    }
+    final holding = await _getHolding(id);
+    final type = AssetType.fromStorage(holding.assetType);
+    if (type.isAmountBased ||
+        type == AssetType.liability ||
+        holding.quantity != 0) {
+      return null;
+    }
+    final events =
+        all.where((row) => _correctionHoldingIds(row).contains(id)).toList()
+          ..sort(compareTransactionEntryOrder);
+    final prior = <TransactionRow>[];
+    var oldBalance = 0.0;
+    var correctedBalance = 0.0;
+    var found = false;
+    for (final row in events) {
+      if (row.holdingId != id ||
+          row.cashSourceId == id ||
+          row.cashTargetId == id ||
+          (row.type != 'buy' && row.type != 'sell') ||
+          row.currency.toUpperCase() != holding.currency.toUpperCase() ||
+          row.quantity == null ||
+          !row.quantity!.isFinite ||
+          row.quantity! <= 0) {
+        throw ArgumentError('清仓记录存在无法核对的份额变动，无法安全更正');
+      }
+      if (row.id == original.id) found = true;
+      if (!found) {
+        if (row.type != 'buy' || row.occurredAt.isAfter(original.occurredAt)) {
+          throw ArgumentError('清仓记录缺少可完整核对的买入基线，无法安全更正');
+        }
+        prior.add(row);
+      } else if (row.type != 'sell' ||
+          row.occurredAt.isBefore(original.occurredAt)) {
+        throw ArgumentError('清仓卖出后存在其他份额变动，无法安全更正');
+      }
+      final sign = row.type == 'buy' ? 1.0 : -1.0;
+      oldBalance += sign * row.quantity!;
+      correctedBalance +=
+          sign * (row.id == original.id ? revised.quantity! : row.quantity!);
+      if (correctedBalance < -1e-8) {
+        throw ArgumentError('更正后的卖出份额超过已记录买入，账本未修改');
+      }
+    }
+    final difference = revised.quantity! - original.quantity!;
+    if (!found ||
+        prior.isEmpty ||
+        !_correctionClose(correctedBalance, 0) ||
+        !_correctionClose(oldBalance, difference)) {
+      throw ArgumentError('更正后的全部买卖份额仍未归零，请核对是否有遗漏流水');
+    }
+
+    final needsSnapshot = prior.any(
+      (row) =>
+          (row.cashSourceId != null || row.internalMove) &&
+          row.costMovedAmount == null,
+    );
+    final snapshots = needsSnapshot
+        ? await _dao.getSnapshots()
+        : <SnapshotRow>[];
+    final resolved = needsSnapshot
+        ? resolveLegacyTransferPrincipal(snapshots, all)
+        : all;
+    final byId = {for (final row in resolved) row.id: row};
+    var openingQuantity = 0.0;
+    var openingCost = 0.0;
+    for (final raw in prior) {
+      final row = byId[raw.id]!;
+      final cost = row.cashSourceId != null || row.internalMove
+          ? row.costMovedAmount
+          : row.amount;
+      if (cost == null || !cost.isFinite || cost < 0) {
+        throw ArgumentError('清仓记录的买入本金无法核对，请先补齐成本记录');
+      }
+      openingQuantity += row.quantity!;
+      openingCost += cost;
+    }
+    if (!openingCost.isFinite || openingCost <= 0) {
+      throw ArgumentError('清仓记录缺少有效的买入成本，无法安全更正');
+    }
+    return _ClosedPositionCorrection(
+      holdingId: id,
+      quantity: difference,
+      openingQuantity: openingQuantity,
+      openingCost: openingCost,
+      proofRows: all,
+      proofSnapshots: snapshots,
     );
   }
 
@@ -350,10 +534,11 @@ extension TransactionCorrection on TransactionService {
     if (holding != null &&
         !AssetType.fromStorage(holding.assetType).isAmountBased) {
       if (type == TransactionType.sell && uncertainBasis.remove(holding.id)) {
-        final principal = isExternalSale(row) ? row.externalSellPrincipal : row.costMovedAmount;
+        final principal = isExternalSale(row)
+            ? row.externalSellPrincipal
+            : row.costMovedAmount;
         final quantity = row.quantity ?? 0;
-        if (principal == null ||
-            quantity <= 0) {
+        if (principal == null || quantity <= 0) {
           throw ArgumentError('「${holding.name}」清仓前的成本缺失，无法安全重放');
         }
         await _updateHolding(
@@ -508,3 +693,18 @@ bool _correctionClose(double a, double b) =>
     a.isFinite &&
     b.isFinite &&
     (a - b).abs() <= 1e-8 + a.abs() * 1e-12 + b.abs() * 1e-12;
+
+bool _sameClosedPositionProof(
+  _ClosedPositionCorrection? a,
+  _ClosedPositionCorrection? b,
+) {
+  if (a == null || b == null) return a == b;
+  return a.holdingId == b.holdingId &&
+      a.quantity == b.quantity &&
+      a.openingQuantity == b.openingQuantity &&
+      a.openingCost == b.openingCost &&
+      a.proofRows.length == b.proofRows.length &&
+      a.proofRows.indexed.every((e) => e.$2 == b.proofRows[e.$1]) &&
+      a.proofSnapshots.length == b.proofSnapshots.length &&
+      a.proofSnapshots.indexed.every((e) => e.$2 == b.proofSnapshots[e.$1]);
+}

@@ -13,7 +13,7 @@ Most portfolio apps force a choice: a cloud service that wants your financial da
 ### Tracking
 
 - **13 asset types** — cash, bank deposits, demand & fixed wealth products, bank wealth management (银行理财), stocks, on- & off-exchange funds, gold accumulation, bonds, crypto, futures, property, and liabilities (credit cards & loans)
-- **Transaction history and corrections** — log buys, sells, dividends, income, expenses, transfers, card spending, and unit splits. View execution details and preview changes to trade amounts, quantities, or prices and their effect on linked holdings. Date edits check historical balances before saving.
+- **Transaction history and corrections** — log buys, sells, dividends, income, expenses, transfers, card spending, and unit splits. View execution details and preview changes to trade amounts, quantities, or prices and their effect on linked holdings. Closed positions can reconcile a transposed sale quantity and price against the complete recorded share ledger. Date edits check historical balances before saving.
 - **Amount-based and share-based holdings** — a deposit account and a stock position are modelled the way they actually behave, with cost basis conserved across transfers and redemptions
 - **Liabilities tracked separately** — repayments and borrowing are plain transfers; debt never pollutes asset totals or allocation ratios
 - **Manual category override** — a gold ETF is a fund by product but gold by exposure; file it where it belongs and every allocation view follows

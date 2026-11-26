@@ -3,6 +3,7 @@ import '../core/formats.dart';
 import '../data/database.dart';
 import 'daily_earnings.dart';
 import 'holding_valuation.dart';
+import 'legacy_transfer_principal.dart';
 import 'product_monthly_earnings.dart';
 import 'transaction_identity.dart';
 
@@ -72,6 +73,7 @@ EarningsBreakdown earningsBreakdownOf(
   String date, {
   List<TransactionRow> transactions = const [],
 }) {
+  transactions = resolveLegacyTransferPrincipal(snapshots, transactions);
   final ordered =
       snapshots
           .where(
@@ -368,7 +370,7 @@ EarningsAttributionIssue? _incompleteAttribution(
     if (!t.amount.isFinite ||
         t.costMovedAmount == null ||
         !t.costMovedAmount!.isFinite) {
-      return issue('缺少有效的转移本金，重建快照无法补齐原流水字段。');
+      return issue('缺少转移本金，且现有成本记录无法唯一核对，请检查该笔流水的成本记录。');
     }
     if (t.currency.toUpperCase() != 'CNY') {
       return issue('缺少 ${t.currency.toUpperCase()} 的历史折算汇率，无法拆分产品收益。');
@@ -450,6 +452,7 @@ List<HoldingSeries> holdingSeriesFromSnapshots(
   String? attributionRequiredFrom,
   void Function(EarningsAttributionIssue)? onIssue,
 }) {
+  transactions = resolveLegacyTransferPrincipal(snapshots, transactions);
   final ordered = snapshots.where((s) => s.currency == 'CNY').toList()
     ..sort((a, b) => a.date.compareTo(b.date));
   final decoded = <String, List<DayHoldingValue>>{};

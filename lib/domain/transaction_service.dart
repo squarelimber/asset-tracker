@@ -7,6 +7,7 @@ import '../data/asset_dao.dart';
 import '../data/database.dart';
 import 'holding_cost.dart';
 import 'holding_valuation.dart';
+import 'legacy_transfer_principal.dart';
 import 'transaction_identity.dart';
 
 part 'transaction_correction.dart';

@@ -270,7 +270,7 @@ class HoldingReplay {
   /// rows of this holding are used.
   ///
   /// [capturedSellPrincipal], when given, receives each sell's principal
-  /// (quantity x unit cost at the moment of sale) keyed by transaction id —
+  /// (recorded debit, or quantity x replayed unit cost when absent) by id —
   /// the number a receiving cash account must credit to its own principal so
   /// the sell's unrealized gain stays on the cash side (see
   /// SmoothHistoryCalculator's sell-proceeds leg). Mirrors
@@ -332,11 +332,13 @@ class HoldingReplay {
           }
           q = qBefore;
         case TransactionType.sell:
-          if (q <= 0 && e.$3 > 0) {
-            final soldPrincipal = e.$7;
-            if (soldPrincipal != null) {
-              u = soldPrincipal / e.$3;
-            } else if (i == events.length - 1 && h.costPrice > 0) {
+          final soldPrincipal = e.$7;
+          if (soldPrincipal != null && e.$3 > 0 && q + e.$3 > 0) {
+            // Reverse the recorded debit even for a partial sale. The
+            // receiving cash cost uses this exact principal as well.
+            u = (q * u + soldPrincipal) / (q + e.$3);
+          } else if (q <= 0 && e.$3 > 0) {
+            if (i == events.length - 1 && h.costPrice > 0) {
               u = h.costPrice;
             } else {
               u = e.$4 / e.$3;
@@ -396,6 +398,10 @@ class HoldingReplay {
         return (newQ, newU);
       case TransactionType.sell:
         final newQ = (q - e.$3).clamp(0.0, double.infinity);
+        if (e.$7 case final principal?) {
+          final cost = (q * u - principal).clamp(0.0, double.infinity);
+          return (newQ, newQ > 0 ? cost / newQ : 0.0);
+        }
         return (newQ, newQ > 0 ? u : 0.0);
       case TransactionType.dividend:
         if (q <= 0) return (q, u);

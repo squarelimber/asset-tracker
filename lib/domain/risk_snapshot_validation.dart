@@ -13,8 +13,9 @@ bool _close(double a, double b) =>
 
 /// Verifies principal and cumulative realized gains against the recorded
 /// transactions for one adjacent pair of daily CNY snapshots. It never
-/// infers a flow's principal or historical FX rate from the very cost
-/// difference being checked.
+/// infers principal here or guesses historical FX. Callers may supply
+/// calculation-only compatibility rows reconciled with old snapshot costs;
+/// those retain the limitations of the recorded historical estimates.
 String? riskSnapshotValidationIssue(
   SnapshotRow previous,
   SnapshotRow current,
@@ -201,6 +202,8 @@ String? riskSnapshotValidationIssue(
               amount(recordedPrincipal) &&
               moved == partner.costMovedAmount &&
               add(subject, -moved);
+        } else if (cash(subject)) {
+          valid = amount(recordedPrincipal) && add(subject, -moved);
         } else {
           final principal = transaction.externalSellPrincipal;
           if (principal == null || !amount(principal)) {
@@ -269,6 +272,12 @@ String? riskSnapshotValidationIssue(
   }
   final needsCorrectedHistory = ordered.any((transaction) {
     if (transaction.type == TransactionType.expense.storageName) return true;
+    if (transaction.type == TransactionType.sell.storageName &&
+        !transaction.internalMove &&
+        transaction.cashTargetId == null &&
+        cash(transaction.holdingId)) {
+      return true;
+    }
     if ((transaction.type == TransactionType.transferIn.storageName ||
             transaction.type == TransactionType.transferOut.storageName) &&
         cash(transaction.cashSourceId) &&

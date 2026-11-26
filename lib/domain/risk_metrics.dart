@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import '../core/formats.dart';
 import '../data/database.dart';
 import 'daily_earnings.dart';
+import 'legacy_transfer_principal.dart';
 import 'risk_snapshot_validation.dart';
 import 'transaction_identity.dart';
 
@@ -15,8 +16,9 @@ import 'transaction_identity.dart';
 /// Manually smoothed asset values and approximated historical FX rates can
 /// also understate or distort volatility. Missing dates, stale snapshots
 /// and unexplained per-holding principal changes break the series. A flow
-/// day requires recorded holding details and independently verifiable
-/// principal movements; unsupported historical FX is never guessed.
+/// day requires recorded holding details and reconcilable principal movements.
+/// Legacy missing principal may use the recorded snapshot cost basis; this
+/// inherits the limitations of those estimates. Historical FX is never guessed.
 class RiskMetricsEstimate {
   const RiskMetricsEstimate({
     required this.sharpe,
@@ -27,6 +29,7 @@ class RiskMetricsEstimate {
     required this.unavailableReason,
     this.interruptedDate,
     this.interruptionReason,
+    this.usesSnapshotPrincipal = false,
   });
 
   final double? sharpe;
@@ -37,6 +40,7 @@ class RiskMetricsEstimate {
   final String? unavailableReason;
   final String? interruptedDate;
   final String? interruptionReason;
+  final bool usesSnapshotPrincipal;
 }
 
 /// [annualRiskFreeRate] is a fraction, so 1% is 0.01. Uses at most 365
@@ -49,6 +53,9 @@ RiskMetricsEstimate estimateRiskMetrics(
   required double annualRiskFreeRate,
   DateTime? now,
 }) {
+  final resolved = resolveLegacyTransferPrincipal(snapshots, transactions);
+  final usesSnapshotPrincipal = !identical(resolved, transactions);
+  transactions = resolved;
   final today = todayKey(now ?? DateTime.now());
   final flows = <String, List<TransactionRow>>{};
   for (final transaction in transactions) {
@@ -172,6 +179,7 @@ RiskMetricsEstimate estimateRiskMetrics(
         unavailableReason: reason,
         interruptedDate: interruptedDate,
         interruptionReason: interruptionReason,
+        usesSnapshotPrincipal: usesSnapshotPrincipal,
       );
   if (ordered.length < 2) {
     interruptedDate = ordered.lastOrNull?.date;
@@ -208,5 +216,6 @@ RiskMetricsEstimate estimateRiskMetrics(
     unavailableReason: null,
     interruptedDate: interruptedDate,
     interruptionReason: interruptionReason,
+    usesSnapshotPrincipal: usesSnapshotPrincipal,
   );
 }

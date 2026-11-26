@@ -421,6 +421,10 @@ void main() {
         await dao.getSetting('backfill_v15_cash_flow_profit_adjustments'),
         isNull,
       );
+      expect(
+        await dao.getSetting('backfill_v16_legacy_principal_and_cost_basis'),
+        isNull,
+      );
     },
   );
 }

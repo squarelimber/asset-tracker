@@ -41,6 +41,235 @@ void main() {
     ),
   );
 
+  Future<({int cash, int etf, TransactionRow trade, TransactionRow buy})>
+  closedPositionWithTransposedSale() async {
+    final cash = await holding('现金', AssetType.cash, 1000, 1000, 1);
+    final etf = await holding('ETF', AssetType.etf, 0, 0, 2);
+    for (final trade in [
+      (TransactionType.buy, 20.0, 2.0, 40.0),
+      (TransactionType.sell, 1.5, 10.0, 15.0),
+      (TransactionType.sell, 6.0, 2.0, 12.0),
+      (TransactionType.sell, 4.0, 2.0, 8.0),
+    ].indexed) {
+      final (type, quantity, price, amount) = trade.$2;
+      final result = await service.record(
+        accountId: account,
+        holdingId: etf,
+        type: type,
+        quantity: quantity,
+        price: price,
+        amount: amount,
+        cashSourceId: type == TransactionType.buy ? cash : null,
+        cashTargetId: type == TransactionType.sell ? cash : null,
+        occurredAt: DateTime(2026, 7, 1 + trade.$1, 12),
+      );
+      expect(result.ok, isTrue, reason: result.message);
+    }
+    final stock = (await dao.getHolding(etf))!;
+    expect(stock.quantity, 8.5);
+    await dao.updateHolding(stock.copyWith(quantity: 0));
+    final rows = await dao.getTransactions();
+    return (cash: cash, etf: etf, trade: rows[1], buy: rows.first);
+  }
+
+  test(
+    'closed position corrects transposed sale and all subsequent principal atomically',
+    () async {
+      final fixture = await closedPositionWithTransposedSale();
+      final originalRows = await dao.getTransactions();
+      final originalHoldings = await dao.getHoldings();
+      final preview = await service.previewCorrection(
+        fixture.trade,
+        amount: 15,
+        quantity: 10,
+        price: 1.5,
+      );
+      expect(preview.reconciledClosedQuantity, 8.5);
+      expect(preview.replayedRows, 3);
+      expect(preview.usesSnapshotPrincipal, isFalse);
+      expect(await dao.getTransactions(), originalRows);
+      expect(await dao.getHoldings(), originalHoldings);
+      expect(await dao.getSetting(historySyncDirtyKey), isNull);
+      final cashImpact = preview.holdings.singleWhere(
+        (v) => v.before.id == fixture.cash,
+      );
+      expect(cashImpact.before.quantity, 995);
+      expect(cashImpact.after.quantity, 995);
+      expect(cashImpact.before.costPrice, 983);
+      expect(cashImpact.after.costPrice, 1000);
+      final result = await service.saveCorrection(preview);
+      expect(result.ok, isTrue, reason: result.message);
+      final rows = await dao.getTransactions();
+      expect(rows.map((r) => r.id), originalRows.map((r) => r.id));
+      expect(rows.map((r) => r.amount), originalRows.map((r) => r.amount));
+      expect(
+        rows.map((r) => r.occurredAt),
+        originalRows.map((r) => r.occurredAt),
+      );
+      expect(
+        rows.map((r) => r.recordedAtMicros),
+        originalRows.map((r) => r.recordedAtMicros),
+      );
+      expect(rows.skip(1).map((r) => r.costMovedAmount), [20, 12, 8]);
+      expect(rows[1].quantity, 10);
+      expect(rows[1].price, 1.5);
+      expect((await dao.getHolding(fixture.etf))!.quantity, 0);
+      expect((await dao.getHolding(fixture.cash))!.quantity, 995);
+      expect((await dao.getHolding(fixture.cash))!.costPrice, 1000);
+      expect(await dao.getSetting(historySyncDirtyKey), historyDirtySet);
+      expect(await dao.getSetting(historyFullRebuildKey), '1');
+    },
+  );
+
+  test(
+    'closed-position save rechecks earlier purchase evidence outside the replay window',
+    () async {
+      final fixture = await closedPositionWithTransposedSale();
+      final preview = await service.previewCorrection(
+        fixture.trade,
+        amount: 15,
+        quantity: 10,
+        price: 1.5,
+      );
+      await dao.updateTransaction(
+        fixture.buy.copyWith(note: const Value('更正说明')),
+      );
+      final rows = await dao.getTransactions();
+      final holdings = await dao.getHoldings();
+      final result = await service.saveCorrection(preview);
+      expect(result.ok, isFalse);
+      expect(result.message, contains('重新预览'));
+      expect(await dao.getTransactions(), rows);
+      expect(await dao.getHoldings(), holdings);
+      expect(await dao.getSetting(historySyncDirtyKey), isNull);
+    },
+  );
+
+  test(
+    'missing legacy purchase cost requires snapshot evidence, also rechecked on save',
+    () async {
+      final fixture = await closedPositionWithTransposedSale();
+      await dao.updateTransaction(
+        fixture.buy.copyWith(costMovedAmount: const Value(null)),
+      );
+      final legacy = (await dao.getTransactions()).first;
+      final baseline = await dao.getHoldings();
+      await expectLater(
+        service.previewCorrection(
+          fixture.trade,
+          amount: 15,
+          quantity: 10,
+          price: 1.5,
+        ),
+        throwsA(isA<ArgumentError>()),
+      );
+      expect(await dao.getHoldings(), baseline);
+      final created = DateTime.now().add(const Duration(seconds: 10));
+      SnapshotRow snapshot(String date, double cashCost, double stockCost) =>
+          SnapshotRow(
+            date: date,
+            currency: 'CNY',
+            totalValue: cashCost + stockCost,
+            totalCost: cashCost + stockCost,
+            liabilities: 0,
+            createdAt: created,
+            holdingValues: encodeHoldingValues([
+              DayHoldingValue(
+                holdingId: fixture.cash,
+                name: '现金',
+                type: AssetType.cash,
+                value: cashCost,
+                cost: cashCost,
+                liability: false,
+              ),
+              DayHoldingValue(
+                holdingId: fixture.etf,
+                name: 'ETF',
+                type: AssetType.etf,
+                value: stockCost,
+                cost: stockCost,
+                liability: false,
+              ),
+            ]),
+          );
+      await dao.upsertSnapshot(
+        snapshot('2026-06-30', 1000, 0).toCompanion(true),
+      );
+      final closing = snapshot('2026-07-01', 960, 40);
+      await dao.upsertSnapshot(closing.toCompanion(true));
+      final preview = await service.previewCorrection(
+        fixture.trade,
+        amount: 15,
+        quantity: 10,
+        price: 1.5,
+      );
+      expect(preview.reconciledClosedQuantity, 8.5);
+      expect(await dao.getTransaction(legacy.id), legacy);
+      expect(preview.usesSnapshotPrincipal, isTrue);
+      await dao.upsertSnapshot(
+        closing
+            .copyWith(createdAt: created.add(const Duration(seconds: 1)))
+            .toCompanion(true),
+      );
+      final rows = await dao.getTransactions();
+      final holdings = await dao.getHoldings();
+      final result = await service.saveCorrection(preview);
+      expect(result.ok, isFalse);
+      expect(result.message, contains('重新预览'));
+      expect(await dao.getTransactions(), rows);
+      expect(await dao.getHoldings(), holdings);
+    },
+  );
+
+  for (final error in [
+    'missing purchase',
+    'split',
+    'different amount',
+    'not transposed',
+    'wrong original cost',
+  ]) {
+    test(
+      'closed-position reconciliation rejects $error without ledger writes',
+      () async {
+        final fixture = await closedPositionWithTransposedSale();
+        if (error == 'missing purchase') {
+          await dao.deleteTransaction(fixture.buy.id);
+        }
+        if (error == 'split') {
+          await dao.createTransaction(
+            TransactionsCompanion.insert(
+              accountId: account,
+              holdingId: Value(fixture.etf),
+              type: 'split',
+              amount: 2,
+              occurredAt: DateTime(2026, 7, 5),
+            ),
+          );
+        }
+        if (error == 'wrong original cost') {
+          await dao.updateHolding(
+            (await dao.getHolding(fixture.etf))!.copyWith(costPrice: 3),
+          );
+        }
+        final rows = await dao.getTransactions();
+        final holdings = await dao.getHoldings();
+        await expectLater(
+          service.previewCorrection(
+            fixture.trade,
+            amount: error == 'different amount' ? 16 : 15,
+            quantity: error == 'not transposed' ? 11 : 10,
+            price: 1.5,
+          ),
+          throwsA(isA<ArgumentError>()),
+        );
+        expect(await dao.getTransactions(), rows);
+        expect(await dao.getHoldings(), holdings);
+        expect(await dao.getSetting(historySyncDirtyKey), isNull);
+        expect(await dao.getSetting(historyFullRebuildKey), isNull);
+      },
+    );
+  }
+
   test(
     'preview is read-only, then corrects an older buy and replays the cash and sell',
     () async {

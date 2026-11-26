@@ -10,6 +10,8 @@ import '../domain/external_sale_gains.dart';
 import '../domain/portfolio_calculator.dart';
 import '../domain/holding_cost.dart';
 import '../domain/holding_valuation.dart';
+import '../domain/legacy_transfer_principal.dart';
+import '../domain/product_monthly_earnings.dart' show HoldingReplay;
 import 'market/market_service.dart';
 
 /// Records one net-worth snapshot per day (per currency).
@@ -79,36 +81,65 @@ class SnapshotService {
       cnyRates: rates,
     );
 
-    final realized = ExternalSaleGains(holdings, transactions, rates)
+    final historyTransactions = resolveLegacyTransferPrincipal(
+      history,
+      transactions,
+    );
+    // Rebuilding history and refreshing today must use the same cost basis.
+    // A manually entered/rounded holding unit cost can differ from the
+    // recorded principal of its buys. Switching back to it on refresh would
+    // create a cost movement without a transaction and break the risk series.
+    // This is calculation-only: preserve the user's original holding fields.
+    final day = DateTime(now.year, now.month, now.day);
+    final flowsByHolding = <int, List<TransactionRow>>{};
+    for (final row in historyTransactions) {
+      final id = row.holdingId;
+      if (id != null) (flowsByHolding[id] ??= []).add(row);
+    }
+    final shareCosts = <int, double>{
+      for (final h in holdings)
+        if (!AssetType.fromStorage(h.assetType).isAmountBased &&
+            h.assetType != 'liability')
+          h.id: const HoldingReplay()
+              .replay(
+                h,
+                flowsByHolding[h.id] ?? const [],
+                from: day,
+                to: day,
+              )[dateKey]!
+              .$2,
+    };
+    final realized = ExternalSaleGains(holdings, historyTransactions, rates)
       ..advanceTo(dateKey);
+    final values = [
+      for (final h in holdings)
+        DayHoldingValue(
+          holdingId: h.id,
+          name: h.name,
+          type: AssetType.fromStorage(h.assetType),
+          value:
+              (AssetType.fromStorage(h.assetType).isAmountBased
+                  ? h.quantity
+                  : h.quantity * h.latestPrice) *
+              valueRateOf(h, rates),
+          cost: h.assetType == 'liability'
+              ? 0
+              : (AssetType.fromStorage(h.assetType).isAmountBased
+                        ? effectiveCostOf(h)
+                        : shareCosts[h.id]!) *
+                    costRateOf(h, rates),
+          liability: h.assetType == 'liability',
+          realizedProfit: realized.forHolding(h.id),
+        ),
+    ];
     final snapshot = SnapshotRow(
       date: dateKey,
       currency: 'CNY',
       totalValue: summary.netWorth,
-      totalCost: summary.totalCost,
+      totalCost: values.fold(0.0, (sum, value) => sum + value.cost),
       liabilities: summary.totalLiabilities,
       realizedProfit: realized.total,
-      holdingValues: encodeHoldingValues([
-        for (final h in holdings)
-          DayHoldingValue(
-            holdingId: h.id,
-            name: h.name,
-            type: AssetType.fromStorage(h.assetType),
-            value:
-                (AssetType.fromStorage(h.assetType).isAmountBased
-                    ? h.quantity
-                    : h.quantity * h.latestPrice) *
-                valueRateOf(h, rates),
-            cost: h.assetType == 'liability'
-                ? 0
-                : (AssetType.fromStorage(h.assetType).isAmountBased
-                          ? effectiveCostOf(h)
-                          : h.quantity * h.costPrice) *
-                      costRateOf(h, rates),
-            liability: h.assetType == 'liability',
-            realizedProfit: realized.forHolding(h.id),
-          ),
-      ]),
+      holdingValues: encodeHoldingValues(values),
       // Written explicitly, even though the column has a DB default: the
       // column doubles as the cross-device last-write-wins version (see
       // SyncFormatter.snapshotToRow) and `insertOnConflictUpdate` only
@@ -130,7 +161,7 @@ class SnapshotService {
     final adjustment = cashFlowAdjustmentsBetween(
       prior,
       snapshot,
-      transactions: transactions,
+      transactions: historyTransactions,
     );
     if (!adjustment.verified) return;
     final corrected = adjustment.applyTo(snapshot);

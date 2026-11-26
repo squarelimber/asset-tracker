@@ -181,8 +181,10 @@ class RiskMetricsCard extends ConsumerWidget {
               child: const Text('重试'),
             ),
           const SizedBox(height: T.s2),
+          if (sample?.usesSnapshotPrincipal == true)
+            Text('部分旧流水本金按已存快照成本核对，结果沿用历史估算口径。', style: T.label()),
           Text(
-            '使用最近可用的连续区间，最多 365 个自然日，按 365 天年化。可核对的交易日参与计算；本金进出按期末发生估算，缺少快照、流水待重建或本金变化无法核对时中断。手动平滑和历史汇率近似可能影响结果。',
+            '使用最近可用的连续区间，最多 365 个自然日，按 365 天年化。快照本金按流水回放，可能与手动录入的持仓成本不同。可核对的交易日参与计算；本金进出按期末发生估算，缺少快照、流水待重建或本金变化无法核对时中断。手动平滑和历史汇率近似可能影响结果。',
             style: T.label(),
           ),
         ],

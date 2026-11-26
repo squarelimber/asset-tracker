@@ -163,10 +163,19 @@ class _TransactionCorrectionDialogState
                 ),
               ] else ...[
                 Text(
-                  '${_value(original)} → ${_value(preview.revised)}',
+                  '${_value(original, shares: shares)} → ${_value(preview.revised, shares: shares)}',
                   style: T.mono(size: 15, weight: FontWeight.w600),
                 ),
                 const SizedBox(height: T.s2),
+                if (preview.reconciledClosedQuantity > 0) ...[
+                  Text(
+                    '已核对全部买卖份额，本次同时修正历史份额差额 '
+                    '${Formats.smartNum(preview.reconciledClosedQuantity)} 份，当前持仓仍为 0。',
+                  ),
+                  const SizedBox(height: T.s2),
+                ],
+                if (preview.usesSnapshotPrincipal)
+                  Text('部分旧买入本金按已存快照成本核对，收益沿用历史估算口径。', style: T.label()),
                 Text('将核对 ${preview.replayedRows} 条关联流水', style: T.label()),
                 for (final impact in preview.holdings)
                   _holdingImpact(impact.before, impact.after),
@@ -252,10 +261,21 @@ class _TransactionCorrectionDialogState
     setState(() => _error = null);
   }
 
-  String _value(TransactionRow row) =>
-      row.type == TransactionType.split.storageName
-      ? '×${Formats.smartNum(row.amount)}'
-      : Formats.money(row.amount, row.currency);
+  String _value(TransactionRow row, {required bool shares}) {
+    if (row.type == TransactionType.split.storageName) {
+      return '×${Formats.smartNum(row.amount)}';
+    }
+    final amount = Formats.money(row.amount, row.currency);
+    if (shares &&
+        (row.type == 'buy' || row.type == 'sell') &&
+        row.quantity != null) {
+      final price = row.price == null
+          ? ''
+          : ' × ${Formats.smartNum(row.price!)}';
+      return '${Formats.smartNum(row.quantity!)} 份$price · $amount';
+    }
+    return amount;
+  }
 
   Widget _holdingImpact(HoldingRow before, HoldingRow after) {
     final type = AssetType.fromStorage(before.assetType);

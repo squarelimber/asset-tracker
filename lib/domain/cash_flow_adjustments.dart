@@ -138,17 +138,27 @@ CashFlowAdjustmentResult cashFlowAdjustmentsBetween(
       continue;
     }
     final expense = row.type == TransactionType.expense.storageName;
+    final withdrawal =
+        row.type == TransactionType.sell.storageName &&
+        !row.internalMove &&
+        row.cashTargetId == null &&
+        identities[row.holdingId]?.liability == false &&
+        identities[row.holdingId]?.type.isAmountBased == true;
     final transfer =
         row.type == TransactionType.transferIn.storageName ||
         row.type == TransactionType.transferOut.storageName;
-    final sourceId = expense ? row.cashTargetId : row.cashSourceId;
+    final sourceId = withdrawal
+        ? row.holdingId
+        : expense
+        ? row.cashTargetId
+        : row.cashSourceId;
     final source = identities[sourceId];
-    if (!expense && !transfer) continue;
+    if (!expense && !transfer && !withdrawal) continue;
     if (source == null || (transfer && identities[row.cashTargetId] == null)) {
       return result(issue: '现金外流或转账缺少来源、去向持仓明细，收益调整待核对。');
     }
     if (source.liability || !source.type.isAmountBased) continue;
-    if (!expense && identities[row.cashTargetId]?.liability != true) continue;
+    if (transfer && identities[row.cashTargetId]?.liability != true) continue;
     final principal = transfer && !row.costMoved ? 0.0 : row.costMovedAmount;
     if (principal == null || !principal.isFinite || principal < 0) {
       return result(issue: '现金外流缺少有效的已记录本金，收益调整待核对。');

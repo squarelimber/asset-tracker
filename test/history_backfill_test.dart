@@ -937,6 +937,7 @@ void main() {
         await dao.setSetting('backfill_v13_transaction_replay', '1');
         await dao.setSetting('backfill_v14_manual_nav_and_realized', '1');
         await dao.setSetting('backfill_v15_cash_flow_profit_adjustments', '1');
+        await dao.setSetting('backfill_v16_legacy_principal_and_cost_basis', '1');
         await seedFundHolding(purchaseDate: DateTime(2026, 7, 1), latest: 2.9);
         final fake = _FakeHistorySource();
         fake.data['110022'] = {
@@ -1003,6 +1004,7 @@ void main() {
     await dao.setSetting('backfill_v13_transaction_replay', '1');
     await dao.setSetting('backfill_v14_manual_nav_and_realized', '1');
     await dao.setSetting('backfill_v15_cash_flow_profit_adjustments', '1');
+    await dao.setSetting('backfill_v16_legacy_principal_and_cost_basis', '1');
     await dao.setSetting('backfill_last_run', '2026-07-16');
     await seedFundHolding(purchaseDate: DateTime(2026, 7, 1), latest: 2.9);
     final fake = _FakeHistorySource();
